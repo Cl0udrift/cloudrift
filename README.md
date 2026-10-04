@@ -49,7 +49,7 @@ Download the latest release for your platform:
 
 ```bash
 # Linux / macOS (example for linux_amd64)
-curl -sSL https://github.com/Cl0udrift/cloudrift/releases/latest/download/cloudrift_Linux_x86_64.tar.gz | tar -xz
+curl -sSL https://github.com/Cl0udrift/cloudrift/releases/latest/download/cloudrift_0.3.0_linux_arm64.tar.gz | tar -xz
 sudo mv cloudrift /usr/local/bin/
 cloudrift version
 ```
