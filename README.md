@@ -49,7 +49,7 @@ Download the latest release for your platform:
 
 ```bash
 # Linux / macOS (example for linux_amd64)
-curl -sSL https://github.com/Zero0x00/cloudrift/releases/latest/download/cloudrift_Linux_x86_64.tar.gz | tar -xz
+curl -sSL https://github.com/Cl0udrift/cloudrift/releases/latest/download/cloudrift_Linux_x86_64.tar.gz | tar -xz
 sudo mv cloudrift /usr/local/bin/
 cloudrift version
 ```
@@ -65,7 +65,7 @@ sha256sum -c checksums.txt --ignore-missing
 Requires Go 1.24+. The pre-built dashboard UI is committed to the repo (`dashboard/dist`) and embedded into the binary, so `go install` and a plain `go build` produce a working UI without an npm step.
 
 ```bash
-go install github.com/Zero0x00/cloudrift/cmd/cloudrift@latest
+go install github.com/Cl0udrift/cloudrift/cmd/cloudrift@latest
 cloudrift version
 ```
 
@@ -74,7 +74,7 @@ cloudrift version
 Requires Go 1.24+ (Node.js 20+ only if you want to rebuild the UI from source):
 
 ```bash
-git clone https://github.com/Zero0x00/cloudrift.git
+git clone https://github.com/Cl0udrift/cloudrift.git
 cd cloudrift
 make build
 sudo mv cloudrift /usr/local/bin/
