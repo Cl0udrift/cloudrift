@@ -25,7 +25,7 @@ password_env = "CLOUDRIFT_NEO4J_PASSWORD"
 # http_probe_concurrency = 50
 # role_assumption_concurrency = 10
 # http_timeout_seconds = 10
-# user_agent = "github.com/Zero0x00/cloudrift/0.1"
+# user_agent = "github.com/Cl0udrift/cloudrift/0.1"
 
 # [trust]
 # approved_external_accounts = []    # AWS account IDs treated as approved cross-account principals
