@@ -4,6 +4,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { CurrentScanCard } from "../components/CurrentScanCard";
 import { ThemeToggle } from "../components/ThemeToggle";
 import {
+  IconBoxes,
   IconGitDiff,
   IconGlobe,
   IconLayoutDashboard,
@@ -27,6 +28,8 @@ const staticNavItems: {
   { to: "/alerting", label: "Alerting", preserveSearch: true, Icon: IconBell },
   { to: "/query", label: "Query", preserveSearch: true, Icon: IconZap },
   { to: "/findings", label: "Findings", preserveSearch: true, Icon: IconList },
+  { to: "/identities", label: "Identities", preserveSearch: true, Icon: IconShield },
+  { to: "/inventory", label: "Inventory", preserveSearch: true, Icon: IconBoxes },
   { to: "/trust-report", label: "Access", preserveSearch: false, Icon: IconShield },
   { to: "/external-entities", label: "External entities", preserveSearch: false, Icon: IconGlobe },
   { to: "/diff", label: "Changes", preserveSearch: false, Icon: IconGitDiff }

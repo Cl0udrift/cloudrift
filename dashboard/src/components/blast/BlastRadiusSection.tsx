@@ -95,16 +95,24 @@ export function BlastRadiusSection({ scanId, findingId, severity }: Props) {
       </div>
       <dl className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
         <div>
-          <dt className="text-slate-500">Reachable resources</dt>
-          <dd className="font-mono tabular-nums text-slate-800 dark:text-slate-200">{s.reachable_resource_count}</dd>
+          <dt className="text-slate-500">Confirmed resources</dt>
+          <dd className="font-mono tabular-nums text-slate-800 dark:text-slate-200">
+            {s.confirmed_resource_count ?? s.reachable_resource_count}
+          </dd>
         </div>
         <div>
-          <dt className="text-slate-500">Accounts touched</dt>
-          <dd className="font-mono tabular-nums text-slate-800 dark:text-slate-200">{s.reachable_accounts_count}</dd>
+          <dt className="text-slate-500">Unresolved references</dt>
+          <dd className="font-mono tabular-nums text-slate-800 dark:text-slate-200">{s.unresolved_reference_count ?? 0}</dd>
         </div>
         <div>
-          <dt className="text-slate-500">Escalation / pivot</dt>
-          <dd className="text-slate-800 dark:text-slate-200">{s.escalation_possible ? "Possible" : "Not indicated"}</dd>
+          <dt className="text-slate-500">Attack path</dt>
+          <dd className="text-slate-800 dark:text-slate-200">
+            {s.path_validity === "VALIDATED_POSSIBLE"
+              ? "Validated possible"
+              : s.path_validity === "CONDITIONAL"
+                ? "Conditional"
+                : "Not established"}
+          </dd>
         </div>
         <div className="col-span-2 sm:col-span-1">
           <dt className="text-slate-500">Action</dt>

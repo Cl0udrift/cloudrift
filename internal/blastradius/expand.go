@@ -2,6 +2,7 @@ package blastradius
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,7 +15,9 @@ import (
 const cypherExpandBlastRadius = `
 MATCH (start:Asset {arn: $arn, scan_id: $scan_id})
 MATCH p = (start)-[rels*1..%d]-(m)
-WHERE all(rel IN rels WHERE type(rel) IN $allowed)
+WHERE all(rel IN rels WHERE type(rel) IN $allowed AND rel.scan_id = $scan_id)
+  AND all(n IN nodes(p) WHERE n:AwsAccount OR (n:Asset AND n.scan_id = $scan_id))
+  AND none(n IN nodes(p)[1..-1] WHERE n:AwsAccount)
   AND (m:Asset OR m:AwsAccount)
 UNWIND rels AS rel
 WITH rel, startNode(rel) AS sn, endNode(rel) AS en
@@ -30,15 +33,19 @@ WITH rel, sn, en,
     ELSE null
   END AS e
 WHERE s IS NOT NULL AND e IS NOT NULL
-RETURN DISTINCT s AS src, e AS dst, type(rel) AS rel_type
+RETURN DISTINCT s AS src, e AS dst, type(rel) AS rel_type, rel.properties_json AS properties_json
 LIMIT $edge_limit
 `
 
-// cypherExpandAttackPath walks directed outbound hops for high-signal path analysis.
+// cypherExpandAttackPath walks directed outbound hops. Callers choose the allowlist:
+// identity exposure passes trust configuration and unevaluated policy candidates; attack path passes validated transitions only.
+// Relationship scan_id keeps a shared AwsAccount from bridging into another scan.
 const cypherExpandAttackPath = `
 MATCH (start:Asset {arn: $arn, scan_id: $scan_id})
 MATCH p = (start)-[rels*1..%d]->(m)
-WHERE all(rel IN rels WHERE type(rel) IN $allowed)
+WHERE all(rel IN rels WHERE type(rel) IN $allowed AND rel.scan_id = $scan_id)
+  AND all(n IN nodes(p) WHERE n:AwsAccount OR (n:Asset AND n.scan_id = $scan_id))
+  AND none(n IN nodes(p)[1..-1] WHERE n:AwsAccount)
   AND (m:Asset OR m:AwsAccount)
 UNWIND rels AS rel
 WITH rel, startNode(rel) AS sn, endNode(rel) AS en
@@ -54,7 +61,7 @@ WITH rel, sn, en,
     ELSE null
   END AS e
 WHERE s IS NOT NULL AND e IS NOT NULL
-RETURN DISTINCT s AS src, e AS dst, type(rel) AS rel_type
+RETURN DISTINCT s AS src, e AS dst, type(rel) AS rel_type, rel.properties_json AS properties_json
 LIMIT $edge_limit
 `
 
@@ -67,6 +74,7 @@ WHERE (
 )
 MATCH (n)-[rel]-(m)
 WHERE type(rel) IN $allowed
+  AND rel.scan_id = $scan_id
   AND (m:Asset OR m:AwsAccount)
   AND (
     (m:Asset AND m.scan_id = $scan_id)
@@ -85,7 +93,7 @@ WITH rel, sn, en,
     ELSE null
   END AS e
 WHERE s IS NOT NULL AND e IS NOT NULL
-RETURN DISTINCT s AS src, e AS dst, type(rel) AS rel_type
+RETURN DISTINCT s AS src, e AS dst, type(rel) AS rel_type, rel.properties_json AS properties_json
 LIMIT $edge_limit
 `
 
@@ -113,15 +121,23 @@ func expandFromAsset(
 	if mode == ModeAttackPath {
 		lim = 60
 	}
+	allowed := traversalRels(mode)
+	if mode == ModeAttackPath && len(allowed) == 0 {
+		// No stored relationship is a validated attacker transition. Return the
+		// starting asset only so the API can say so without inventing a path.
+		g := newWorkingGraph()
+		g.ensureMinimalNode(arn)
+		return g, nil
+	}
 	queryTemplate := cypherExpandBlastRadius
-	if mode == ModeAttackPath {
+	if mode == ModeAttackPath || mode == ModeIdentityExposure {
 		queryTemplate = cypherExpandAttackPath
 	}
 	q := fmt.Sprintf(queryTemplate, maxHops)
 	recs, err := readList(ctx, driver, database, q, map[string]any{
 		"arn":        arn,
 		"scan_id":    scanID,
-		"allowed":    V1TraversalRels,
+		"allowed":    allowed,
 		"edge_limit": lim,
 	})
 	if err != nil {
@@ -145,7 +161,7 @@ func expandFromAsset(
 		if s == "" || d == "" || t == "" {
 			continue
 		}
-		triples = append(triples, PathTriple{Src: s, Dst: d, Type: t})
+		triples = append(triples, PathTriple{Src: s, Dst: d, Type: t, Props: relationshipProps(rec)})
 	}
 	if mode == ModeAttackPath {
 		triples = prioritizeAttackTriples(triples, lim)
@@ -173,7 +189,12 @@ func prioritizeAttackTriples(in []PathTriple, edgeCap int) []PathTriple {
 		switch t.Type {
 		case "TRUSTS":
 			w = 8
-			if accountForNode(nil, t.Src) != "" && accountForNode(nil, t.Dst) != "" && accountForNode(nil, t.Src) != accountForNode(nil, t.Dst) {
+			srcAcct := accountForNode(nil, t.Src)
+			dstAcct := accountForNode(nil, t.Dst)
+			if ext := strings.TrimSpace(stringProp(t.Props, "external_account_id")); ext != "" && srcAcct != "" && srcAcct != ext {
+				dstAcct = ext
+			}
+			if srcAcct != "" && dstAcct != "" && srcAcct != dstAcct {
 				w += 3
 			}
 		case "POINTS_TO", "FRONTS":
@@ -219,11 +240,15 @@ func expandOneHopFromNode(
 	scanID string,
 	mode BlastMode,
 ) (*workingGraph, []PathTriple, error) {
+	allowed := traversalRels(mode)
+	if len(allowed) == 0 {
+		return newWorkingGraph(), nil, nil
+	}
 	isAccount := strings.HasPrefix(nodeID, "account:")
 	recs, err := readList(ctx, driver, database, cypherExpandOneHop, map[string]any{
 		"node_id":    nodeID,
 		"scan_id":    scanID,
-		"allowed":    V1TraversalRels,
+		"allowed":    allowed,
 		"is_account": isAccount,
 		"edge_limit": oneHopRawEdgeCap,
 	})
@@ -247,7 +272,7 @@ func expandOneHopFromNode(
 		if s == "" || d == "" || t == "" {
 			continue
 		}
-		triples = append(triples, PathTriple{Src: s, Dst: d, Type: t})
+		triples = append(triples, PathTriple{Src: s, Dst: d, Type: t, Props: relationshipProps(rec)})
 	}
 	triples = prioritizeOneHopTriples(nodeID, triples, mode, oneHopMaxNeighbors)
 	g := newWorkingGraph()
@@ -275,17 +300,26 @@ func prioritizeOneHopTriples(focusNodeID string, in []PathTriple, mode BlastMode
 		if t.Dst == focusNodeID {
 			neighbor = t.Src
 		}
+		if mode == ModeAttackPath && !attackTriple(t) {
+			continue
+		}
+		if mode == ModeIdentityExposure && !identityTriple(t) {
+			continue
+		}
 		w := 1 + expansionSemanticWeight(t.Type)
-		if mode == ModeAttackPath && t.Type == "TRUSTS" {
+		if mode == ModeIdentityExposure && t.Type == "TRUSTS" {
 			w += 2
 		}
 		if strings.HasPrefix(neighbor, "account:") {
 			w += 2
 		}
-		if a := accountForNode(nil, t.Src); a != "" {
-			if b := accountForNode(nil, t.Dst); b != "" && a != b {
-				w += 2
-			}
+		srcA := accountForNode(nil, t.Src)
+		dstA := accountForNode(nil, t.Dst)
+		if ext := strings.TrimSpace(stringProp(t.Props, "external_account_id")); ext != "" && srcA != "" && srcA != ext {
+			dstA = ext
+		}
+		if srcA != "" && dstA != "" && srcA != dstA {
+			w += 2
 		}
 		// Keep low-signal bookkeeping edges only when they are the only available context.
 		if t.Type == "OWNED_BY" && mode == ModeAttackPath {
@@ -325,6 +359,16 @@ func prioritizeOneHopTriples(focusNodeID string, in []PathTriple, mode BlastMode
 	return out
 }
 
+func attackTriple(t PathTriple) bool {
+	sem, ok := RelationshipSemanticsFor(t.Type)
+	return ok && sem.AttackTraversable
+}
+
+func identityTriple(t PathTriple) bool {
+	sem, ok := RelationshipSemanticsFor(t.Type)
+	return ok && sem.IdentityTraversable
+}
+
 func expansionSemanticWeight(relType string) int {
 	switch relType {
 	case "TRUSTS":
@@ -343,7 +387,10 @@ func expansionSemanticWeight(relType string) int {
 const cypherHydrateAssets = `
 MATCH (a:Asset {scan_id: $scan_id})
 WHERE a.arn IN $arns
-RETURN a.arn AS arn, a.account_id AS account_id, a.asset_type AS asset_type, a.name AS name, a.region AS region
+RETURN a.arn AS arn, a.account_id AS account_id, a.asset_type AS asset_type, a.name AS name, a.region AS region,
+       a.resolution_status AS resolution_status, a.ownership_status AS ownership_status,
+       a.discovered_in_account_id AS discovered_in_account_id, a.owning_account_id AS owning_account_id,
+       a.properties_json AS properties_json
 `
 
 func hydrateAssets(
@@ -382,14 +429,27 @@ func hydrateAssets(
 		at, _ := rec.Get("asset_type")
 		nm, _ := rec.Get("name")
 		rg, _ := rec.Get("region")
-		g.addNode(arnStr, "Asset", "asset", map[string]any{
+		props := map[string]any{
 			"arn":        arnStr,
 			"account_id": acc,
 			"asset_type": at,
 			"name":       nm,
 			"region":     rg,
 			"scan_id":    scanID,
-		})
+		}
+		copyStringProp(props, "resolution_status", rec)
+		copyStringProp(props, "ownership_status", rec)
+		copyStringProp(props, "discovered_in_account_id", rec)
+		copyStringProp(props, "owning_account_id", rec)
+		if raw, ok := rec.Get("properties_json"); ok {
+			if s, _ := raw.(string); s != "" {
+				props["properties_json"] = s
+				if parsed := parsePropsJSON(s); len(parsed) > 0 {
+					props["properties"] = parsed
+				}
+			}
+		}
+		g.setAssetNode(arnStr, props)
 	}
 	return nil
 }
@@ -469,4 +529,39 @@ func loadFindingContext(
 		}
 	}
 	return row, nil
+}
+
+func relationshipProps(rec *neo4j.Record) map[string]any {
+	if rec == nil {
+		return nil
+	}
+	raw, ok := rec.Get("properties_json")
+	if !ok || raw == nil {
+		return nil
+	}
+	s, _ := raw.(string)
+	return parsePropsJSON(s)
+}
+
+func parsePropsJSON(s string) map[string]any {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "null" || s == "{}" {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(s), &m); err != nil || len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+func copyStringProp(dst map[string]any, key string, rec *neo4j.Record) {
+	raw, ok := rec.Get(key)
+	if !ok || raw == nil {
+		return
+	}
+	s, _ := raw.(string)
+	if strings.TrimSpace(s) != "" {
+		dst[key] = strings.TrimSpace(s)
+	}
 }

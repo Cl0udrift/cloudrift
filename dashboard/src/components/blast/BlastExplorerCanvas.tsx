@@ -132,6 +132,9 @@ function nodeColor(n: BlastGraphNode): string {
   if (n.community != null) {
     return communityColor(n.community);
   }
+  if (n.resolution_status === "unresolved") {
+    return "#a8a29e";
+  }
   if (n.type === "finding") {
     return "#ea580c";
   }
@@ -243,10 +246,13 @@ function EdgeLine({
   const isExpanded = expandedEdgeIDs ? expandedEdgeIDs.has(e.id) : false;
   const crit = selectedPathEdgeIDs ? inSelectedPath : e.is_critical_path;
   const muted = selectedPathEdgeIDs ? !inSelectedPath : !e.is_critical_path;
+  const validated = e.path_validity === "VALIDATED_POSSIBLE";
+  const conditional = e.path_validity === "CONDITIONAL";
+  const color = validated ? "#38bdf8" : conditional ? "#f59e0b" : crit ? "#fbbf24" : isExpanded ? "#67e8f9" : "#475569";
   return (
     <Line
       points={[a, b]}
-      color={crit ? "#38bdf8" : isExpanded ? "#67e8f9" : "#475569"}
+      color={color}
       lineWidth={crit ? 2.2 : isExpanded ? 1.4 : 1}
       transparent
       opacity={crit ? 0.95 : muted ? 0.18 : 0.32}

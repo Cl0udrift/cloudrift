@@ -72,8 +72,10 @@ func TestHybridVectorRetrievalCypher_Structure(t *testing.T) {
 		"collect({",
 		"vector_global_match_count",
 		"MATCH (s:ScanSnapshot {scan_id: $scan_id})-[:CAPTURED]->(f)",
-		"OPTIONAL MATCH (f)-[:AFFECTS]->(asset:Asset)",
-		"OPTIONAL MATCH (asset)-[:OWNED_BY]->(account:AwsAccount)",
+		"OPTIONAL MATCH (f)-[aff:AFFECTS]->(asset:Asset)",
+		"aff.scan_id = f.scan_id",
+		"own.scan_id = f.scan_id",
+		"OPTIONAL MATCH (asset)-[own:OWNED_BY]->(account:AwsAccount)",
 		"ORDER BY score DESC",
 		"LIMIT $top_k",
 	} {

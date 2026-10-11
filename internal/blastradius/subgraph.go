@@ -21,15 +21,18 @@ type rawNode struct {
 }
 
 type rawEdge struct {
-	ID   string
-	Src  string
-	Tgt  string
-	Type string
+	ID    string
+	Src   string
+	Tgt   string
+	Type  string
+	Props map[string]any
 }
 
 // PathTriple is a directed edge with logical source/target ids (ARNs or account:…).
+// Props carries relationship evidence hydrated from Neo4j (source_kind, is_public, and so on).
 type PathTriple struct {
 	Src, Dst, Type string
+	Props          map[string]any
 }
 
 func newWorkingGraph() *workingGraph {
@@ -53,6 +56,10 @@ func (g *workingGraph) addNode(id, label, nType string, props map[string]any) {
 }
 
 func (g *workingGraph) addEdge(src, tgt, relType string) {
+	g.addEdgeWithProps(src, tgt, relType, nil)
+}
+
+func (g *workingGraph) addEdgeWithProps(src, tgt, relType string, props map[string]any) {
 	if src == "" || tgt == "" || relType == "" {
 		return
 	}
@@ -60,10 +67,24 @@ func (g *workingGraph) addEdge(src, tgt, relType string) {
 		g.HasTrusts = true
 	}
 	eid := edgeKey(src, relType, tgt)
-	if _, ok := g.Edges[eid]; ok {
+	if existing, ok := g.Edges[eid]; ok {
+		if existing.Props == nil && len(props) > 0 {
+			existing.Props = props
+			g.Edges[eid] = existing
+		}
 		return
 	}
-	g.Edges[eid] = rawEdge{ID: eid, Src: src, Tgt: tgt, Type: relType}
+	g.Edges[eid] = rawEdge{ID: eid, Src: src, Tgt: tgt, Type: relType, Props: props}
+}
+
+func (g *workingGraph) setAssetNode(arn string, props map[string]any) {
+	if arn == "" {
+		return
+	}
+	if props == nil {
+		props = map[string]any{}
+	}
+	g.Nodes[arn] = rawNode{ID: arn, Label: "Asset", NType: "asset", Props: props}
 }
 
 func edgeKey(a, t, b string) string { return a + "→" + t + "→" + b }
@@ -75,7 +96,7 @@ func (g *workingGraph) addTriples(triples []PathTriple) {
 		}
 		g.ensureMinimalNode(t.Src)
 		g.ensureMinimalNode(t.Dst)
-		g.addEdge(t.Src, t.Dst, t.Type)
+		g.addEdgeWithProps(t.Src, t.Dst, t.Type, t.Props)
 	}
 }
 

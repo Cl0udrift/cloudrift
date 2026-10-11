@@ -2,17 +2,13 @@
 // Traversal is limited to a fixed allowlist of relationship types; see [V1TraversalRels] and comments.
 package blastradius
 
-// V1TraversalRels are the only relationship *types* that may appear in a blast-radius or
-// attack-path walk. They align with the Cloudrift graph model in internal/graph and
-// internal/models (POINTS_TO, TRUSTS, etc.). These are the edges we consider semantically
-// meaningful for “what is reachable from this resource / trust pivot” analysis.
+// V1TraversalRels is the topology allowlist. It is not an attack-path allowlist.
+// Attack traversal uses AttackTraversalRels, which stays empty until a relationship is
+// classified as a validated attacker transition. Identity exposure also walks unevaluated policy candidates.
 //
-// V1 does NOT walk CAPTURED (Scan↔Finding) or AFFECTS (Finding→Asset) as traversal steps:
-// those bind findings to the graph but are not “operational” pivot edges. The service starts
-// from a Finding or Asset and expands through infrastructure + trust.
-//
-// OWNED_BY is included so we can count distinct AwsAccount impact and show account boundaries
-// in the explorer without inferring org-wide reach from a bare account id.
+// CAPTURED and AFFECTS stay out of every traversal: they bind findings to a scan.
+// OWNED_BY may appear in topology as an account leaf. Variable-length walks reject paths
+// that use an AwsAccount as an intermediate node, so ownership is not lateral movement.
 var V1TraversalRels = []string{
 	"TRUSTS",    // cross-principal / cross-account trust (privilege-escalation-relevant)
 	"POINTS_TO", // directed infrastructure edges (e.g. DNS to target)

@@ -4,16 +4,17 @@ output_dir = "./cloudrift-output"
 [neo4j]
 uri = "bolt://127.0.0.1:7687"
 username = "neo4j"
-password_env = "CLOUDRIFT_NEO4J_PASSWORD"
+#password_env = "CLOUDRIFT_NEO4J_PASSWORD"
+password = "dev-password-only"
 
 # Optional sections below. This file is optional and the built-in defaults work
 # without it; uncomment and edit only what you need to override.
 
-# [aws]
-# org_role_name = "CloudriftAuditRole"  # role assumed in each member account for org-wide scans.
+[aws]
+org_role_name = ""   # role assumed in each member account for org-wide scans.
 #                                        # Set to "" for no-assume mode: scan only the caller's own
 #                                        # account using your current credentials (no role to deploy).
-# management_profile = "default"         # AWS profile/credentials used to start the scan
+management_profile = "defaults"         # AWS profile/credentials used to start the scan
 
 # [synthesis]
 # provider = "anthropic"             # LLM provider for `cloudrift query` answer synthesis
@@ -21,11 +22,12 @@ password_env = "CLOUDRIFT_NEO4J_PASSWORD"
 # api_key_env = "ANTHROPIC_API_KEY"  # synthesis runs only when this env var is set; otherwise query stays retrieval-only
 # max_tokens = 2048                  # answer length cap
 
-# [scan]
+[scan]
 # http_probe_concurrency = 50
 # role_assumption_concurrency = 10
 # http_timeout_seconds = 10
 # user_agent = "github.com/Zero0x00/cloudrift/0.1"
+# iam_policy_inventory = false       # true collects every IAM role and policy document; external-access findings stay limited to external trust
 
 # [trust]
 # approved_external_accounts = []    # AWS account IDs treated as approved cross-account principals

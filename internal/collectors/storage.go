@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
-	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/Zero0x00/cloudrift/internal/config"
 	"github.com/Zero0x00/cloudrift/internal/models"
@@ -56,6 +56,7 @@ func CollectStorageWithConfig(ctx context.Context, cfg *config.Config, accounts 
 					firstErr = err
 				}
 				failed = append(failed, account.ID)
+				out = append(out, CollectionStatus(account.ID, "", "s3", "global", "failed", err.Error()))
 				mu.Unlock()
 				return
 			}
@@ -99,6 +100,9 @@ func CollectStorageWithConfig(ctx context.Context, cfg *config.Config, accounts 
 				}()
 			}
 			bwg.Wait()
+			mu.Lock()
+			out = append(out, CollectionStatus(account.ID, "", "s3", "global", "succeeded", ""))
+			mu.Unlock()
 		}()
 	}
 	wg.Wait()

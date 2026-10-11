@@ -147,6 +147,10 @@ func blastModeOrDefault(s string) blastradius.BlastMode {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "attack_path":
 		return blastradius.ModeAttackPath
+	case "identity_exposure":
+		return blastradius.ModeIdentityExposure
+	case "permission_blast_radius":
+		return blastradius.ModePermissionBlast
 	default:
 		return blastradius.ModeBlastRadius
 	}

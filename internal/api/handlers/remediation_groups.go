@@ -73,7 +73,7 @@ func ListRemediationGroups(outputDir string) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid_scan_id", "invalid scan id", nil)
 			return
 		}
-		_, findings, err := scans.LoadScanArtifacts(outputDir, scanID)
+		meta, findings, err := scans.LoadScanArtifacts(outputDir, scanID)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				writeError(w, http.StatusNotFound, "scan_not_found", "scan not found", map[string]any{"scan_id": scanID})
@@ -114,10 +114,16 @@ func ListRemediationGroups(outputDir string) http.HandlerFunc {
 			return items[i].Label < items[j].Label
 		})
 
-		writeJSON(w, http.StatusOK, schema.RemediationGroupsResponse{
-			ScanID: scanID,
-			Items:  items,
-		})
+		resp := schema.RemediationGroupsResponse{
+			ScanID:    scanID,
+			Items:     items,
+			Synthetic: meta != nil && meta.Synthetic,
+		}
+		if resp.Synthetic {
+			enabled := false
+			resp.ExecutionEnabled = &enabled
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -137,4 +143,3 @@ func topExample(findings []models.Finding) string {
 	}
 	return strings.TrimSpace(best.Title)
 }
-

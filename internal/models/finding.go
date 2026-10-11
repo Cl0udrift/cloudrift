@@ -19,6 +19,7 @@ const (
 
 	ModuleOrphanedEdge   Module = "orphaned_edge"
 	ModuleExternalAccess Module = "external_access"
+	ModuleIAMEntitlement Module = "iam_entitlement"
 )
 
 type Finding struct {

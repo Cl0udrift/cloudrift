@@ -311,8 +311,8 @@ func TestExportScanToNeo4j_WriteFailureAfterSchema(t *testing.T) {
 	findings := []models.Finding{{ID: "f2", Title: "T2", AccountID: "222222222222", ScanID: scanID}}
 	writeScanFiles(t, scanPath, meta, findings)
 
-	// 3 schema statements, then fail on first write statement.
-	ex := &fakeGraphExecer{failOnNth: 4}
+	// Schema statements, then fail on the first write statement.
+	ex := &fakeGraphExecer{failOnNth: len(graph.SchemaStatements()) + 1}
 	err := exportScanToNeo4j(context.Background(), cfg, scanPath, fakeConnector{ex: ex})
 	if err == nil || !strings.Contains(err.Error(), "neo4j export failed") {
 		t.Fatalf("expected neo4j export failed wrap, got %v", err)

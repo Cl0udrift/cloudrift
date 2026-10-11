@@ -41,6 +41,10 @@ func newDemoCommand(cfgPath *string) *cobra.Command {
 	var denseGraph bool
 	var fixedTimestamp string
 	var scanIDFlag string
+	var scenario string
+	var profile string
+	var seed int
+	var includeSecurityFixtures bool
 
 	demoCmd := &cobra.Command{
 		Use:   "demo",
@@ -68,7 +72,13 @@ func newDemoCommand(cfgPath *string) *cobra.Command {
 				now = parsed.UTC()
 			}
 
-			scanPath, err := generateDemoScan(outputDir, now, strings.TrimSpace(scanIDFlag), denseGraph)
+			scanPath, err := generateDemoScanWithOptions(outputDir, now, strings.TrimSpace(scanIDFlag), demoOptions{
+				Scenario:                strings.TrimSpace(scenario),
+				Profile:                 strings.TrimSpace(profile),
+				Seed:                    seed,
+				IncludeSecurityFixtures: includeSecurityFixtures,
+				Dense:                   denseGraph,
+			})
 			if err != nil {
 				return err
 			}
@@ -88,6 +98,10 @@ func newDemoCommand(cfgPath *string) *cobra.Command {
 	generateCmd.Flags().BoolVar(&denseGraph, "dense", false, "Generate deterministic dense cross-account trust chains for richer blast paths")
 	generateCmd.Flags().StringVar(&fixedTimestamp, "timestamp", "", "Fixed RFC3339 timestamp (deterministic testing)")
 	generateCmd.Flags().StringVar(&scanIDFlag, "scan-id", "", "Fixed scan directory name (e.g. demo). Default: demo-<UTC timestamp>. Must satisfy safe scan id rules.")
+	generateCmd.Flags().StringVar(&scenario, "scenario", "", "Security scenario id (for example iam-01 or s3-01). history writes the remediation scan set. Empty keeps the legacy demo.")
+	generateCmd.Flags().StringVar(&profile, "profile", "legacy", "Demo profile: legacy, small, medium, or stress. stress is opt-in.")
+	generateCmd.Flags().IntVar(&seed, "seed", 1, "Deterministic demo seed. Resource identities do not change with the seed.")
+	generateCmd.Flags().BoolVar(&includeSecurityFixtures, "include-security-fixtures", false, "Add the security scenario fixtures to the legacy demo scan.")
 	_ = generateCmd.Flags().MarkHidden("timestamp")
 	demoCmd.AddCommand(generateCmd)
 	return demoCmd
@@ -176,6 +190,8 @@ func buildDemoArtifacts(scanID string, ts time.Time, denseGraph bool) demoArtifa
 		CriticalCount:    criticalCount,
 		HighCount:        highCount,
 		TotalMonthlyCost: totalCost,
+		Synthetic:        true,
+		DataOrigin:       syntheticDataOrigin,
 	}
 
 	assets := demoAssets(scanID, org)
@@ -185,8 +201,8 @@ func buildDemoArtifacts(scanID string, ts time.Time, denseGraph bool) demoArtifa
 		findings:      findings,
 		relationships: relationships,
 		assetFiles: map[string][]models.AssetNode{
-			"edge.json":               assets.edge,
-			"iam_and_external.json":   assets.iamAndExternal,
+			"edge.json":                assets.edge,
+			"iam_and_external.json":    assets.iamAndExternal,
 			"infrastructure_core.json": assets.infrastructureCore,
 		},
 	}
@@ -203,30 +219,31 @@ type demoAssetSets struct {
 // Shared-Sec (audit/break-glass), Dev-Sandbox (CI-CD/dev).
 func bankDemoAccounts() []demoAccount {
 	return []demoAccount{
-		{ID: "111111111111", Name: "Core-Prod",   OUPath: "Root/Org/Prod/Core",    Team: "Platform",         Environment: "prod"},
-		{ID: "222222222222", Name: "Data-Prod",   OUPath: "Root/Org/Prod/Data",    Team: "Data-Engineering", Environment: "prod"},
-		{ID: "333333333333", Name: "Edge-Prod",   OUPath: "Root/Org/Prod/Edge",    Team: "Platform",         Environment: "prod"},
-		{ID: "444444444444", Name: "Shared-Sec",  OUPath: "Root/Org/Shared/Sec",   Team: "Security",         Environment: "prod"},
-		{ID: "555555555555", Name: "Dev-Sandbox", OUPath: "Root/Org/Dev",          Team: "Engineering",      Environment: "dev"},
+		{ID: "111111111111", Name: "Core-Prod", OUPath: "Root/Org/Prod/Core", Team: "Platform", Environment: "prod"},
+		{ID: "222222222222", Name: "Data-Prod", OUPath: "Root/Org/Prod/Data", Team: "Data-Engineering", Environment: "prod"},
+		{ID: "333333333333", Name: "Edge-Prod", OUPath: "Root/Org/Prod/Edge", Team: "Platform", Environment: "prod"},
+		{ID: "444444444444", Name: "Shared-Sec", OUPath: "Root/Org/Shared/Sec", Team: "Security", Environment: "prod"},
+		{ID: "555555555555", Name: "Dev-Sandbox", OUPath: "Root/Org/Dev", Team: "Engineering", Environment: "dev"},
 	}
 }
 
 // demoAssets models a 5-account multi-account architecture:
 //
-//   Edge-Prod (333) owns CloudFront distributions, ACM cert, and all DNS records.
-//   Data-Prod (222) owns S3 buckets and represents the Lambda execution boundary.
-//   Core-Prod (111) owns EC2-tier IAM roles and cross-account data access roles.
-//   Shared-Sec (444) owns centralised audit, break-glass, and SAML billing roles.
-//   Dev-Sandbox (555) owns CI/CD deploy and dev sandbox roles.
+//	Edge-Prod (333) owns CloudFront distributions, ACM cert, and all DNS records.
+//	Data-Prod (222) owns S3 buckets and represents the Lambda execution boundary.
+//	Core-Prod (111) owns EC2-tier IAM roles and cross-account data access roles.
+//	Shared-Sec (444) owns centralised audit, break-glass, and SAML billing roles.
+//	Dev-Sandbox (555) owns CI/CD deploy and dev sandbox roles.
 //
 // Cross-account coupling wired in relationships:
-//   E333EXAMPLE(333) FRONTS user-uploads-prod(222)          — CDN in edge, data in data account
-//   E444EXAMPLE(333) FRONTS analytics-reports-prod(222)     — second CDN, deleted origin
-//   DNS(333) POINTS_TO old-campaign-assets(222) [deleted]   — cross-account subdomain takeover
-//   DNS(333) POINTS_TO static-assets-edge(333) [deleted]    — same-account subdomain takeover
-//   LambdaExecutionRole(222) TRUSTS ext:777                 — Lambda in data trusts shared vendor
-//   BreakGlassRole(444) TRUSTS ext:888                      — blast reaches 444+555 accounts
-//   SecurityAuditRole(444) TRUSTS ext:777                   — blast reaches all 5 accounts via BFS
+//
+//	E333EXAMPLE(333) FRONTS user-uploads-prod(222)          — CDN in edge, data in data account
+//	E444EXAMPLE(333) FRONTS analytics-reports-prod(222)     — second CDN, deleted origin
+//	DNS(333) POINTS_TO old-campaign-assets(222) [deleted]   — cross-account subdomain takeover
+//	DNS(333) POINTS_TO static-assets-edge(333) [deleted]    — same-account subdomain takeover
+//	LambdaExecutionRole(222) TRUSTS ext:777                 — Lambda in data trusts shared vendor
+//	BreakGlassRole(444) TRUSTS ext:888                      — blast reaches 444+555 accounts
+//	SecurityAuditRole(444) TRUSTS ext:777                   — blast reaches all 5 accounts via BFS
 func demoAssets(scanID string, accounts []demoAccount) demoAssetSets {
 	// Infrastructure: CloudFront + cert live in Edge-Prod; S3 buckets live in Data-Prod.
 	infra := []models.AssetNode{
@@ -268,29 +285,29 @@ func demoAssets(scanID string, accounts []demoAccount) demoAssetSets {
 	// IAM roles per account — named to reflect service ownership.
 	iamRoles := []models.AssetNode{
 		// Core-Prod (111): EC2/application tier
-		demoRole(scanID, "111111111111", "AppServerRole"),          // EC2 instance role
-		demoRole(scanID, "111111111111", "CrossAccountDataRole"),   // assumed by Lambda in Data-Prod (222)
-		demoRole(scanID, "111111111111", "OidcDevRole"),            // OIDC trust — Okta dev environment
-		demoRole(scanID, "111111111111", "PlatformEngineerRole"),   // OIDC Okta shared + BI vendor trust
-		demoRole(scanID, "111111111111", "ReadOnlyAuditRole"),      // SAML CorpSAML, aging, limited
+		demoRole(scanID, "111111111111", "AppServerRole"),        // EC2 instance role
+		demoRole(scanID, "111111111111", "CrossAccountDataRole"), // assumed by Lambda in Data-Prod (222)
+		demoRole(scanID, "111111111111", "OidcDevRole"),          // OIDC trust — Okta dev environment
+		demoRole(scanID, "111111111111", "PlatformEngineerRole"), // OIDC Okta shared + BI vendor trust
+		demoRole(scanID, "111111111111", "ReadOnlyAuditRole"),    // SAML CorpSAML, aging, limited
 		// Data-Prod (222): Lambda + S3 tier
-		demoRole(scanID, "222222222222", "LambdaExecutionRole"),    // runs Lambda; trusts shared vendor ext:777
-		demoRole(scanID, "222222222222", "DataPipelineRole"),       // GitHub Actions OIDC — never used
-		demoRole(scanID, "222222222222", "DataAnalyticsRole"),      // GitHub Actions OIDC — aging, analytics pipeline
-		demoRole(scanID, "222222222222", "S3ReplicationRole"),      // trusts ext:777; large blast radius
+		demoRole(scanID, "222222222222", "LambdaExecutionRole"), // runs Lambda; trusts shared vendor ext:777
+		demoRole(scanID, "222222222222", "DataPipelineRole"),    // GitHub Actions OIDC — never used
+		demoRole(scanID, "222222222222", "DataAnalyticsRole"),   // GitHub Actions OIDC — aging, analytics pipeline
+		demoRole(scanID, "222222222222", "S3ReplicationRole"),   // trusts ext:777; large blast radius
 		// Edge-Prod (333): CloudFront + DNS management
-		demoRole(scanID, "333333333333", "VendorReadRole"),         // third-party monitoring vendor
-		demoRole(scanID, "333333333333", "EdgeCdnRole"),            // CDN management role; trusts ext:777
-		demoRole(scanID, "333333333333", "ApiGatewayRole"),         // unique OIDC vendor trust; small blast
+		demoRole(scanID, "333333333333", "VendorReadRole"), // third-party monitoring vendor
+		demoRole(scanID, "333333333333", "EdgeCdnRole"),    // CDN management role; trusts ext:777
+		demoRole(scanID, "333333333333", "ApiGatewayRole"), // unique OIDC vendor trust; small blast
 		// Shared-Sec (444): centralised security, audit, break-glass
-		demoRole(scanID, "444444444444", "BreakGlassRole"),         // emergency admin — ext:888; blast 444+555
-		demoRole(scanID, "444444444444", "SecurityAuditRole"),      // cross-account audit — ext:777; blast all 5
-		demoRole(scanID, "444444444444", "SamlBillingRole"),        // SAML federation for billing
-		demoRole(scanID, "444444444444", "PenTestRole"),            // pentest admin — ext:888; blast 444+555
+		demoRole(scanID, "444444444444", "BreakGlassRole"),    // emergency admin — ext:888; blast 444+555
+		demoRole(scanID, "444444444444", "SecurityAuditRole"), // cross-account audit — ext:777; blast all 5
+		demoRole(scanID, "444444444444", "SamlBillingRole"),   // SAML federation for billing
+		demoRole(scanID, "444444444444", "PenTestRole"),       // pentest admin — ext:888; blast 444+555
 		// Dev-Sandbox (555): CI/CD and development
-		demoRole(scanID, "555555555555", "DevSandboxRole"),         // admin in dev — ext:888; blast 444+555
-		demoRole(scanID, "555555555555", "CicdDeployRole"),         // SAML CI/CD pipeline role
-		demoRole(scanID, "555555555555", "DevOidcRole"),            // shared Okta; blast 111+555
+		demoRole(scanID, "555555555555", "DevSandboxRole"), // admin in dev — ext:888; blast 444+555
+		demoRole(scanID, "555555555555", "CicdDeployRole"), // SAML CI/CD pipeline role
+		demoRole(scanID, "555555555555", "DevOidcRole"),    // shared Okta; blast 111+555
 	}
 
 	externalPrincipals := []models.AssetNode{
@@ -300,10 +317,10 @@ func demoAssets(scanID string, accounts []demoAccount) demoAssetSets {
 		demoExternalPrincipal(scanID, "222222222222", "aws_account", "arn:aws:iam::777777777777:root"), // shared vendor (LambdaExec+SecurityAudit+EdgeCdn+S3Rep) — large blast
 		demoExternalPrincipal(scanID, "222222222222", "aws_account", "arn:aws:iam::666666666666:root"), // BI vendor (PlatformEngineerRole only) — small blast
 		// Federated identity providers
-		demoExternalPrincipal(scanID, "111111111111", "oidc", "https://dev.okta.com/oauth2/default"),          // Okta dev (OidcDevRole) — same-account
-		demoExternalPrincipal(scanID, "111111111111", "oidc", "https://sso.corp.okta.com/oauth2/default"),     // shared corp Okta (PlatformEngineerRole+DevOidcRole) — blast 111+555
-		demoExternalPrincipal(scanID, "222222222222", "oidc", "https://token.actions.githubusercontent.com"),  // GitHub Actions (DataPipelineRole+DataAnalyticsRole) — same-account
-		demoExternalPrincipal(scanID, "333333333333", "oidc", "https://api.vendor123.com/oauth2/token"),       // unique vendor OIDC (ApiGatewayRole only) — small blast
+		demoExternalPrincipal(scanID, "111111111111", "oidc", "https://dev.okta.com/oauth2/default"),         // Okta dev (OidcDevRole) — same-account
+		demoExternalPrincipal(scanID, "111111111111", "oidc", "https://sso.corp.okta.com/oauth2/default"),    // shared corp Okta (PlatformEngineerRole+DevOidcRole) — blast 111+555
+		demoExternalPrincipal(scanID, "222222222222", "oidc", "https://token.actions.githubusercontent.com"), // GitHub Actions (DataPipelineRole+DataAnalyticsRole) — same-account
+		demoExternalPrincipal(scanID, "333333333333", "oidc", "https://api.vendor123.com/oauth2/token"),      // unique vendor OIDC (ApiGatewayRole only) — small blast
 		demoExternalPrincipal(scanID, "444444444444", "saml", "arn:aws:iam::000000000000:saml-provider/CorpSAML"),
 		demoExternalPrincipal(scanID, "555555555555", "saml", "arn:aws:iam::000000000000:saml-provider/CorpSAML"),
 		// Internal cross-account: Core-Prod trusted as principal by Data-Prod
@@ -693,7 +710,7 @@ func demoFindings(scanID string, accounts []demoAccount) []models.Finding {
 			MonthlyRiskCost:   0.4,
 			Impact:            "DNS record in Edge-Prod (333) returns NXDOMAIN. No active takeover risk, but the stale entry pollutes the hosted-zone inventory.",
 			Recommendation:    "Confirm with the Marketing team that this hostname is no longer needed, then delete the record.",
-			Evidence: map[string]any{"dns_status": "nxdomain", "cross_account": false},
+			Evidence:          map[string]any{"dns_status": "nxdomain", "cross_account": false},
 			ScanID:            scanID,
 		},
 		// CROSS-ACCOUNT: DNS(333) NXDOMAIN, target was resource in Data-Prod (222)
@@ -713,7 +730,7 @@ func demoFindings(scanID string, accounts []demoAccount) []models.Finding {
 			MonthlyRiskCost:   0.4,
 			Impact:            "DNS record in Edge-Prod (333) returns NXDOMAIN. The original target was a resource in Data-Prod (222) that has been decommissioned. No immediate takeover risk but stale cross-account DNS entry should be cleaned up.",
 			Recommendation:    "Confirm with the Data Engineering team that this hostname is obsolete, then delete the Route53 record.",
-			Evidence: map[string]any{"dns_status": "nxdomain", "original_target_account_id": "222222222222", "cross_account": true},
+			Evidence:          map[string]any{"dns_status": "nxdomain", "original_target_account_id": "222222222222", "cross_account": true},
 			ScanID:            scanID,
 		},
 	}

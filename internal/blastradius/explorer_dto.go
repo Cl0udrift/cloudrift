@@ -55,21 +55,24 @@ func BuildExplorerPayload(
 		impact := nodeImpactScore(id, n, g, cn)
 		st := firstStringProp(n.Props, "asset_type", "account_id", "title")
 		isExternal := strings.EqualFold(firstStringProp(n.Props, "asset_type"), "external_principal")
+		unresolved := nodeUnresolved(n)
 		nodes = append(nodes, schema.BlastGraphNode{
-			ID:              id,
-			Label:           displayLabel(n),
-			Type:            n.NType,
-			Subtype:         st,
-			AccountID:       firstStringProp(n.Props, "account_id"),
-			SeverityOrTier:  firstStringProp(n.Props, "severity", "asset_type"),
-			IsFocus:         id == focusID || (findingID != "" && id == "finding:"+findingID),
-			IsCriticalPath:  cn[id],
-			IsReachable:     true,
-			IsExternal:      isExternal,
-			ImpactScore:     impact,
-			DisplayNameHint: st,
-			Community:       intPropPtr(n.Props, "community"),
-			Centrality:      floatPropPtr(n.Props, "centrality"),
+			ID:               id,
+			Label:            displayLabel(n),
+			Type:             n.NType,
+			Subtype:          st,
+			AccountID:        firstStringProp(n.Props, "account_id"),
+			SeverityOrTier:   firstStringProp(n.Props, "severity", "asset_type"),
+			IsFocus:          id == focusID || (findingID != "" && id == "finding:"+findingID),
+			IsCriticalPath:   cn[id] && !unresolved,
+			IsReachable:      !unresolved && (mode != ModeAttackPath || validatedNode(g, id)),
+			IsExternal:       isExternal,
+			ImpactScore:      impact,
+			DisplayNameHint:  st,
+			ResolutionStatus: firstStringProp(n.Props, "resolution_status"),
+			OwnershipStatus:  firstStringProp(n.Props, "ownership_status"),
+			Community:        intPropPtr(n.Props, "community"),
+			Centrality:       floatPropPtr(n.Props, "centrality"),
 		})
 	}
 	eids := make([]string, 0, len(g.Edges))
@@ -83,16 +86,7 @@ func BuildExplorerPayload(
 			break
 		}
 		e := g.Edges[eid]
-		stype := semanticEdgeType(g, e)
-		edges = append(edges, schema.BlastGraphEdge{
-			ID:             e.ID,
-			Source:         e.Src,
-			Target:         e.Tgt,
-			Type:           stype,
-			Label:          stype,
-			IsCriticalPath: ce[e.ID] || e.Type == "TRUSTS" || stype == "CROSS_ACCOUNT_ASSUME_ROLE" || stype == "EXTERNAL_TRUST",
-			Explanation:    edgeExpl(stype),
-		})
+		edges = append(edges, graphEdgeDTO(g, e, mode, ce[e.ID]))
 	}
 	highlightNodes := make([]string, 0, 4)
 	for id, on := range cn {
@@ -190,26 +184,94 @@ func floatPropPtr(m map[string]any, key string) *float64 {
 	return nil
 }
 
+func unresolvedEndpoint(g *workingGraph, id string) bool {
+	if g == nil {
+		return false
+	}
+	n, ok := g.Nodes[id]
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(firstStringProp(n.Props, "resolution_status"), "unresolved")
+}
+
+func graphEdgeDTO(g *workingGraph, e rawEdge, mode BlastMode, highlighted bool) schema.BlastGraphEdge {
+	stype := semanticEdgeType(g, e)
+	assessment := assessRelationship(g, e)
+	critical := highlighted
+	if mode != ModeAttackPath && (e.Type == "TRUSTS" || stype == "CROSS_ACCOUNT_ASSUME_ROLE" || stype == "EXTERNAL_TRUST") {
+		critical = true
+	}
+	if mode == ModeAttackPath {
+		critical = attackEdge(g, e)
+	}
+	return schema.BlastGraphEdge{
+		ID:                   e.ID,
+		Source:               e.Src,
+		Target:               e.Tgt,
+		Type:                 stype,
+		Label:                stype,
+		GraphRelationship:    e.Type,
+		Properties:           e.Props,
+		RelationshipClass:    string(assessment.Class),
+		PathValidity:         string(assessment.Validity),
+		MissingPrerequisites: assessment.Missing,
+		Evidence:             assessment.Evidence,
+		IsCriticalPath:       critical,
+		Explanation:          edgeExplanation(g, e, stype, assessment),
+	}
+}
+
+func validatedNode(g *workingGraph, id string) bool {
+	for _, target := range validatedAttackTargets(g) {
+		if target == id {
+			return true
+		}
+	}
+	return false
+}
+
+func edgeExplanation(g *workingGraph, e rawEdge, semantic string, assessment RelationshipAssessment) string {
+	expl := edgeExpl(semantic)
+	if assessment.Limitation != "" {
+		expl += " " + assessment.Limitation
+	}
+	if unresolvedEndpoint(g, e.Src) || unresolvedEndpoint(g, e.Tgt) {
+		expl += " One endpoint was not collected in this scan. The link is an unresolved reference."
+	}
+	return expl
+}
+
 func edgeExpl(t string) string {
 	switch t {
 	case "ASSUME_ROLE":
-		return "IAM trust (assume-role or vendor trust) — treat as a privilege-pivot surface."
+		return "Trust policy names this principal. IAM authorization is unevaluated."
 	case "CROSS_ACCOUNT_ASSUME_ROLE":
-		return "Cross-account trust pivot between principals."
+		return "Cross-account trust configuration. Role assumption is unevaluated."
 	case "EXTERNAL_TRUST":
-		return "External principal trust path into internal roles."
+		return "An external principal is named in trust or resource policy. Access is unevaluated."
 	case "IAM_WRITE":
-		return "IAM control-plane write/reconfiguration access path."
+		return "Permission visibility suggests IAM write. This is not an evaluated control-plane transition."
 	case "ESCALATES_TO":
-		return "Privilege transition to a higher-impact node."
+		return "Labeled privilege transition. Prerequisites for this label are unevaluated."
 	case "CAN_ACCESS":
-		return "Permission-derived access path from principal to resource."
+		return "Labeled access relationship. Authorization is unevaluated."
 	case "OWNED_BY":
-		return "Resource ownership in an AWS account."
+		return "Account ownership. Ownership is not access."
 	case "RESOURCE_ACCESS":
-		return "Infra points-to relationship (e.g. DNS, routing)."
+		return "Structural dependency such as DNS or fronting."
 	case "CERT_LINK":
-		return "Certificate or TLS association."
+		return "Certificate association."
+	case "POLICY_ATTACHED_TO":
+		return "Collected policy attachment. Attachment is not authorization."
+	case "POLICY_CONTAINS_STATEMENT":
+		return "Statement inside a collected identity policy. Effect Allow is not effective authorization."
+	case "POLICY_PERMISSION_CANDIDATE":
+		return "Unevaluated permission candidate. An Allow statement is not effective access."
+	case "HAS_AUTHORIZATION_DECISION":
+		return "Evaluated authorization evidence for one action and one concrete resource. This is not an attack path."
+	case "AUTHORIZATION_TARGETS":
+		return "Decision linked to a collected target asset. This is not an access edge or an attack path."
 	default:
 		return t
 	}
@@ -245,11 +307,10 @@ func markCritical(focus string, g *workingGraph, mode BlastMode) (nodes map[stri
 		}
 	}
 	if mode == ModeAttackPath && focus != "" {
-		// Add simple directed chain emphasis from focus.
 		cur := focus
 		for i := 0; i < 6; i++ {
 			nextEdge, ok := highestSignalOutgoing(g, cur)
-			if !ok {
+			if !ok || !attackEdge(g, nextEdge) {
 				break
 			}
 			edges[nextEdge.ID] = true
@@ -437,19 +498,22 @@ func BuildExplorerExpansionDelta(
 	for _, id := range nodeIDs {
 		n := newNodes[id]
 		st := firstStringProp(n.Props, "asset_type", "account_id", "title")
+		unresolved := nodeUnresolved(n)
 		nodes = append(nodes, schema.BlastGraphNode{
-			ID:              id,
-			Label:           displayLabel(n),
-			Type:            n.NType,
-			Subtype:         st,
-			AccountID:       firstStringProp(n.Props, "account_id"),
-			SeverityOrTier:  firstStringProp(n.Props, "severity", "asset_type"),
-			IsFocus:         id == expandedFromNodeID,
-			IsCriticalPath:  false,
-			IsReachable:     true,
-			IsExternal:      strings.EqualFold(firstStringProp(n.Props, "asset_type"), "external_principal"),
-			ImpactScore:     nodeImpactScore(id, n, delta, map[string]bool{}),
-			DisplayNameHint: st,
+			ID:               id,
+			Label:            displayLabel(n),
+			Type:             n.NType,
+			Subtype:          st,
+			AccountID:        firstStringProp(n.Props, "account_id"),
+			SeverityOrTier:   firstStringProp(n.Props, "severity", "asset_type"),
+			IsFocus:          id == expandedFromNodeID,
+			IsCriticalPath:   false,
+			IsReachable:      !unresolved,
+			IsExternal:       strings.EqualFold(firstStringProp(n.Props, "asset_type"), "external_principal"),
+			ResolutionStatus: firstStringProp(n.Props, "resolution_status"),
+			OwnershipStatus:  firstStringProp(n.Props, "ownership_status"),
+			ImpactScore:      nodeImpactScore(id, n, delta, map[string]bool{}),
+			DisplayNameHint:  st,
 		})
 	}
 
@@ -461,16 +525,7 @@ func BuildExplorerExpansionDelta(
 	edges := make([]schema.BlastGraphEdge, 0, len(edgeIDs))
 	for _, id := range edgeIDs {
 		e := newEdges[id]
-		sem := semanticEdgeType(delta, e)
-		edges = append(edges, schema.BlastGraphEdge{
-			ID:             e.ID,
-			Source:         e.Src,
-			Target:         e.Tgt,
-			Type:           sem,
-			Label:          sem,
-			IsCriticalPath: mode == ModeAttackPath && (sem == "ASSUME_ROLE" || sem == "CROSS_ACCOUNT_ASSUME_ROLE" || sem == "EXTERNAL_TRUST"),
-			Explanation:    edgeExpl(sem),
-		})
+		edges = append(edges, graphEdgeDTO(delta, e, mode, false))
 	}
 
 	newNodeIDs := make([]string, 0, len(nodes))

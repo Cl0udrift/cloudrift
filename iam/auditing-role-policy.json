@@ -8,7 +8,11 @@
         "organizations:ListAccounts",
         "organizations:ListParents",
         "organizations:ListTagsForResource",
-        "organizations:DescribeOrganizationalUnit"
+        "organizations:DescribeOrganizationalUnit",
+        "organizations:DescribeOrganization",
+        "organizations:ListRoots",
+        "organizations:ListPoliciesForTarget",
+        "organizations:DescribePolicy"
       ],
       "Resource": "*"
     },

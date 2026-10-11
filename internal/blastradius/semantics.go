@@ -121,30 +121,21 @@ func detectGraphMotifs(g *workingGraph) graphMotifs {
 	return m
 }
 
-func escalationPossibleFromSignals(g *workingGraph, signals PrivilegeSignals) bool {
-	m := detectGraphMotifs(g)
-	if signals.AdminLike || signals.IAMWriteAccess {
-		return true
-	}
-	if rankClassification(signals.Classification) >= rankClassification("privileged") && m.TrustEdges > 0 {
-		return true
-	}
-	if m.CrossAccountAssumeEdges > 0 {
-		return true
-	}
-	if m.TrustEdges > 0 {
-		return true
-	}
-	if m.ExternalTrustEdges > 0 && (signals.AdminLike || rankClassification(signals.Classification) >= rankClassification("privileged")) {
-		return true
-	}
-	return signals.HasExternalTrust && m.TrustEdges > 0
-}
-
 func isCrossAccountEdge(g *workingGraph, e rawEdge) bool {
 	src := accountForNode(g, e.Src)
 	dst := accountForNode(g, e.Tgt)
+	if ext := strings.TrimSpace(stringProp(e.Props, "external_account_id")); ext != "" && src != "" && src != ext {
+		return true
+	}
 	return src != "" && dst != "" && src != dst
+}
+
+func stringProp(props map[string]any, key string) string {
+	if props == nil {
+		return ""
+	}
+	s, _ := props[key].(string)
+	return s
 }
 
 func isExternalTrustEdge(g *workingGraph, e rawEdge) bool {
@@ -168,6 +159,9 @@ func accountForNode(g *workingGraph, id string) string {
 	if g != nil {
 		if n, ok := g.Nodes[id]; ok {
 			if a, _ := n.Props["account_id"].(string); strings.TrimSpace(a) != "" {
+				return strings.TrimSpace(a)
+			}
+			if a, _ := n.Props["owning_account_id"].(string); strings.TrimSpace(a) != "" {
 				return strings.TrimSpace(a)
 			}
 		}

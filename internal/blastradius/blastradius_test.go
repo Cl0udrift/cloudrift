@@ -78,14 +78,17 @@ func TestBuildSummaryPayload_withGraph(t *testing.T) {
 		true,
 		ReasonNone,
 	)
-	if !s.GraphAvailable || !s.EscalationPossible {
-		t.Fatalf("expected trusts escalation: %+v", s)
+	if !s.GraphAvailable || s.EscalationPossible {
+		t.Fatalf("TRUSTS is configuration, not escalation: %+v", s)
 	}
 	if s.ReachableResourceCount < 1 || s.ReachableAccountsCount < 1 {
 		t.Fatalf("counts: %+v", s)
 	}
-	if s.DominantMotif != "ASSUME_ROLE" {
-		t.Fatalf("expected ASSUME_ROLE dominant motif, got %q", s.DominantMotif)
+	if s.DominantMotif != "" || s.PathValidity != string(ValidityUnknown) || s.AnalysisKind != "TOPOLOGY" {
+		t.Fatalf("topology must stay unevaluated: %+v", s)
+	}
+	if s.AttackPathCount != 0 {
+		t.Fatalf("topology must not invent attack paths: %+v", s)
 	}
 }
 
@@ -135,6 +138,46 @@ func TestSemanticEdgeType_TrustVariants(t *testing.T) {
 	}
 }
 
+func TestIsCrossAccountEdge_UsesOwningAccountAndRelationshipEvidence(t *testing.T) {
+	const role = "arn:aws:iam::111111111111:role/Vendor"
+	const ext = "arn:cloudrift:external-principal:::aws_account/vendor"
+	g := newWorkingGraph()
+	g.AddAssetNode(role, "111111111111", "iam_role", "Vendor", "global", "s1")
+	g.AddAssetNode(ext, "222222222222", "external_principal", "arn:aws:iam::222222222222:root", "global", "s1")
+	g.addEdgeWithProps(role, ext, "TRUSTS", map[string]any{
+		"principal_type":      "aws_account",
+		"external_account_id": "222222222222",
+	})
+	e := g.Edges[edgeKey(role, "TRUSTS", ext)]
+	if !isCrossAccountEdge(g, e) {
+		t.Fatal("expected cross-account when the principal owning account differs from the role account")
+	}
+	if got := semanticEdgeType(g, e); got != "EXTERNAL_TRUST" {
+		t.Fatalf("TRUSTS remains an external configuration relationship, got %s", got)
+	}
+
+	g2 := newWorkingGraph()
+	g2.AddAssetNode(role, "111111111111", "iam_role", "Vendor", "global", "s1")
+	g2.AddAssetNode(ext, "111111111111", "external_principal", "ext", "global", "s1")
+	g2.addEdgeWithProps(role, ext, "TRUSTS", map[string]any{"external_account_id": "222222222222"})
+	if !isCrossAccountEdge(g2, g2.Edges[edgeKey(role, "TRUSTS", ext)]) {
+		t.Fatal("relationship external_account_id classifies the edge when node account_id still says the trusting account")
+	}
+
+	oidc := "arn:cloudrift:external-principal:::oidc/x"
+	g3 := newWorkingGraph()
+	g3.AddAssetNode(role, "111111111111", "iam_role", "Vendor", "global", "s1")
+	g3.AddAssetNode(oidc, "", "external_principal", "idp", "global", "s1")
+	g3.addEdge(role, oidc, "TRUSTS")
+	e3 := g3.Edges[edgeKey(role, "TRUSTS", oidc)]
+	if isCrossAccountEdge(g3, e3) {
+		t.Fatal("OIDC with unknown ownership is not a cross-account AWS account edge")
+	}
+	if !isExternalTrustEdge(g3, e3) {
+		t.Fatal("OIDC remains an external trust")
+	}
+}
+
 func TestBuildSummaryPayload_escalationFromPrivilegeSignals(t *testing.T) {
 	g := newWorkingGraph()
 	g.addTriples([]PathTriple{{Src: "arn:aws:iam::111111111111:role/A", Dst: "arn:aws:iam::111111111111:role/B", Type: "POINTS_TO"}})
@@ -150,14 +193,14 @@ func TestBuildSummaryPayload_escalationFromPrivilegeSignals(t *testing.T) {
 		true,
 		ReasonNone,
 	)
-	if !s.EscalationPossible {
-		t.Fatalf("expected escalation true for IAM write signal")
+	if s.EscalationPossible || s.PathValidity != string(ValidityUnknown) {
+		t.Fatalf("IAM write visibility is not a validated transition: %+v", s)
 	}
 	if !strings.Contains(strings.ToLower(s.SummaryText), "privilege") {
 		t.Fatalf("expected privilege narrative, got: %s", s.SummaryText)
 	}
-	if s.DominantMotif != "IAM_WRITE" {
-		t.Fatalf("expected IAM_WRITE dominant motif from structured semantics, got %q", s.DominantMotif)
+	if s.DominantMotif != "" || s.AttackPathCount != 0 {
+		t.Fatalf("POINTS_TO must not become an attack motif: %+v", s)
 	}
 }
 
@@ -232,21 +275,24 @@ func TestBuildPathVariants_attackPathPrimaryAndAlternates(t *testing.T) {
 	g.addEdge("arn:aws:iam::111111111111:role/LocalA", "arn:aws:iam::111111111111:role/LocalB", "POINTS_TO")
 	g.addEdge("arn:aws:iam::111111111111:role/LocalB", "arn:aws:s3:::sensitive-bucket", "FRONTS")
 
-	variants, selectedID, pathIDs := buildPathVariants("arn:aws:iam::111111111111:role/Root", g, ModeAttackPath)
-	if selectedID != "primary" {
-		t.Fatalf("expected primary selected id, got %q", selectedID)
+	variants, selectedID, _ := buildPathVariants("arn:aws:iam::111111111111:role/Root", g, ModeAttackPath)
+	if selectedID != "" || len(variants) != 0 {
+		t.Fatalf("TRUSTS, POINTS_TO, and FRONTS must not become attack paths: %#v", variants)
 	}
-	if len(variants) < 2 || len(variants) > 3 {
-		t.Fatalf("expected 2-3 variants, got %d", len(variants))
+	exposure, selectedID, pathIDs := buildPathVariants("arn:aws:iam::111111111111:role/Root", g, ModeIdentityExposure)
+	if selectedID != "primary" || len(exposure) < 2 {
+		t.Fatalf("expected unevaluated trust candidates, got %#v", exposure)
 	}
-	if len(pathIDs) != len(variants) {
-		t.Fatalf("path id mismatch %d vs %d", len(pathIDs), len(variants))
+	if len(pathIDs) != len(exposure) {
+		t.Fatalf("path id mismatch %d vs %d", len(pathIDs), len(exposure))
 	}
-	if variants[0].Kind != "primary" {
-		t.Fatalf("first variant should be primary: %#v", variants[0])
-	}
-	if len(variants[1].NodeIDs) > 1 && len(variants[0].NodeIDs) > 1 && variants[1].NodeIDs[1] == variants[0].NodeIDs[1] {
-		t.Fatalf("alternate should differ by first pivot node")
+	for _, v := range exposure {
+		if v.Validity != string(ValidityUnknown) {
+			t.Fatalf("trust candidate validity: %#v", v)
+		}
+		if v.Kind != "exposure" {
+			t.Fatalf("kind: %#v", v)
+		}
 	}
 }
 
@@ -259,8 +305,12 @@ func TestBuildPathVariants_noAlternatesForSingleBranch(t *testing.T) {
 	g.addEdge("arn:aws:iam::111111111111:role/A", "arn:aws:iam::111111111111:role/B", "POINTS_TO")
 
 	variants, _, _ := buildPathVariants("arn:aws:iam::111111111111:role/Root", g, ModeAttackPath)
-	if len(variants) != 1 {
-		t.Fatalf("expected only primary variant, got %d", len(variants))
+	if len(variants) != 0 {
+		t.Fatalf("a single TRUSTS plus POINTS_TO chain is not an attack path, got %d", len(variants))
+	}
+	exposure, _, _ := buildPathVariants("arn:aws:iam::111111111111:role/Root", g, ModeIdentityExposure)
+	if len(exposure) != 1 || exposure[0].Validity != string(ValidityUnknown) {
+		t.Fatalf("expected one unevaluated trust candidate, got %#v", exposure)
 	}
 }
 
@@ -274,16 +324,19 @@ func TestBuildExplorerPayload_pathVariantsAttackPathOnly(t *testing.T) {
 	sum := BuildSummaryPayload(schema.BlastRootPrincipal, "arn:aws:iam::111111111111:role/Root", "s", ModeAttackPath, g, "arn:aws:iam::111111111111:role/Root", "", PrivilegeSignals{}, true, ReasonNone)
 
 	attackPayload := BuildExplorerPayload(sum, "arn:aws:iam::111111111111:role/Root", ModeAttackPath, "", g)
-	if len(attackPayload.PathVariants) == 0 || attackPayload.SelectedPathID == "" {
-		t.Fatalf("expected path variants in attack_path mode")
+	if len(attackPayload.PathVariants) != 0 || attackPayload.SelectedPathID != "" {
+		t.Fatalf("attack_path must not manufacture variants from TRUSTS: %#v", attackPayload.PathVariants)
 	}
-	if len(attackPayload.Display.HighlightPathIDs) == 0 {
-		t.Fatalf("expected highlight path ids in attack_path mode")
+	if attackPayload.Summary.PathValidity != string(ValidityUnknown) {
+		t.Fatalf("attack summary validity: %+v", attackPayload.Summary)
 	}
 
 	blastPayload := BuildExplorerPayload(sum, "arn:aws:iam::111111111111:role/Root", ModeBlastRadius, "", g)
 	if len(blastPayload.PathVariants) != 0 || blastPayload.SelectedPathID != "" || len(blastPayload.Display.HighlightPathIDs) != 0 {
 		t.Fatalf("expected no path variants in blast_radius mode")
+	}
+	if len(blastPayload.Nodes) == 0 || len(blastPayload.Edges) == 0 {
+		t.Fatalf("topology explorer must still return the neighborhood")
 	}
 }
 
@@ -294,14 +347,17 @@ func TestPrioritizeOneHopTriples_prefersTrustAndCapsNeighbors(t *testing.T) {
 		{Src: "arn:root", Dst: "arn:local", Type: "POINTS_TO"},
 		{Src: "arn:root", Dst: "account:111111111111", Type: "OWNED_BY"},
 	}
-	got := prioritizeOneHopTriples("arn:root", in, ModeAttackPath, 2)
+	got := prioritizeOneHopTriples("arn:root", in, ModeIdentityExposure, 2)
 	if len(got) != 2 {
-		t.Fatalf("expected 2 neighbors, got %d", len(got))
+		t.Fatalf("expected 2 trust neighbors, got %d", len(got))
 	}
 	for _, t3 := range got {
 		if t3.Type != "TRUSTS" {
-			t.Fatalf("expected TRUSTS-ranked neighbors first, got %#v", got)
+			t.Fatalf("identity exposure keeps TRUSTS candidates, got %#v", got)
 		}
+	}
+	if attack := prioritizeOneHopTriples("arn:root", in, ModeAttackPath, 2); len(attack) != 0 {
+		t.Fatalf("attack expansion must not keep topology neighbors, got %#v", attack)
 	}
 }
 

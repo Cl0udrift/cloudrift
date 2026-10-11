@@ -45,6 +45,7 @@ func CollectDNSWithConfig(ctx context.Context, cfg *config.Config, accounts []Ac
 					if firstErr == nil {
 						firstErr = err
 					}
+					out = append(out, CollectionStatus(account.ID, "", "route53", "global", "failed", err.Error()))
 					mu.Unlock()
 					return
 				}
@@ -59,6 +60,7 @@ func CollectDNSWithConfig(ctx context.Context, cfg *config.Config, accounts []Ac
 							if firstErr == nil {
 								firstErr = err
 							}
+							out = append(out, CollectionStatus(account.ID, "", "route53", "global", "failed", err.Error()))
 							mu.Unlock()
 							return
 						}
@@ -89,6 +91,7 @@ func CollectDNSWithConfig(ctx context.Context, cfg *config.Config, accounts []Ac
 			}
 			mu.Lock()
 			out = append(out, local...)
+			out = append(out, CollectionStatus(account.ID, "", "route53", "global", "succeeded", ""))
 			mu.Unlock()
 		}()
 	}

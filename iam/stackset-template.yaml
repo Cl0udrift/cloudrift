@@ -29,8 +29,33 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
+                  # Organization policy reads run with the management credential,
+                  # which needs organizations:DescribeOrganization, ListRoots,
+                  # ListParents, ListPoliciesForTarget, and DescribePolicy.
                   - organizations:ListAccounts
+                  - organizations:ListParents
                   - organizations:ListTagsForResource
+                  - organizations:DescribeOrganizationalUnit
+                  - iam:ListRoles
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListRolePolicies
+                  - iam:GetRolePolicy
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:GetInstanceProfile
+                  - ec2:DescribeInstances
+                  - ec2:DescribeIamInstanceProfileAssociations
+                  - lambda:ListFunctions
+                  - ecs:ListClusters
+                  - ecs:ListServices
+                  - ecs:DescribeServices
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                  - ecs:DescribeTaskDefinition
+                  - eks:ListClusters
+                  - eks:DescribeCluster
+                  - eks:ListPodIdentityAssociations
+                  - eks:DescribePodIdentityAssociation
                   - route53:ListHostedZones
                   - route53:ListResourceRecordSets
                   - cloudfront:ListDistributions
@@ -38,5 +63,8 @@ Resources:
                   - s3:GetBucketLocation
                   - s3:GetBucketWebsite
                   - s3:GetBucketPolicy
+                  - s3:GetPublicAccessBlock
+                  - s3:GetBucketOwnershipControls
+                  - s3:GetBucketEncryption
                   - sts:AssumeRole
                 Resource: "*"

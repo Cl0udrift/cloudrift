@@ -17,6 +17,9 @@ type ScanListItem struct {
 	CriticalCount       int       `json:"critical_count"`
 	HighCount           int       `json:"high_count"`
 	TotalMonthlyCostUSD float64   `json:"total_monthly_cost_usd"`
+	Synthetic           bool      `json:"synthetic,omitempty"`
+	DataOrigin          string    `json:"data_origin,omitempty"`
+	ScenarioID          string    `json:"scenario_id,omitempty"`
 }
 
 // ScanSummaryResponse is the payload for GET /api/scans/:id/summary.
@@ -55,7 +58,7 @@ type ScanSummaryResponse struct {
 // ExternalEntityRow aggregates external_access findings by (external_principal, principal_type, external_account_id).
 type ExternalEntityRow struct {
 	// EntityID is a stable opaque id (same encoding as blast-radius entity routes) for this aggregate row.
-	EntityID                   string  `json:"entity_id"`
+	EntityID string `json:"entity_id"`
 	// PrincipalID is an optional encoded principal root id when a single trusted principal identity is derivable.
 	PrincipalID                string  `json:"principal_id,omitempty"`
 	ExternalPrincipal          string  `json:"external_principal"`
@@ -126,8 +129,10 @@ type TopFixItem struct {
 // RemediationGroupsResponse is the payload for GET /api/scans/:id/remediation-groups.
 // Groups are transparent, rule-based aggregations derived from existing findings data.
 type RemediationGroupsResponse struct {
-	ScanID string                 `json:"scan_id"`
-	Items  []RemediationGroupItem `json:"items"`
+	ScanID           string                 `json:"scan_id"`
+	Items            []RemediationGroupItem `json:"items"`
+	Synthetic        bool                   `json:"synthetic,omitempty"`
+	ExecutionEnabled *bool                  `json:"execution_enabled,omitempty"`
 }
 
 type RemediationGroupItem struct {
@@ -194,6 +199,8 @@ type FindingDetailItem struct {
 	ScanID         string         `json:"scan_id"`
 	Evidence       map[string]any `json:"evidence,omitempty"`
 	Trust          *TrustDisplay  `json:"trust,omitempty"`
+	// CIEM is the hypothetical post-compromise assessment for an external-access finding.
+	CIEM *CIEMAssessment `json:"ciem,omitempty"`
 }
 
 // TrustDisplay is optional and populated when module == external_access.

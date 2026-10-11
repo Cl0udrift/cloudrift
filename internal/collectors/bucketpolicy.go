@@ -3,12 +3,14 @@ package collectors
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"strings"
 	"sync"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 
 	"github.com/Zero0x00/cloudrift/internal/config"
 	"github.com/Zero0x00/cloudrift/internal/models"
@@ -24,11 +26,11 @@ import (
 //
 // It is given the already-collected bucket assets (from CollectStorage) to avoid a second
 // ListBuckets pass; it only needs each owning account's session for GetBucketPolicy.
-func CollectBucketPolicies(ctx context.Context, accounts []Account, buckets []models.AssetNode) ([]models.AssetNode, []models.Relationship, []string, error) {
+func CollectBucketPolicies(ctx context.Context, accounts []Account, buckets []models.AssetNode) ([]models.AssetNode, []models.Relationship, []BucketPolicyEvidence, []string, error) {
 	return CollectBucketPoliciesWithConfig(ctx, config.Default(), accounts, buckets)
 }
 
-func CollectBucketPoliciesWithConfig(ctx context.Context, cfg *config.Config, accounts []Account, buckets []models.AssetNode) ([]models.AssetNode, []models.Relationship, []string, error) {
+func CollectBucketPoliciesWithConfig(ctx context.Context, cfg *config.Config, accounts []Account, buckets []models.AssetNode) ([]models.AssetNode, []models.Relationship, []BucketPolicyEvidence, []string, error) {
 	sessionByAccount := make(map[string]*awsv2.Config, len(accounts))
 	for i := range accounts {
 		if accounts[i].Session != nil {
@@ -40,6 +42,7 @@ func CollectBucketPoliciesWithConfig(ctx context.Context, cfg *config.Config, ac
 		mu         sync.Mutex
 		principals []models.AssetNode
 		rels       []models.Relationship
+		evidence   []BucketPolicyEvidence
 		failed     []string
 		firstErr   error
 		seenPrin   = map[string]bool{}
@@ -63,41 +66,48 @@ func CollectBucketPoliciesWithConfig(ctx context.Context, cfg *config.Config, ac
 			defer func() { <-sem }()
 
 			c := s3.NewFromConfig(*sess)
+			fact := readBucketEvidence(ctx, c, b)
 			out, err := c.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{Bucket: awsv2.String(b.Name)})
-			if err != nil {
-				// The overwhelmingly common case is "no bucket policy" (NoSuchBucketPolicy),
-				// which is not a coverage gap. Only an access-denied read is a real gap.
-				if isAccessDeniedErr(err) {
-					mu.Lock()
-					if firstErr == nil {
-						firstErr = err
-					}
-					failed = append(failed, b.AccountID)
-					mu.Unlock()
+			policyStatus, policyEvidence, document := ClassifyBucketPolicyRead(apiErrorCode(err), "")
+			if err == nil && out != nil {
+				policyStatus, policyEvidence, document = ClassifyBucketPolicyRead("", decodeBucketPolicy(awsv2.ToString(out.Policy)))
+			}
+			fact.PolicyStatus = policyStatus
+			fact.PolicyEvidence = policyEvidence
+			fact.PolicyDocument = document
+			if err != nil && isAccessDeniedErr(err) {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
 				}
-				return
-			}
-			if out.Policy == nil {
-				return
-			}
-			grants := externalGrantsFromBucketPolicy(b.AccountID, awsv2.ToString(out.Policy))
-			if len(grants) == 0 {
+				failed = append(failed, b.AccountID)
+				evidence = append(evidence, fact)
+				mu.Unlock()
 				return
 			}
 			mu.Lock()
+			evidence = append(evidence, fact)
+			if document == "" {
+				mu.Unlock()
+				return
+			}
+			grants := externalGrantsFromBucketPolicy(b.AccountID, document)
 			for _, g := range grants {
 				if !seenPrin[g.principalARN] {
 					seenPrin[g.principalARN] = true
-					principals = append(principals, models.AssetNode{
+					principalNode := models.AssetNode{
 						ARN:       g.principalARN,
 						AssetType: models.AssetExternalPrincipal,
 						Name:      g.principalValue,
+						AccountID: b.AccountID,
 						Properties: map[string]any{
 							"principal_type":      g.principalType,
 							"principal_value":     g.principalValue,
 							"external_account_id": g.externalAccountID,
 						},
-					})
+					}
+					principalNode, _ = models.ResolvePrincipalOwnership(principalNode)
+					principals = append(principals, principalNode)
 				}
 				rels = append(rels, models.Relationship{
 					SourceARN: b.ARN,
@@ -118,7 +128,7 @@ func CollectBucketPoliciesWithConfig(ctx context.Context, cfg *config.Config, ac
 	}
 	wg.Wait()
 	warnPartial(ctx, "bucket_policy", firstErr)
-	return principals, rels, failed, nil
+	return principals, rels, evidence, failed, nil
 }
 
 type bucketGrant struct {
@@ -261,6 +271,107 @@ func accountIDFromARN(arn string) string {
 		return m[1]
 	}
 	return ""
+}
+
+// BucketPolicyEvidence is the bucket-policy and related S3 configuration observed
+// for one bucket. A missing read is not recorded as confirmed absence.
+type BucketPolicyEvidence struct {
+	BucketARN                 string
+	PolicyStatus              string
+	PolicyEvidence            string
+	PolicyDocument            string
+	ObjectOwnership           string
+	ObjectOwnershipEvidence   string
+	Encryption                string
+	EncryptionEvidence        string
+	KMSKeyARN                 string
+	PublicAccessBlockStatus   string
+	PublicAccessBlockEvidence string
+}
+
+// ClassifyBucketPolicyRead maps one GetBucketPolicy result to an evidence state.
+// The document is retained whole, including Deny, NotAction, NotResource, and Condition.
+func ClassifyBucketPolicyRead(apiCode, policy string) (status, evidence, document string) {
+	switch apiCode {
+	case "":
+		if strings.TrimSpace(policy) == "" {
+			return "confirmed_absent", "s3:GetBucketPolicy returned no policy document", ""
+		}
+		return "present", "s3:GetBucketPolicy returned a bucket policy document", policy
+	case "NoSuchBucketPolicy":
+		return "confirmed_absent", "s3:GetBucketPolicy returned NoSuchBucketPolicy", ""
+	case "AccessDenied", "Forbidden":
+		return "missing", "s3:GetBucketPolicy was denied", ""
+	default:
+		if apiCode == "" {
+			apiCode = "unknown"
+		}
+		return "missing", "s3:GetBucketPolicy failed: " + apiCode, ""
+	}
+}
+
+func readBucketEvidence(ctx context.Context, c *s3.Client, bucket models.AssetNode) BucketPolicyEvidence {
+	fact := BucketPolicyEvidence{BucketARN: bucket.ARN}
+	name := awsv2.String(bucket.Name)
+	if out, err := c.GetBucketOwnershipControls(ctx, &s3.GetBucketOwnershipControlsInput{Bucket: name}); err != nil {
+		fact.ObjectOwnershipEvidence = "s3:GetBucketOwnershipControls " + apiErrorCode(err)
+	} else if out != nil && out.OwnershipControls != nil && len(out.OwnershipControls.Rules) > 0 {
+		fact.ObjectOwnership = string(out.OwnershipControls.Rules[0].ObjectOwnership)
+		fact.ObjectOwnershipEvidence = "s3:GetBucketOwnershipControls returned " + fact.ObjectOwnership
+	}
+	if out, err := c.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{Bucket: name}); err != nil {
+		code := apiErrorCode(err)
+		if code == "ServerSideEncryptionConfigurationNotFoundError" {
+			fact.Encryption = "confirmed_absent"
+			fact.EncryptionEvidence = "s3:GetBucketEncryption returned ServerSideEncryptionConfigurationNotFoundError"
+		} else {
+			fact.Encryption = "missing"
+			fact.EncryptionEvidence = "s3:GetBucketEncryption " + code
+		}
+	} else if out != nil && out.ServerSideEncryptionConfiguration != nil && len(out.ServerSideEncryptionConfiguration.Rules) > 0 {
+		rule := out.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault
+		if rule != nil {
+			fact.Encryption = string(rule.SSEAlgorithm)
+			fact.KMSKeyARN = awsv2.ToString(rule.KMSMasterKeyID)
+			fact.EncryptionEvidence = "s3:GetBucketEncryption returned " + fact.Encryption
+		}
+	}
+	if _, err := c.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{Bucket: name}); err != nil {
+		code := apiErrorCode(err)
+		if code == "NoSuchPublicAccessBlockConfiguration" {
+			fact.PublicAccessBlockStatus = "confirmed_absent"
+			fact.PublicAccessBlockEvidence = "s3:GetPublicAccessBlock returned NoSuchPublicAccessBlockConfiguration; account-level Block Public Access was not read"
+		} else {
+			fact.PublicAccessBlockStatus = "missing"
+			fact.PublicAccessBlockEvidence = "s3:GetPublicAccessBlock " + code
+		}
+	} else {
+		fact.PublicAccessBlockStatus = "present"
+		fact.PublicAccessBlockEvidence = "s3:GetPublicAccessBlock returned a bucket configuration; account-level Block Public Access was not read"
+	}
+	return fact
+}
+
+func decodeBucketPolicy(raw string) string {
+	decoded, err := url.QueryUnescape(raw)
+	if err != nil || strings.TrimSpace(decoded) == "" {
+		return raw
+	}
+	return decoded
+}
+
+func apiErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	var api smithy.APIError
+	if errors.As(err, &api) && api.ErrorCode() != "" {
+		return api.ErrorCode()
+	}
+	if isAccessDeniedErr(err) {
+		return "AccessDenied"
+	}
+	return "Error"
 }
 
 func isAccessDeniedErr(err error) bool {

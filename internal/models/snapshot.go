@@ -23,4 +23,13 @@ type ScanSnapshot struct {
 	EmbeddingProvider   string `json:"embedding_provider,omitempty"`
 	EmbeddingModel      string `json:"embedding_model,omitempty"`
 	EmbeddingDimensions int    `json:"embedding_dimensions,omitempty"`
+	// Synthetic marks a generated demo scan. It is not a production AWS collection.
+	Synthetic  bool   `json:"synthetic,omitempty"`
+	DataOrigin string `json:"data_origin,omitempty"`
+	ScenarioID string `json:"scenario_id,omitempty"`
+	DemoSeed   int    `json:"demo_seed,omitempty"`
+	// CIEM evidence collection. Omitted on legacy scans and older metadata files.
+	// org_policy_discovery access_denied is not policy absence.
+	CIEMCollection     string `json:"ciem_collection,omitempty"`
+	OrgPolicyDiscovery string `json:"org_policy_discovery,omitempty"`
 }

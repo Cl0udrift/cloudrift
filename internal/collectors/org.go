@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
@@ -19,9 +20,17 @@ import (
 // for findings: a reclaimable verdict is only safe when coverage is complete, because a
 // bucket "missing" from scanned accounts could still be owned by an account we skipped.
 type Coverage struct {
-	Discovered int               `json:"discovered"`        // accounts returned by Organizations
-	Scanned    []string          `json:"scanned"`           // account IDs successfully assumed
-	Failed     map[string]string `json:"failed,omitempty"`  // account ID -> assume error
+	Discovered int               `json:"discovered"`       // accounts returned by Organizations
+	Scanned    []string          `json:"scanned"`          // account IDs successfully assumed
+	Failed     map[string]string `json:"failed,omitempty"` // account ID -> assume error
+	// OrgPolicyDiscovery is set only for a CIEM scan. Empty means the legacy
+	// scan did not attempt organization policy collection.
+	OrgPolicyDiscovery string `json:"org_policy_discovery,omitempty"`
+	CIEMCollection     string `json:"ciem_collection,omitempty"`
+	// OrgMembershipKnown is true only after Organizations ListAccounts succeeded.
+	// KnownOrgAccountIDs includes members that could not be assumed.
+	OrgMembershipKnown bool     `json:"org_membership_known,omitempty"`
+	KnownOrgAccountIDs []string `json:"known_org_account_ids,omitempty"`
 }
 
 // Complete reports whether every discovered account was successfully assumed.
@@ -137,7 +146,17 @@ func CollectAccounts(ctx context.Context, cfg *config.Config, orgAPI Organizatio
 		scannedIDs = append(scannedIDs, acc.ID)
 	}
 	sort.Strings(scannedIDs)
-	cov := Coverage{Discovered: len(accounts), Scanned: scannedIDs, Failed: failed}
+	known := make([]string, 0, len(accounts))
+	for _, item := range accounts {
+		if id := strings.TrimSpace(awsv2.ToString(item.Id)); id != "" {
+			known = append(known, id)
+		}
+	}
+	sort.Strings(known)
+	cov := Coverage{
+		Discovered: len(accounts), Scanned: scannedIDs, Failed: failed,
+		OrgMembershipKnown: true, KnownOrgAccountIDs: known,
+	}
 	if len(failed) > 0 {
 		slog.Warn("account collection skipped accounts that could not be assumed", "failed", len(failed), "discovered", len(accounts))
 		// Surface the real reason (e.g. AccessDenied assuming the audit role) to operators.

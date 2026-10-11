@@ -1,0 +1,211 @@
+package handlers
+
+import (
+	"errors"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/Zero0x00/cloudrift/internal/api/schema"
+	"github.com/Zero0x00/cloudrift/internal/ciem"
+	"github.com/Zero0x00/cloudrift/internal/models"
+	"github.com/Zero0x00/cloudrift/internal/scans"
+)
+
+func ListIdentities(outputDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		if !ok {
+			return
+		}
+		page, pageSize, err := parsePagination(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_pagination", err.Error(), nil)
+			return
+		}
+		items := ciem.ListRoles(assets, rels, ciem.InventoryFilter{
+			AccountID:    strings.TrimSpace(r.URL.Query().Get("account_id")),
+			Purpose:      strings.TrimSpace(r.URL.Query().Get("purpose")),
+			Trust:        strings.TrimSpace(r.URL.Query().Get("trust")),
+			Broad:        strings.TrimSpace(r.URL.Query().Get("broad")),
+			Evidence:     strings.TrimSpace(r.URL.Query().Get("evidence")),
+			Search:       strings.TrimSpace(r.URL.Query().Get("q")),
+			Workload:     strings.TrimSpace(r.URL.Query().Get("workload")),
+			WorkloadType: strings.TrimSpace(r.URL.Query().Get("type")),
+			Region:       strings.TrimSpace(r.URL.Query().Get("region")),
+		})
+		total := len(items)
+		totalPages := 0
+		if total > 0 {
+			totalPages = (total + pageSize - 1) / pageSize
+		}
+		start := (page - 1) * pageSize
+		if start > total {
+			start = total
+		}
+		end := start + pageSize
+		if end > total {
+			end = total
+		}
+		pageItems := items[start:end]
+		if pageItems == nil {
+			pageItems = []schema.IdentityListItem{}
+		}
+		writeJSON(w, http.StatusOK, schema.IdentityListResponse{
+			ScanID: scanID, Items: pageItems, Page: page, PageSize: pageSize,
+			TotalItems: total, TotalPages: totalPages,
+			CoverageNote: "This list is the IAM roles stored in the scan. Accounts that were not scanned are absent. Opening the list does not evaluate authorization.",
+		})
+	}
+}
+
+func GetIdentityProfile(outputDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		if !ok {
+			return
+		}
+		role, found := findIAMRole(assets, r.URL.Query().Get("arn"))
+		if !found {
+			writeError(w, http.StatusNotFound, "role_not_found", "iam role was not collected in this scan", nil)
+			return
+		}
+		profile := ciem.Profile(scanID, role, assets, rels)
+		if truthy(r.URL.Query().Get("impact")) {
+			impact := ciem.Impact(r.Context(), scanID, role, assets, rels)
+			if workload := strings.TrimSpace(r.URL.Query().Get("workload_arn")); workload != "" {
+				impact.Kind = "workload_credential_compromise"
+				impact.Assumption = workloadAssumption(workload, role.ARN, ciem.WorkloadsForRole(role.ARN, assets, rels))
+			}
+			profile.Impact = &impact
+		}
+		writeJSON(w, http.StatusOK, profile)
+	}
+}
+
+func ListWorkloads(outputDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		if !ok {
+			return
+		}
+		page, pageSize, err := parsePagination(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_pagination", err.Error(), nil)
+			return
+		}
+		items := ciem.ListWorkloads(assets, rels,
+			strings.TrimSpace(r.URL.Query().Get("account_id")),
+			strings.TrimSpace(r.URL.Query().Get("region")),
+			strings.TrimSpace(r.URL.Query().Get("type")),
+			strings.TrimSpace(r.URL.Query().Get("role_arn")),
+		)
+		roles := map[string]int{}
+		workloads := map[string]struct{}{}
+		for _, item := range items {
+			workloads[item.WorkloadARN] = struct{}{}
+			if item.RoleARN != "" {
+				roles[item.RoleARN]++
+			}
+		}
+		shared := 0
+		for _, count := range roles {
+			if count > 1 {
+				shared++
+			}
+		}
+		total := len(items)
+		totalPages := 0
+		if total > 0 {
+			totalPages = (total + pageSize - 1) / pageSize
+		}
+		start := (page - 1) * pageSize
+		if start > total {
+			start = total
+		}
+		end := start + pageSize
+		if end > total {
+			end = total
+		}
+		pageItems := items[start:end]
+		if pageItems == nil {
+			pageItems = []schema.WorkloadAttachment{}
+		}
+		writeJSON(w, http.StatusOK, schema.WorkloadListResponse{
+			ScanID: scanID, Items: pageItems, Page: page, PageSize: pageSize,
+			TotalItems: total, TotalPages: totalPages,
+			UniqueWorkloads: len(workloads), UniqueRoles: len(roles), SharedRoleCount: shared,
+			CoverageNote: "Workload rows are configured attachments. They are not attacker transitions. Unique role impact is not multiplied by the number of workloads.",
+		})
+	}
+}
+
+func loadIdentityScan(w http.ResponseWriter, r *http.Request, outputDir string) (string, []models.AssetNode, []models.Relationship, bool) {
+	scanID, ok := scanIDFromPath(outputDir, chi.URLParam(r, "id"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid_scan_id", "invalid scan id", nil)
+		return "", nil, nil, false
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, scanID, "scan-metadata.json")); err != nil {
+		writeError(w, http.StatusNotFound, "scan_not_found", "scan was not found", nil)
+		return "", nil, nil, false
+	}
+	assets, err := scans.LoadAssets(outputDir, scanID)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		writeError(w, http.StatusInternalServerError, "scan_load_error", "failed to load scan assets", nil)
+		return "", nil, nil, false
+	}
+	rels, err := scans.LoadRelationships(outputDir, scanID)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		writeError(w, http.StatusInternalServerError, "scan_load_error", "failed to load scan relationships", nil)
+		return "", nil, nil, false
+	}
+	return scanID, assets, rels, true
+}
+
+func findIAMRole(assets []models.AssetNode, arn string) (models.AssetNode, bool) {
+	arn = strings.TrimSpace(arn)
+	if arn == "" {
+		return models.AssetNode{}, false
+	}
+	for _, asset := range assets {
+		if asset.AssetType == models.AssetIAMRole && asset.ARN == arn {
+			return asset, true
+		}
+	}
+	return models.AssetNode{}, false
+}
+
+func workloadAssumption(workload, roleARN string, items []schema.WorkloadAttachment) string {
+	mechanism := ""
+	for _, item := range items {
+		if item.WorkloadARN == workload {
+			mechanism = item.Mechanism
+			break
+		}
+	}
+	switch mechanism {
+	case "ecs_execution_role":
+		return "A usable session for the ECS execution role " + roleARN + " configured on " + workload + " is compromised. This role is used by ECS infrastructure, not application containers. This is not observed credential theft."
+	case "ecs_task_role":
+		return "A usable session for the ECS task role " + roleARN + " configured on " + workload + " is compromised. This is the application task identity for that configuration. This is not observed task compromise or network reachability."
+	case "eks_pod_identity":
+		return "A usable session for role " + roleARN + " named by the EKS Pod Identity association " + workload + " is compromised. A running Pod was not observed. This is not observed credential theft."
+	case "irsa":
+		return "A usable session for role " + roleARN + " is compromised under the IRSA trust configuration " + workload + ". Kubernetes attachment was not collected, and AssumeRoleWithWebIdentity is not modeled as sts:AssumeRole. This is not an observed Pod."
+	default:
+		return "A usable AWS credential session associated with " + workload + " and configured role " + roleARN + " is compromised. This is not observed credential theft, and it is not network reachability."
+	}
+}
+
+func truthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}

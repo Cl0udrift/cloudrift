@@ -23,10 +23,22 @@ type pathCandidate struct {
 }
 
 func buildPathVariants(focusID string, g *workingGraph, mode BlastMode) ([]schema.BlastPathVariant, string, []string) {
-	if g == nil || mode != ModeAttackPath || strings.TrimSpace(focusID) == "" {
+	if g == nil || strings.TrimSpace(focusID) == "" {
 		return nil, "", nil
 	}
-	cands := collectPathCandidates(focusID, g)
+	var allow func(rawEdge) bool
+	switch mode {
+	case ModeIdentityExposure:
+		allow = func(e rawEdge) bool {
+			sem, ok := RelationshipSemanticsFor(e.Type)
+			return ok && sem.IdentityTraversable
+		}
+	case ModeAttackPath:
+		allow = func(e rawEdge) bool { return attackEdge(g, e) }
+	default:
+		return nil, "", nil
+	}
+	cands := collectPathCandidates(focusID, g, allow)
 	if len(cands) == 0 {
 		return nil, "", nil
 	}
@@ -71,31 +83,73 @@ func buildPathVariants(focusID string, g *workingGraph, mode BlastMode) ([]schem
 		return nil, "", nil
 	}
 
+	return finishVariants(selected, mode)
+}
+
+func finishVariants(selected []pathCandidate, mode BlastMode) ([]schema.BlastPathVariant, string, []string) {
+	if len(selected) == 0 {
+		return nil, "", nil
+	}
 	out := make([]schema.BlastPathVariant, 0, len(selected))
 	pathIDs := make([]string, 0, len(selected))
 	for i, c := range selected {
 		id := primaryVariantID
 		kind := "primary"
-		if i > 0 {
+		label := pathLabel(kind, c.semantics)
+		summary := pathSummary(c)
+		validity := string(ValidityValidatedPossible)
+		var missing []string
+		evidence := []string{"Every transition on this chain has evaluated attacker-movement evidence."}
+		risk := pathRiskHint(c.semantics)
+		if mode == ModeIdentityExposure {
+			if i == 0 {
+				kind = "exposure"
+				label = "Unevaluated trust candidate"
+			} else {
+				id = alternateIDPrefix + itoaU(i)
+				kind = "exposure"
+				label = "Alternate trust candidate"
+			}
+			summary = "Trust configuration length " + itoaU(len(c.edgeIDs)) + ". AssumeRole authorization is unevaluated."
+			validity = string(ValidityUnknown)
+			missing = []string{prereqIAMAuthorization, prereqTrustConditions}
+			evidence = []string{"The chain follows TRUSTS configuration only."}
+			risk = "Review the trust policy. This candidate is not a confirmed AssumeRole path."
+			if pathHasPermissionCandidate(c.semantics) {
+				if i == 0 {
+					label = "Unevaluated permission candidate"
+				} else {
+					label = "Alternate permission candidate"
+				}
+				summary = "Identity-policy candidate length " + itoaU(len(c.edgeIDs)) + ". Effect Allow is not effective authorization."
+				missing = []string{prereqEffectiveIAM}
+				evidence = []string{"The chain follows a collected policy statement. Authorization was not evaluated."}
+				risk = "Review the policy statement. This candidate is not an established attack path."
+			}
+		} else if i > 0 {
 			id = alternateIDPrefix + itoaU(i)
 			kind = "alternate"
+			label = pathLabel(kind, c.semantics)
 		}
 		out = append(out, schema.BlastPathVariant{
-			ID:                id,
-			Label:             pathLabel(kind, c.semantics),
-			Kind:              kind,
-			Summary:           pathSummary(c),
-			NodeIDs:           c.nodeIDs,
-			EdgeIDs:           c.edgeIDs,
-			DominantSemantics: topSemantics(c.semantics, 3),
-			RiskHint:          pathRiskHint(c.semantics),
+			ID:                   id,
+			Label:                label,
+			Kind:                 kind,
+			Summary:              summary,
+			NodeIDs:              c.nodeIDs,
+			EdgeIDs:              c.edgeIDs,
+			DominantSemantics:    topSemantics(c.semantics, 3),
+			RiskHint:             risk,
+			Validity:             validity,
+			MissingPrerequisites: missing,
+			Evidence:             evidence,
 		})
 		pathIDs = append(pathIDs, id)
 	}
 	return out, primaryVariantID, pathIDs
 }
 
-func collectPathCandidates(focusID string, g *workingGraph) []pathCandidate {
+func collectPathCandidates(focusID string, g *workingGraph, allow func(rawEdge) bool) []pathCandidate {
 	out := make([]pathCandidate, 0, maxRawCandidates)
 	var walk func(cur string, depth int, visited map[string]struct{}, nodes []string, edges []string, semantics []string, score int)
 	walk = func(cur string, depth int, visited map[string]struct{}, nodes []string, edges []string, semantics []string, score int) {
@@ -116,6 +170,9 @@ func collectPathCandidates(focusID string, g *workingGraph) []pathCandidate {
 		}
 		advanced := false
 		for _, e := range next {
+			if allow != nil && !allow(e) {
+				continue
+			}
 			if _, seen := visited[e.Tgt]; seen {
 				continue
 			}
@@ -165,6 +222,15 @@ func outgoingEdges(g *workingGraph, src string) []rawEdge {
 		return out[i].ID < out[j].ID
 	})
 	return out
+}
+
+func pathHasPermissionCandidate(semantics []string) bool {
+	for _, sem := range semantics {
+		if sem == "POLICY_PERMISSION_CANDIDATE" || sem == "POLICY_ATTACHED_TO" || sem == "POLICY_CONTAINS_STATEMENT" {
+			return true
+		}
+	}
+	return false
 }
 
 func edgeSignalScore(sem string) int {

@@ -522,6 +522,7 @@ func schemaFromAlertContext(ctx alerting.AlertContext) schema.AlertContext {
 			TopAccount:         ctx.BlastSummary.TopAccount,
 			DominantMotif:      ctx.BlastSummary.DominantMotif,
 			ActionLabel:        ctx.BlastSummary.ActionLabel,
+			PathValidity:       ctx.BlastSummary.PathValidity,
 		}
 	}
 	return schema.AlertContext{

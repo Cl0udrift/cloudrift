@@ -40,6 +40,11 @@ export function CurrentScanCard() {
             <dd className="cr-mono mt-0.5 break-all text-slate-800 dark:text-slate-200" title={selectedScanId}>
               {selectedScanId}
             </dd>
+            {(currentScan?.synthetic || selectedScanId.startsWith("demo")) && (
+              <p className="mt-1 inline-flex rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-950 dark:bg-amber-900/40 dark:text-amber-100">
+                SYNTHETIC / DEMO
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-x-2 gap-y-1">
             <div>

@@ -36,7 +36,7 @@ const SEARCH_DEBOUNCE_MS = 350;
 const TRIAGE_FETCH_PAGE_SIZE = 200;
 
 const SEVERITY_OPTIONS = ["", "critical", "high", "medium", "low"] as const;
-const MODULE_OPTIONS = ["", "orphaned_edge", "external_access"] as const;
+const MODULE_OPTIONS = ["", "orphaned_edge", "external_access", "iam_entitlement"] as const;
 const CLAIM_OPTIONS = ["", "reclaimable", "dangling", "broken", "edge_obscured"] as const;
 
 const columnHelper = createColumnHelper<FindingListItem>();

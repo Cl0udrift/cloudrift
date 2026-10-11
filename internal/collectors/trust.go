@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -30,6 +31,86 @@ type IAMAPI interface {
 	ListAttachedRolePolicies(ctx context.Context, params *iam.ListAttachedRolePoliciesInput, optFns ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error)
 	ListRolePolicies(ctx context.Context, params *iam.ListRolePoliciesInput, optFns ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error)
 	GetRolePolicy(ctx context.Context, params *iam.GetRolePolicyInput, optFns ...func(*iam.Options)) (*iam.GetRolePolicyOutput, error)
+	GetPolicy(ctx context.Context, params *iam.GetPolicyInput, optFns ...func(*iam.Options)) (*iam.GetPolicyOutput, error)
+	GetPolicyVersion(ctx context.Context, params *iam.GetPolicyVersionInput, optFns ...func(*iam.Options)) (*iam.GetPolicyVersionOutput, error)
+}
+
+func retrieveBoundaryDocument(ctx context.Context, client IAMAPI, roleNode *models.AssetNode, cache *managedPolicyCache) {
+	if roleNode == nil || roleNode.Properties == nil {
+		return
+	}
+	if stringValue(roleNode.Properties["permissions_boundary_status"]) != "present" {
+		return
+	}
+	arn := strings.TrimSpace(stringValue(roleNode.Properties["permissions_boundary_arn"]))
+	if arn == "" {
+		roleNode.Properties["permissions_boundary_status"] = "missing"
+		roleNode.Properties["permissions_boundary_retrieval"] = "missing"
+		roleNode.Properties["permissions_boundary_evidence"] = "a permissions boundary was indicated without an ARN; this is not confirmed absence"
+		return
+	}
+	roleNode.Properties["permissions_boundary_retrieved_at"] = time.Now().UTC().Format(time.RFC3339)
+	fetched := cache.get(ctx, client, arn, arn, roleNode.AccountID)
+	roleNode.Properties["permissions_boundary_version"] = fetched.VersionID
+	switch fetched.RetrievalStatus {
+	case models.PolicyRetrievalOK:
+		roleNode.Properties["permissions_boundary_document"] = fetched.Document
+		roleNode.Properties["permissions_boundary_retrieval"] = "collected"
+		roleNode.Properties["permissions_boundary_status"] = "present"
+		roleNode.Properties["permissions_boundary_evidence"] = "iam:GetPolicy and iam:GetPolicyVersion retrieved the default boundary policy version"
+	case models.PolicyRetrievalMalformed:
+		roleNode.Properties["permissions_boundary_document"] = fetched.Document
+		roleNode.Properties["permissions_boundary_retrieval"] = "malformed"
+		roleNode.Properties["permissions_boundary_status"] = "malformed"
+		roleNode.Properties["permissions_boundary_evidence"] = "the boundary document was retrieved but could not be normalized. It is not treated as absent."
+	default:
+		delete(roleNode.Properties, "permissions_boundary_document")
+		roleNode.Properties["permissions_boundary_retrieval"] = "missing"
+		roleNode.Properties["permissions_boundary_status"] = "missing"
+		roleNode.Properties["permissions_boundary_evidence"] = "a boundary ARN is attached but the policy document was not retrieved. This is not confirmed absence."
+	}
+}
+
+func boundaryPolicyGraph(role models.AssetNode) ([]models.AssetNode, []models.Relationship) {
+	arn := strings.TrimSpace(stringValue(role.Properties["permissions_boundary_arn"]))
+	if arn == "" {
+		return nil, nil
+	}
+	status := stringValue(role.Properties["permissions_boundary_retrieval"])
+	retrieval := models.PolicyRetrievalMissing
+	switch status {
+	case "collected":
+		retrieval = models.PolicyRetrievalOK
+	case "malformed":
+		retrieval = models.PolicyRetrievalMalformed
+	}
+	return policyEvidenceGraph(role, []collectedPolicy{{
+		ARN:             arn,
+		Name:            arn,
+		PolicyType:      "permissions_boundary",
+		VersionID:       stringValue(role.Properties["permissions_boundary_version"]),
+		Document:        stringValue(role.Properties["permissions_boundary_document"]),
+		RetrievalStatus: retrieval,
+		RoleARN:         role.ARN,
+		AccountID:       role.AccountID,
+	}})
+}
+
+func observePermissionsBoundary(roleNode *models.AssetNode, role iamtypes.Role) {
+	if roleNode.Properties == nil {
+		roleNode.Properties = map[string]any{}
+	}
+	if role.PermissionsBoundary != nil {
+		arn := strings.TrimSpace(awsv2.ToString(role.PermissionsBoundary.PermissionsBoundaryArn))
+		if arn != "" {
+			roleNode.Properties["permissions_boundary_arn"] = arn
+			roleNode.Properties["permissions_boundary_status"] = "present"
+			roleNode.Properties["permissions_boundary_evidence"] = "iam:ListRoles returned a permissions boundary ARN; the boundary policy document was not retrieved"
+			return
+		}
+	}
+	roleNode.Properties["permissions_boundary_status"] = "confirmed_absent"
+	roleNode.Properties["permissions_boundary_evidence"] = "iam:ListRoles returned this role with no permissions boundary"
 }
 
 var newIAMClient = func(cfg awsv2.Config) IAMAPI {
@@ -62,17 +143,22 @@ func CollectTrustWithConfig(ctx context.Context, cfg *config.Config, accounts []
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			localNodes, localRels, err := collectTrustFromClient(ctx, account.ID, newIAMClient(*account.Session), roleSem)
+			inventory := cfg != nil && cfg.Scan.IAMPolicyInventory
+			localNodes, localRels, err := collectTrustFromClient(ctx, account.ID, newIAMClient(*account.Session), inventory, roleSem)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = err
 				}
+				failed := CollectionStatus(account.ID, "", "iam", "global", "failed", err.Error())
+				nodeByARN[failed.ARN] = failed
 				mu.Unlock()
 				return
 			}
 
 			mu.Lock()
+			succeeded := CollectionStatus(account.ID, "", "iam", "global", "succeeded", "")
+			nodeByARN[succeeded.ARN] = succeeded
 			for _, n := range localNodes {
 				nodeByARN[n.ARN] = n
 			}
@@ -112,7 +198,7 @@ func CollectTrustWithConfig(ctx context.Context, cfg *config.Config, accounts []
 	return nodes, rels, nil
 }
 
-func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI, roleSem chan struct{}) ([]models.AssetNode, []models.Relationship, error) {
+func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI, inventory bool, roleSem chan struct{}) ([]models.AssetNode, []models.Relationship, error) {
 	// Paginate the (cheap) role listing first; listing failure is fatal for the account.
 	var roles []iamtypes.Role
 	var marker *string
@@ -136,10 +222,11 @@ func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI
 	var rels []models.Relationship
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	managedCache := newManagedPolicyCache()
 	for _, role := range roles {
 		role := role
 		principals := extractExternalPrincipals(accountID, awsv2.ToString(role.AssumeRolePolicyDocument))
-		if len(principals) == 0 {
+		if len(principals) == 0 && !inventory {
 			continue
 		}
 		wg.Add(1)
@@ -155,13 +242,39 @@ func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI
 				AccountID: accountID,
 				Region:    "global",
 				Properties: map[string]any{
-					"path": awsv2.ToString(role.Path),
+					"path":                  awsv2.ToString(role.Path),
+					"role_id":               awsv2.ToString(role.RoleId),
+					"trust_policy_document": decodeIAMDocument(awsv2.ToString(role.AssumeRolePolicyDocument)),
 				},
 			}
-			attachedPolicyNames, inlinePolicyDocuments, parseOK := collectRolePermissionInputs(ctx, client, roleNode.Name)
-			roleNode.Properties["attached_policy_names"] = attachedPolicyNames
-			roleNode.Properties["inline_policy_documents"] = inlinePolicyDocuments
-			roleNode.Properties["policy_parse_ok"] = parseOK
+			if role.CreateDate != nil {
+				roleNode.Properties["create_date"] = role.CreateDate.UTC().Format(time.RFC3339)
+			}
+			if role.RoleLastUsed != nil && role.RoleLastUsed.LastUsedDate != nil {
+				roleNode.Properties["role_last_used"] = role.RoleLastUsed.LastUsedDate.UTC().Format(time.RFC3339)
+			}
+			observePermissionsBoundary(&roleNode, role)
+			var policyNodes []models.AssetNode
+			var policyRels []models.Relationship
+			if inventory {
+				retrieveBoundaryDocument(ctx, client, &roleNode, managedCache)
+				bundle := collectRolePolicyEvidence(ctx, client, roleNode, managedCache)
+				roleNode.Properties["attached_policy_names"] = bundle.AttachedNames
+				roleNode.Properties["attached_policy_arns"] = bundle.AttachedARNs
+				roleNode.Properties["inline_policy_documents"] = bundle.InlineDocs
+				roleNode.Properties["policy_parse_ok"] = bundle.ParseOK
+				roleNode.Properties["policy_retrieval_status"] = bundle.RetrievalStatus
+				policyNodes, policyRels = policyEvidenceGraph(roleNode, bundle.Policies)
+				if boundaryNodes, boundaryRels := boundaryPolicyGraph(roleNode); len(boundaryNodes) > 0 {
+					policyNodes = append(policyNodes, boundaryNodes...)
+					policyRels = append(policyRels, boundaryRels...)
+				}
+			} else {
+				attachedPolicyNames, inlinePolicyDocuments, parseOK := collectRolePermissionInputs(ctx, client, roleNode.Name)
+				roleNode.Properties["attached_policy_names"] = attachedPolicyNames
+				roleNode.Properties["inline_policy_documents"] = inlinePolicyDocuments
+				roleNode.Properties["policy_parse_ok"] = parseOK
+			}
 
 			localPrincipals := make([]models.AssetNode, 0, len(principals))
 			localRels := make([]models.Relationship, 0, len(principals))
@@ -177,6 +290,7 @@ func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI
 						"principal_value": p.Value,
 					},
 				}
+				extNode, _ = models.ResolvePrincipalOwnership(extNode)
 				localPrincipals = append(localPrincipals, extNode)
 				localRels = append(localRels, models.Relationship{
 					SourceARN: roleNode.ARN,
@@ -191,8 +305,10 @@ func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI
 
 			mu.Lock()
 			roleNodes = append(roleNodes, roleNode)
+			roleNodes = append(roleNodes, policyNodes...)
 			principalNodes = append(principalNodes, localPrincipals...)
 			rels = append(rels, localRels...)
+			rels = append(rels, policyRels...)
 			mu.Unlock()
 		}()
 	}
@@ -409,6 +525,213 @@ func classifyFederatedPrincipal(value string) string {
 func externalPrincipalARN(principalType, principalValue string) string {
 	encoded := base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(principalValue)))
 	return "arn:cloudrift:external-principal:::" + principalType + "/" + encoded
+}
+
+func decodeIAMDocument(raw string) string {
+	decoded, err := url.QueryUnescape(strings.TrimSpace(raw))
+	if err != nil || strings.TrimSpace(decoded) == "" {
+		return strings.TrimSpace(raw)
+	}
+	return decoded
+}
+
+type managedPolicyCache struct {
+	mu       sync.Mutex
+	byARN    map[string]collectedPolicy
+	inflight map[string]*policyFetch
+}
+
+type policyFetch struct {
+	done   chan struct{}
+	result collectedPolicy
+}
+
+func newManagedPolicyCache() *managedPolicyCache {
+	return &managedPolicyCache{byARN: map[string]collectedPolicy{}, inflight: map[string]*policyFetch{}}
+}
+
+func (c *managedPolicyCache) get(ctx context.Context, client IAMAPI, arn, name, accountID string) collectedPolicy {
+	c.mu.Lock()
+	if existing, ok := c.byARN[arn]; ok {
+		c.mu.Unlock()
+		return existing
+	}
+	if call, ok := c.inflight[arn]; ok {
+		c.mu.Unlock()
+		select {
+		case <-call.done:
+			return call.result
+		case <-ctx.Done():
+			return collectedPolicy{ARN: arn, Name: name, PolicyType: models.PolicyTypeManaged, AccountID: accountID, RetrievalStatus: models.PolicyRetrievalMissing}
+		}
+	}
+	call := &policyFetch{done: make(chan struct{})}
+	c.inflight[arn] = call
+	c.mu.Unlock()
+
+	fetched := fetchManagedPolicy(ctx, client, arn, name, accountID)
+	c.mu.Lock()
+	c.byARN[arn] = fetched
+	delete(c.inflight, arn)
+	call.result = fetched
+	close(call.done)
+	c.mu.Unlock()
+	return fetched
+}
+
+func fetchManagedPolicy(ctx context.Context, client IAMAPI, arn, name, accountID string) collectedPolicy {
+	out := collectedPolicy{
+		ARN:             arn,
+		Name:            name,
+		PolicyType:      models.PolicyTypeManaged,
+		AccountID:       accountID,
+		RetrievalStatus: models.PolicyRetrievalMissing,
+	}
+	policy, err := client.GetPolicy(ctx, &iam.GetPolicyInput{PolicyArn: awsv2.String(arn)})
+	if err != nil || policy == nil || policy.Policy == nil {
+		return out
+	}
+	versionID := strings.TrimSpace(awsv2.ToString(policy.Policy.DefaultVersionId))
+	out.VersionID = versionID
+	if versionID == "" {
+		return out
+	}
+	ver, err := client.GetPolicyVersion(ctx, &iam.GetPolicyVersionInput{
+		PolicyArn: awsv2.String(arn),
+		VersionId: awsv2.String(versionID),
+	})
+	if err != nil || ver == nil || ver.PolicyVersion == nil {
+		return out
+	}
+	out.Document = decodeIAMDocument(awsv2.ToString(ver.PolicyVersion.Document))
+	if strings.TrimSpace(out.Document) == "" {
+		return out
+	}
+	if _, err := models.NormalizeIdentityPolicy(arn, models.PolicyTypeManaged, accountID, out.Document); err != nil {
+		out.RetrievalStatus = models.PolicyRetrievalMalformed
+		return out
+	}
+	out.RetrievalStatus = models.PolicyRetrievalOK
+	return out
+}
+
+type rolePolicyBundle struct {
+	AttachedNames   []string
+	AttachedARNs    []string
+	InlineDocs      []string
+	Policies        []collectedPolicy
+	ParseOK         bool
+	RetrievalStatus string
+}
+
+func (b *rolePolicyBundle) mark(status string) {
+	b.ParseOK = false
+	switch {
+	case b.RetrievalStatus == "" || b.RetrievalStatus == models.PolicyRetrievalOK:
+		b.RetrievalStatus = status
+	case b.RetrievalStatus != status:
+		b.RetrievalStatus = models.PolicyRetrievalPartial
+	}
+}
+
+func collectRolePolicyEvidence(ctx context.Context, client IAMAPI, role models.AssetNode, cache *managedPolicyCache) rolePolicyBundle {
+	bundle := rolePolicyBundle{ParseOK: true, RetrievalStatus: models.PolicyRetrievalOK}
+	var attachedMarker *string
+	for {
+		out, err := client.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
+			RoleName: awsv2.String(role.Name),
+			Marker:   attachedMarker,
+		})
+		if err != nil {
+			bundle.mark(models.PolicyRetrievalMissing)
+			break
+		}
+		for _, ap := range out.AttachedPolicies {
+			name := strings.TrimSpace(awsv2.ToString(ap.PolicyName))
+			arn := strings.TrimSpace(awsv2.ToString(ap.PolicyArn))
+			if name != "" {
+				bundle.AttachedNames = append(bundle.AttachedNames, name)
+			}
+			if arn == "" {
+				bundle.mark(models.PolicyRetrievalMissing)
+				bundle.Policies = append(bundle.Policies, collectedPolicy{
+					Name:            name,
+					PolicyType:      models.PolicyTypeManaged,
+					RetrievalStatus: models.PolicyRetrievalMissing,
+					RoleARN:         role.ARN,
+					AccountID:       role.AccountID,
+				})
+				continue
+			}
+			bundle.AttachedARNs = append(bundle.AttachedARNs, arn)
+			fetched := cache.get(ctx, client, arn, name, role.AccountID)
+			fetched.RoleARN = role.ARN
+			if fetched.RetrievalStatus != models.PolicyRetrievalOK {
+				bundle.mark(fetched.RetrievalStatus)
+			}
+			bundle.Policies = append(bundle.Policies, fetched)
+		}
+		if !out.IsTruncated || out.Marker == nil {
+			break
+		}
+		attachedMarker = out.Marker
+	}
+
+	inlineNames := make([]string, 0, 4)
+	var inlineMarker *string
+	for {
+		out, err := client.ListRolePolicies(ctx, &iam.ListRolePoliciesInput{
+			RoleName: awsv2.String(role.Name),
+			Marker:   inlineMarker,
+		})
+		if err != nil {
+			bundle.mark(models.PolicyRetrievalMissing)
+			break
+		}
+		for _, pn := range out.PolicyNames {
+			if s := strings.TrimSpace(pn); s != "" {
+				inlineNames = append(inlineNames, s)
+			}
+		}
+		if !out.IsTruncated || out.Marker == nil {
+			break
+		}
+		inlineMarker = out.Marker
+	}
+	for _, pn := range inlineNames {
+		policy := collectedPolicy{
+			Name:            pn,
+			PolicyType:      models.PolicyTypeInline,
+			RoleARN:         role.ARN,
+			AccountID:       role.AccountID,
+			RetrievalStatus: models.PolicyRetrievalMissing,
+		}
+		out, err := client.GetRolePolicy(ctx, &iam.GetRolePolicyInput{
+			RoleName:   awsv2.String(role.Name),
+			PolicyName: awsv2.String(pn),
+		})
+		if err != nil {
+			bundle.mark(models.PolicyRetrievalMissing)
+			bundle.Policies = append(bundle.Policies, policy)
+			continue
+		}
+		policy.Document = decodeIAMDocument(awsv2.ToString(out.PolicyDocument))
+		if _, nerr := models.NormalizeIdentityPolicy(inlinePolicyARN(role.AccountID, role.Name, pn), models.PolicyTypeInline, role.AccountID, policy.Document); nerr != nil {
+			policy.RetrievalStatus = models.PolicyRetrievalMalformed
+			bundle.mark(models.PolicyRetrievalMalformed)
+		} else {
+			policy.RetrievalStatus = models.PolicyRetrievalOK
+			bundle.InlineDocs = append(bundle.InlineDocs, policy.Document)
+		}
+		bundle.Policies = append(bundle.Policies, policy)
+	}
+	if bundle.RetrievalStatus == "" {
+		bundle.RetrievalStatus = models.PolicyRetrievalOK
+	}
+	sort.Strings(bundle.AttachedNames)
+	sort.Strings(bundle.AttachedARNs)
+	sort.Strings(bundle.InlineDocs)
+	return bundle
 }
 
 func collectRolePermissionInputs(ctx context.Context, client IAMAPI, roleName string) ([]string, []string, bool) {

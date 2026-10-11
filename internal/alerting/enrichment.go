@@ -61,6 +61,7 @@ func (e *Evaluator) maybeEnrichAlertWithBlast(
 		TopAccount:         firstOrEmpty(sum.TopImpactedAccounts),
 		DominantMotif:      dominantMotifFromSummary(sum),
 		ActionLabel:        strings.TrimSpace(sum.RecommendedActionLabel),
+		PathValidity:       strings.TrimSpace(sum.PathValidity),
 	}
 	enriched := blastBullets(bs)
 	// Keep alerts concise: preserve one base bullet and add up to two blast bullets.
@@ -89,6 +90,9 @@ func (e *Evaluator) maybeEnrichAlertWithBlast(
 }
 
 func dominantMotifFromSummary(sum schema.BlastRadiusSummary) string {
+	if validity := strings.TrimSpace(sum.PathValidity); validity != "" && validity != "VALIDATED_POSSIBLE" {
+		return ""
+	}
 	if motif := strings.TrimSpace(sum.DominantMotif); motif != "" {
 		return strings.ToUpper(motif)
 	}
@@ -112,6 +116,11 @@ func dominantMotifFromSummary(sum schema.BlastRadiusSummary) string {
 func blastBullets(bs *AlertBlastSummary) []string {
 	if bs == nil {
 		return nil
+	}
+	if validity := strings.TrimSpace(bs.PathValidity); validity != "" && validity != "VALIDATED_POSSIBLE" {
+		return []string{
+			"Topology shows " + itoa(bs.ReachableResources) + " confirmed resources across " + itoa(bs.ReachableAccounts) + " accounts. No validated attack path is established.",
+		}
 	}
 	out := []string{
 		"Can reach " + itoa(bs.ReachableResources) + " resources across " + itoa(bs.ReachableAccounts) + " accounts.",

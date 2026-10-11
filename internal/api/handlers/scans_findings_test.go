@@ -17,6 +17,42 @@ import (
 	"github.com/Zero0x00/cloudrift/internal/models"
 )
 
+func TestSyntheticScanDisablesRemediationExecution(t *testing.T) {
+	dir := t.TempDir()
+	writeScan(t, dir, "demo-synthetic", time.Date(2026, 4, 18, 10, 0, 0, 0, time.UTC), []models.Finding{{
+		ID: "f1", Title: "demo", Severity: models.SeverityHigh, RemediationCmd: "aws s3 rb s3://example --force",
+	}})
+	metaPath := filepath.Join(dir, "demo-synthetic", "scan-metadata.json")
+	var meta models.ScanSnapshot
+	b, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &meta); err != nil {
+		t.Fatal(err)
+	}
+	meta.Synthetic = true
+	meta.DataOrigin = "synthetic-demo"
+	writeJSONFile(t, metaPath, meta)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/scans", nil)
+	rr := httptest.NewRecorder()
+	ListScans(dir).ServeHTTP(rr, req)
+	var list schema.ScanListResponse
+	mustDecode(t, rr, &list)
+	if len(list.Items) != 1 || !list.Items[0].Synthetic || list.Items[0].DataOrigin != "synthetic-demo" {
+		t.Fatalf("list item: %+v", list.Items)
+	}
+
+	rr = httptest.NewRecorder()
+	ListRemediationGroups(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/demo-synthetic/remediation-groups", nil), "id", "demo-synthetic"))
+	var groups schema.RemediationGroupsResponse
+	mustDecode(t, rr, &groups)
+	if !groups.Synthetic || groups.ExecutionEnabled == nil || *groups.ExecutionEnabled {
+		t.Fatalf("remediation execution: %+v", groups)
+	}
+}
+
 func TestListScansNewestFirst(t *testing.T) {
 	dir := t.TempDir()
 	writeScan(t, dir, "scan-1", time.Date(2026, 4, 18, 10, 0, 0, 0, time.UTC), []models.Finding{{ID: "f1", Title: "one", Severity: models.SeverityHigh}})

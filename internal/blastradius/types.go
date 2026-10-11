@@ -1,12 +1,17 @@
 package blastradius
 
-// BlastMode is the viewer mode: attack_path emphasizes a shortest / highest-signal chain;
-// blast_radius emphasizes breadth and impacted accounts.
+// BlastMode selects which question the explorer answers.
+// blast_radius is topology. identity_exposure is unevaluated trust configuration.
+// attack_path contains only evidence-backed attacker transitions.
 type BlastMode string
 
 const (
-	ModeBlastRadius BlastMode = "blast_radius"
-	ModeAttackPath  BlastMode = "attack_path"
+	ModeBlastRadius      BlastMode = "blast_radius"
+	ModeIdentityExposure BlastMode = "identity_exposure"
+	ModeAttackPath       BlastMode = "attack_path"
+	// ModePermissionBlast is a hypothetical permission impact assessment.
+	// It does not replace topology, identity exposure, or attack path.
+	ModePermissionBlast BlastMode = "permission_blast_radius"
 )
 
 // UnavailableReason is returned when Neo4j is not configured, connectivity fails, or

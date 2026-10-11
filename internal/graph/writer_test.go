@@ -87,16 +87,29 @@ func TestCompileWriteScan_FindingAffectsAssetWhenARNMatches(t *testing.T) {
 	}
 }
 
-func TestCompileWriteScan_SkipsAffectsWhenNoMatchingAsset(t *testing.T) {
+func TestCompileWriteScan_UnresolvedFindingTargetIsExplicit(t *testing.T) {
 	snap := models.ScanSnapshot{ScanID: "s1", Timestamp: time.Unix(1, 0).UTC(), AccountIDs: []string{"123"}}
 	findings := []models.Finding{
 		{ID: "f1", Title: "t", AffectedARN: "arn:missing", AccountID: "123", ScanID: "s1"},
 	}
-	stmts := CompileWriteScan(snap, nil, nil, findings)
-	for _, st := range stmts {
-		if strings.Contains(st.Cypher, "AFFECTS") {
-			t.Fatalf("should not emit AFFECTS when no asset matches: %q", st.Cypher)
+	proj := CompileScanProjection(snap, nil, nil, findings)
+	if proj.Integrity.FindingsUnresolvedTargets != 1 || proj.Integrity.FindingsLinked != 0 {
+		t.Fatalf("integrity: %+v", proj.Integrity)
+	}
+	var affects, unresolved bool
+	for _, st := range proj.Statements {
+		if strings.Contains(st.Cypher, "AFFECTS") && st.Params["affected_arn"] == "arn:missing" {
+			affects = true
 		}
+		if strings.Contains(st.Cypher, "MERGE (x:Asset") && st.Params["arn"] == "arn:missing" {
+			if st.Params["resolution_status"] != "unresolved" {
+				t.Fatalf("missing finding target must be an unresolved reference, got %#v", st.Params)
+			}
+			unresolved = true
+		}
+	}
+	if !affects || !unresolved {
+		t.Fatalf("expected AFFECTS to an unresolved asset, affects=%v unresolved=%v", affects, unresolved)
 	}
 }
 

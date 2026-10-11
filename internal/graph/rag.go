@@ -188,8 +188,10 @@ WITH bag, size(bag) AS vector_global_match_count
 UNWIND bag AS hit
 WITH vector_global_match_count, hit.n AS f, hit.s AS score
 MATCH (s:ScanSnapshot {scan_id: $scan_id})-[:CAPTURED]->(f)
-OPTIONAL MATCH (f)-[:AFFECTS]->(asset:Asset)
-OPTIONAL MATCH (asset)-[:OWNED_BY]->(account:AwsAccount)
+OPTIONAL MATCH (f)-[aff:AFFECTS]->(asset:Asset)
+WHERE asset.scan_id = f.scan_id AND aff.scan_id = f.scan_id
+OPTIONAL MATCH (asset)-[own:OWNED_BY]->(account:AwsAccount)
+WHERE own.scan_id = f.scan_id
 RETURN f.id AS finding_id,
        f.title AS title,
        f.severity AS severity,

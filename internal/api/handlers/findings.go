@@ -12,6 +12,7 @@ import (
 
 	"github.com/Zero0x00/cloudrift/internal/api/schema"
 	"github.com/Zero0x00/cloudrift/internal/blastradius"
+	"github.com/Zero0x00/cloudrift/internal/ciem"
 	"github.com/Zero0x00/cloudrift/internal/models"
 	"github.com/Zero0x00/cloudrift/internal/scans"
 )
@@ -122,12 +123,21 @@ func GetFinding(outputDir string) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "scan_load_error", "failed to load scan artifacts", nil)
 			return
 		}
+		assets, assetErr := scans.LoadAssets(outputDir, scanID)
+		rels, relErr := scans.LoadRelationships(outputDir, scanID)
+		if assetErr != nil || relErr != nil {
+			assets, rels = nil, nil
+		}
 
 		for _, finding := range findings {
 			if finding.ID != findingID {
 				continue
 			}
 			detail := toFindingDetailItem(scanID, finding)
+			if len(assets) > 0 {
+				assessment := ciem.Assess(scanID, finding, assets, rels, findings)
+				detail.CIEM = &assessment
+			}
 			writeJSON(w, http.StatusOK, schema.FindingDetailResponse{Item: detail})
 			return
 		}

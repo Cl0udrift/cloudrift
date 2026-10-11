@@ -49,6 +49,7 @@ func newRootCommand() *cobra.Command {
 
 	var outputDir string
 	var neo4jEnabled bool
+	var ciemProfile bool
 	scanCmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Run orphaned-edge scan",
@@ -63,6 +64,9 @@ func newRootCommand() *cobra.Command {
 			noHTTP, _ := cmd.Flags().GetBool("no-http")
 			if c, _ := cmd.Flags().GetInt("concurrency"); c > 0 {
 				cfg.Scan.HTTPProbeConcurrency = c
+			}
+			if ciemProfile {
+				config.EnableCIEM(cfg)
 			}
 			if err := ensureValidSession(cmd.Context(), cfg.AWS.ManagementProfile, cmd); err != nil {
 				return err
@@ -83,6 +87,7 @@ func newRootCommand() *cobra.Command {
 	scanCmd.Flags().Bool("no-http", false, "Skip HTTP probing")
 	scanCmd.Flags().Int("concurrency", 50, "HTTP probe concurrency")
 	scanCmd.Flags().BoolVar(&neo4jEnabled, "neo4j", false, "Write scan projection to Neo4j (Phase 3, optional)")
+	scanCmd.Flags().BoolVar(&ciemProfile, "ciem", false, "CIEM profile: collect IAM policy inventory. Does not change the legacy default.")
 
 	var reportScanID, format, reportOut string
 	reportCmd := &cobra.Command{

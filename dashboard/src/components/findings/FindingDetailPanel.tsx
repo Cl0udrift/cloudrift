@@ -71,6 +71,60 @@ function EvidenceBlock({ evidence }: { evidence: Record<string, unknown> }) {
   );
 }
 
+function CIEMBlock({ ciem }: { ciem: NonNullable<FindingDetailItem["ciem"]> }) {
+  if (!ciem.applicable) {
+    return <p className="text-slate-500">This finding is outside the external-access CIEM assessment.</p>;
+  }
+  return (
+    <div className="space-y-2 text-xs text-slate-700 dark:text-slate-300">
+      <p>{ciem.assumption}</p>
+      <p>
+        Entry feasibility: {ciem.entry_feasibility}. Delegation: {ciem.delegation_breadth}. Principal class: {ciem.principal_class}.
+      </p>
+      <p>
+        Hypothetical impact: {ciem.validated_allowed} validated allows, {ciem.validated_denied} denied, {ciem.conditional} conditional, {ciem.unknown} unknown.
+        Complete resource paths: {ciem.resource_impact_paths}. Validated transitions: {ciem.validated_transitions}. Additional reachable roles: {ciem.reachable_identities}.
+      </p>
+      <p>
+        Privilege escalation: {ciem.privilege_escalation || "NOT_ASSESSED"}. A validated resource read is not privilege escalation.
+        Identity movement: {ciem.validated_identity_movement ? "validated" : "none"}. Resource access: {ciem.validated_resource_access ? "validated" : "none"}.
+      </p>
+      {(ciem.unique_impacted_resources ?? []).length > 0 ? (
+        <p className="break-all">Collected resources: {ciem.unique_impacted_resources?.join(", ")}</p>
+      ) : null}
+      {(ciem.broad_privilege_candidates ?? []).length > 0 ? (
+        <p>Administrative candidates, not validated access: {ciem.broad_privilege_candidates?.join(", ")}</p>
+      ) : null}
+      {(ciem.unsupported_actions ?? []).length > 0 ? <p>Unsupported actions: {ciem.unsupported_actions?.join(", ")}</p> : null}
+      {(ciem.evidence_coverage?.lines ?? []).map((line) => (
+        <p key={line}>{line}</p>
+      ))}
+      {(ciem.bucket_scope_notes ?? []).map((note) => (
+        <p key={note} className="break-all">
+          {note}
+        </p>
+      ))}
+      {(ciem.missing_evidence ?? []).slice(0, 4).map((note) => (
+        <p key={note}>Missing or limited evidence: {note}</p>
+      ))}
+      {(ciem.sibling_finding_ids ?? []).length > 0 ? (
+        <p>Same role impact is shared with findings {ciem.sibling_finding_ids?.join(", ")}. Resources are not counted again.</p>
+      ) : null}
+      {ciem.truncated ? <p>Analysis truncated. Counts are incomplete.</p> : null}
+      {(ciem.recommendations ?? []).map((rec) => (
+        <div key={rec.id} className="rounded border border-slate-200 p-2 dark:border-slate-700">
+          <p className="font-medium">{rec.title}</p>
+          <p>{rec.issue}</p>
+          <p>Change: {rec.change_target}. Expected change: {rec.expected_reduction}</p>
+          <p>Risk: {rec.operational_risk}</p>
+          <p>Verify: {rec.verification}</p>
+          <p>{rec.executable || ciem.execution_enabled ? "Executable" : "Read-only. This recommendation is not executed."}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function FindingDetailPanelContent({
   item,
   scanId,
@@ -110,6 +164,11 @@ export function FindingDetailPanelContent({
       {item.trust ? (
         <Section title="Trust (external access)">
           <TrustBlock trust={item.trust} />
+        </Section>
+      ) : null}
+      {item.ciem ? (
+        <Section title="CIEM assessment">
+          <CIEMBlock ciem={item.ciem} />
         </Section>
       ) : null}
       {item.evidence && Object.keys(item.evidence).length > 0 ? (

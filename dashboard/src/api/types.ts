@@ -12,6 +12,9 @@ export interface ScanListItem {
   critical_count: number;
   high_count: number;
   total_monthly_cost_usd: number;
+  synthetic?: boolean;
+  data_origin?: string;
+  scenario_id?: string;
 }
 
 export interface ScanListResponse {
@@ -211,6 +214,228 @@ export interface FindingDetailItem extends FindingListItem {
   scan_id: string;
   evidence?: Record<string, unknown>;
   trust?: TrustDisplay;
+  ciem?: CIEMAssessment;
+}
+
+export interface CIEMRecommendation {
+  id: string;
+  title: string;
+  issue: string;
+  evidence?: string[];
+  change_target?: string;
+  affected?: string;
+  expected_reduction?: string;
+  operational_risk?: string;
+  verification?: string;
+  executable: boolean;
+}
+
+export interface IdentityListItem {
+  role_arn: string;
+  account_id: string;
+  account_name?: string;
+  name: string;
+  path?: string;
+  classifications: string[];
+  trusted_principal_count: number;
+  broad_candidates?: string[];
+  workload_count: number;
+  evidence_completeness: string;
+  collection_status: string;
+}
+
+export interface IdentityListResponse {
+  scan_id: string;
+  items: IdentityListItem[];
+  page: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+  coverage_note: string;
+}
+
+export interface WorkloadListResponse {
+  scan_id: string;
+  items: WorkloadAttachment[];
+  page: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+  unique_workloads: number;
+  unique_roles: number;
+  shared_role_count: number;
+  coverage_note: string;
+}
+
+export interface WorkloadAttachment {
+  workload_arn: string;
+  workload_type: string;
+  workload_name?: string;
+  account_id?: string;
+  region?: string;
+  role_arn?: string;
+  mechanism: string;
+  kind: string;
+  status?: string;
+  relationship_id?: string;
+  runtime_observed?: string;
+  revision?: string;
+  cluster?: string;
+  namespace?: string;
+  service_account?: string;
+  note?: string;
+}
+
+export interface InventoryServiceCard {
+  service: string;
+  name: string;
+  count: number;
+  resource_types: string[];
+  coverage: string;
+  coverage_text: string;
+  finding_count: number;
+}
+
+export interface InventoryCategory {
+  category: string;
+  name: string;
+  count: number;
+}
+
+export interface InventorySummary {
+  scan_id: string;
+  timestamp?: string;
+  synthetic: boolean;
+  data_origin?: string;
+  total_assets: number;
+  account_count: number;
+  region_count: number;
+  service_count: number;
+  accounts_note: string;
+  coverage_note: string;
+  services: InventoryServiceCard[];
+  categories: InventoryCategory[];
+  distribution: { service: string; name: string; count: number }[];
+}
+
+export interface InventoryResource {
+  id: string;
+  arn: string;
+  service: string;
+  service_name: string;
+  category: string;
+  category_name: string;
+  record_kind: string;
+  resource_type: string;
+  resource_type_name: string;
+  name: string;
+  account_id?: string;
+  region?: string;
+  state?: string;
+  collected_at?: string;
+  collection_status?: string;
+  finding_count: number;
+  relationship_count: number;
+  identity_associated: boolean;
+}
+
+export interface InventoryListResponse {
+  scan_id: string;
+  items: InventoryResource[];
+  page: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+  coverage_note: string;
+}
+
+export interface InventoryDetail {
+  scan_id: string;
+  resource: InventoryResource;
+  findings: { id: string; title: string; severity: string; module: string }[];
+  relationships: { rel_type: string; direction: string; other_id: string; other_type?: string; semantic: string; note?: string }[];
+  identity_links: { role_arn: string; mechanism?: string; label: string }[];
+  evidence: Record<string, unknown>;
+  evidence_note: string;
+}
+
+export interface ConfiguredTrust {
+  principal_arn?: string;
+  principal_type?: string;
+  kind: string;
+  scope: string;
+  note?: string;
+}
+
+export interface RoleEntitlementProfile {
+  scan_id: string;
+  role_arn: string;
+  account_id: string;
+  name: string;
+  path?: string;
+  classifications: string[];
+  assumption: string;
+  collection_status: string;
+  policy_retrieval: string;
+  attached_policies?: string[];
+  inline_policy_count: number;
+  broad_candidates?: string[];
+  candidate_note: string;
+  trusts: ConfiguredTrust[];
+  workloads?: WorkloadAttachment[];
+  workload_count: number;
+  shared_role: boolean;
+  attachment_note?: string;
+  evidence_coverage: CIEMEvidenceCoverage;
+  recommendations?: CIEMRecommendation[];
+  execution_enabled: boolean;
+  impact?: CIEMAssessment;
+}
+
+export interface CIEMAssessment {
+  applicable: boolean;
+  kind: string;
+  finding_id: string;
+  role_arn?: string;
+  external_principal?: string;
+  principal_class?: string;
+  delegation_breadth?: string;
+  trust_conditions?: string[];
+  unknown_trust_restrictions?: string[];
+  entry_feasibility?: string;
+  assumption?: string;
+  policy_retrieval?: string;
+  broad_privilege_candidates?: string[];
+  validated_allowed: number;
+  validated_denied: number;
+  conditional: number;
+  unknown: number;
+  unsupported_actions?: string[];
+  bucket_scope_notes?: string[];
+  unique_impacted_resources?: string[];
+  reachable_identities: number;
+  resource_impact_paths: number;
+  validated_transitions: number;
+  privilege_escalation?: string;
+  validated_identity_movement: boolean;
+  validated_resource_access: boolean;
+  truncated: boolean;
+  missing_evidence?: string[];
+  coverage_notes?: string[];
+  evidence_coverage?: CIEMEvidenceCoverage;
+  shared_impact_key?: string;
+  sibling_finding_ids?: string[];
+  recommendations?: CIEMRecommendation[];
+  execution_enabled: boolean;
+}
+
+export interface CIEMEvidenceCoverage {
+  permissions_boundary?: string;
+  organizations_scp?: string;
+  organizations_rcp?: string;
+  session_context?: string;
+  s3_object_inventory?: string;
+  lines?: string[];
 }
 
 export interface FindingDetailResponse {
@@ -565,6 +790,55 @@ export interface AlertCatalogResponse {
 
 export type BlastRootKind = "finding" | "external_entity" | "principal";
 
+export type BlastAnalysisMode = "blast_radius" | "identity_exposure" | "attack_path" | "permission_blast_radius";
+
+export interface PermissionDecision {
+  action: string;
+  category: string;
+  resource_arn: string;
+  account_id?: string;
+  status: string;
+  reason: string;
+  evidence?: string[];
+  same_account: boolean;
+  classification?: string;
+}
+
+export interface PermissionBucketScope {
+  bucket_arn: string;
+  account_id?: string;
+  note: string;
+}
+
+export interface PermissionBlastReport {
+  assumed_compromise: boolean;
+  assumption: string;
+  role_arn: string;
+  account_id?: string;
+  session_context_source: string;
+  resources_evaluated: number;
+  allowed_resource_count: number;
+  denied_resource_count: number;
+  conditional_resource_count: number;
+  unknown_resource_count: number;
+  unresolved_reference_count: number;
+  decisions?: PermissionDecision[];
+  bucket_scopes?: PermissionBucketScope[];
+  broad_privilege_candidates?: string[];
+  cross_account_resource_arns?: string[];
+  sensitive_resource_arns?: string[];
+  unsupported_actions?: string[];
+  coverage_notes?: string[];
+  truncated: boolean;
+  analysis_complete: boolean;
+  impact_summary: string;
+  permission_breadth: string;
+  validated_resource_impact: number;
+  potential_administrative_control: boolean;
+  evaluation_coverage: string;
+  evidence_confidence: string;
+}
+
 export interface BlastRadiusSummary {
   root_type: BlastRootKind;
   root_id: string;
@@ -586,6 +860,64 @@ export interface BlastRadiusSummary {
   source_principal_arn?: string;
   source_principal_id?: string;
   source_entity_id?: string;
+  analysis_kind?: string;
+  path_validity?: string;
+  missing_prerequisites?: string[];
+  confirmed_resource_count?: number;
+  unresolved_reference_count?: number;
+  attack_path_count?: number;
+  validated_transition_count?: number;
+  reachable_identity_count?: number;
+  analysis_complete?: boolean;
+  starting_assumption?: string;
+  permission_blast?: PermissionBlastReport;
+  identity_attack?: IdentityAttackReport;
+}
+
+export interface IdentityAttackTransition {
+  technique: string;
+  source_principal: string;
+  target_arn: string;
+  status: string;
+  reason: string;
+  decision_id?: string;
+  evidence_fingerprint?: string;
+  context_fingerprint?: string;
+  evidence?: string[];
+  missing_prerequisites?: string[];
+  same_account: boolean;
+  feasibility: string;
+  cycle?: boolean;
+  depth: number;
+  session_policy_state?: string;
+  session_origin?: string;
+  session_evidence_class?: string;
+}
+
+export interface IdentityAttackReport {
+  assumption: string;
+  initial_principal: string;
+  session_context_source: string;
+  transitions?: IdentityAttackTransition[];
+  validated_role_transitions: number;
+  conditional_role_transitions: number;
+  unknown_transitions: number;
+  denied_transitions: number;
+  impacted_resources?: string[];
+  validated_transition_count?: number;
+  resource_impact_path_count?: number;
+  resource_impact_paths_discovered?: number;
+  reachable_identity_count?: number;
+  privilege_escalation?: string;
+  validated_identity_movement?: boolean;
+  validated_resource_access?: boolean;
+  cross_account_transitions: number;
+  missing_prerequisites?: string[];
+  unsupported_techniques?: string[];
+  truncated: boolean;
+  coverage_notes?: string[];
+  states_explored: number;
+  paths?: { id: string; label: string; summary: string; validity?: string; node_ids: string[]; evidence?: string[] }[];
 }
 
 export interface BlastFocus {
@@ -611,6 +943,8 @@ export interface BlastGraphNode {
   is_external: boolean;
   impact_score?: number;
   display_name_hint?: string;
+  resolution_status?: string;
+  ownership_status?: string;
   community?: number | null;
   centrality?: number | null;
 }
@@ -621,6 +955,12 @@ export interface BlastGraphEdge {
   target: string;
   type: string;
   label: string;
+  graph_relationship?: string;
+  properties?: Record<string, unknown>;
+  relationship_class?: string;
+  path_validity?: string;
+  missing_prerequisites?: string[];
+  evidence?: string[];
   is_critical_path: boolean;
   explanation?: string;
 }
@@ -641,6 +981,9 @@ export interface BlastPathVariant {
   edge_ids: string[];
   dominant_semantics?: string[];
   risk_hint?: string;
+  validity?: string;
+  missing_prerequisites?: string[];
+  evidence?: string[];
 }
 
 export interface BlastExplorerResponse {

@@ -46,6 +46,7 @@ func CollectEdgeWithConfig(ctx context.Context, cfg *config.Config, accounts []A
 					if firstErr == nil {
 						firstErr = err
 					}
+					nodes = append(nodes, CollectionStatus(account.ID, "", "cloudfront", "global", "failed", err.Error()))
 					mu.Unlock()
 					return
 				}
@@ -90,6 +91,7 @@ func CollectEdgeWithConfig(ctx context.Context, cfg *config.Config, accounts []A
 			}
 			mu.Lock()
 			nodes = append(nodes, localNodes...)
+			nodes = append(nodes, CollectionStatus(account.ID, "", "cloudfront", "global", "succeeded", ""))
 			rels = append(rels, localRels...)
 			mu.Unlock()
 		}()
@@ -113,4 +115,3 @@ func bucketFromOrigin(origin string) string {
 	}
 	return origin
 }
-

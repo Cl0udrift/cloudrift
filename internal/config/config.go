@@ -19,6 +19,11 @@ type Config struct {
 		RoleAssumptionConcurrency int    `toml:"role_assumption_concurrency"`
 		HTTPTimeoutSeconds        int    `toml:"http_timeout_seconds"`
 		UserAgent                 string `toml:"user_agent"`
+		// IAMPolicyInventory collects every IAM role and its inline and managed
+		// policy documents. External-access findings still come only from roles
+		// that trust an external principal. Default false preserves the
+		// external-trust collection path.
+		IAMPolicyInventory bool `toml:"iam_policy_inventory"`
 	} `toml:"scan"`
 	Cost struct {
 		Currency                  string  `toml:"currency"`
@@ -103,6 +108,18 @@ func Default() *Config {
 	c.Synthesis.APIKeyEnv = "ANTHROPIC_API_KEY"
 	c.Synthesis.MaxTokens = 2048
 	return c
+}
+
+// EnableCIEM turns on IAM policy inventory plus the read-only CIEM evidence
+// collectors: permissions-boundary documents and organization SCP/RCP documents.
+// Legacy scans stay unchanged until this is selected with --ciem or by setting
+// scan.iam_policy_inventory. Session policies are still not collected from STS.
+// A denied Organizations call is not treated as proof that no SCP or RCP exists.
+func EnableCIEM(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	cfg.Scan.IAMPolicyInventory = true
 }
 
 // Neo4jPassword resolves the Neo4j password from the first available source: the env var

@@ -82,6 +82,7 @@ type AlertBlastSummary struct {
 	TopAccount         string `json:"top_account,omitempty"`
 	DominantMotif      string `json:"dominant_motif,omitempty"`
 	ActionLabel        string `json:"action_label,omitempty"`
+	PathValidity       string `json:"path_validity,omitempty"`
 }
 
 type AlertContext struct {

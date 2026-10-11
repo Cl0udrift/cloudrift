@@ -2,6 +2,8 @@ import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./layout/AppLayout";
 import { AccountsPage } from "./pages/Accounts";
+import { IdentitiesPage } from "./pages/Identities";
+import { InventoryPage } from "./pages/Inventory";
 import { DiffPage } from "./pages/Diff";
 import { FindingsPage } from "./pages/Findings";
 import { OverviewPage } from "./pages/Overview";
@@ -26,6 +28,8 @@ export default function App() {
         <Route path="/findings" element={<FindingsPage />} />
         <Route path="/triage" element={<FindingsPage triage />} />
         <Route path="/accounts" element={<AccountsPage />} />
+        <Route path="/identities" element={<IdentitiesPage />} />
+        <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/diff" element={<DiffPage />} />
         <Route path="/trust-report" element={<TrustReportPage />} />
         <Route path="/external-entities" element={<ExternalEntitiesPage />} />

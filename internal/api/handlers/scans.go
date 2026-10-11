@@ -177,6 +177,9 @@ func mapScanListItem(scanID string, meta *models.ScanSnapshot, findings []models
 		Timestamp:    meta.Timestamp,
 		AccountIDs:   accountIDs,
 		FindingCount: len(findings),
+		Synthetic:    meta.Synthetic,
+		DataOrigin:   meta.DataOrigin,
+		ScenarioID:   meta.ScenarioID,
 	}
 	if item.Timestamp.IsZero() {
 		item.Timestamp = time.Unix(0, 0).UTC()

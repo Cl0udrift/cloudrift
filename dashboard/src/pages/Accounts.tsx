@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { formatQueryError } from "../api/httpError";
 import type { AccountBreakdownItem } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
@@ -43,7 +44,7 @@ export function AccountsPage() {
           />
           <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {accountItems.map((account) => (
-              <AccountCard key={account.account_id} account={account} />
+              <AccountCard key={account.account_id} account={account} scanId={selectedScanId} />
             ))}
           </div>
         </div>
@@ -54,7 +55,7 @@ export function AccountsPage() {
   );
 }
 
-function AccountCard({ account }: { account: AccountBreakdownItem }) {
+function AccountCard({ account, scanId }: { account: AccountBreakdownItem; scanId: string | null }) {
   const title = account.account_name?.trim() || account.account_id;
 
   return (
@@ -87,6 +88,14 @@ function AccountCard({ account }: { account: AccountBreakdownItem }) {
       <div className="mt-4 border-t border-slate-200 pt-3 dark:border-t-slate-800/90">
         <p className="hs-label !mb-0">Top finding</p>
         <p className="mt-1 text-sm text-slate-800 dark:text-slate-200">{account.top_finding?.trim() || "—"}</p>
+        {scanId ? (
+          <Link
+            className="mt-3 inline-block text-sm text-cyan-800 hover:underline dark:text-cyan-300"
+            to={`/identities?scan_id=${encodeURIComponent(scanId)}&account_id=${encodeURIComponent(account.account_id)}`}
+          >
+            IAM roles
+          </Link>
+        ) : null}
       </div>
     </article>
   );

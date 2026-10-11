@@ -4,6 +4,12 @@ import type {
   ExternalEntitiesQueryParams,
   ExternalEntitiesResponse,
   FindingDetailResponse,
+  IdentityListResponse,
+  InventoryDetail,
+  InventoryListResponse,
+  InventorySummary,
+  RoleEntitlementProfile,
+  WorkloadListResponse,
   FindingsListResponse,
   FindingsQueryParams,
   TopFixesResponse,
@@ -27,6 +33,7 @@ import type {
   AlertRuleResponse,
   AlertRulesResponse,
   AlertTestResponse,
+  BlastAnalysisMode,
   BlastExplorerResponse,
   BlastExplorerExpansionResponse,
   BlastRadiusSummary,
@@ -114,7 +121,7 @@ export const apiClient = {
   getBlastRadiusSummary(
     scanId: string,
     findingId: string,
-    params: { mode?: "blast_radius" | "attack_path" } = {}
+    params: { mode?: BlastAnalysisMode } = {}
   ): Promise<BlastRadiusSummary> {
     return fetchJSON<BlastRadiusSummary>(
       `/scans/${encodeURIComponent(scanId)}/findings/${encodeURIComponent(findingId)}/blast-radius/summary${makeQueryString(
@@ -125,7 +132,7 @@ export const apiClient = {
   getBlastRadiusExplorer(
     scanId: string,
     findingId: string,
-    params: { mode?: "blast_radius" | "attack_path" } = {}
+    params: { mode?: BlastAnalysisMode } = {}
   ): Promise<BlastExplorerResponse> {
     return fetchJSON<BlastExplorerResponse>(
       `/scans/${encodeURIComponent(scanId)}/findings/${encodeURIComponent(findingId)}/blast-radius/explorer${makeQueryString(
@@ -136,7 +143,7 @@ export const apiClient = {
   getEntityBlastSummary(
     scanId: string,
     entityId: string,
-    params: { mode?: "blast_radius" | "attack_path" } = {}
+    params: { mode?: BlastAnalysisMode } = {}
   ): Promise<BlastRadiusSummary> {
     return fetchJSON<BlastRadiusSummary>(
       `/scans/${encodeURIComponent(scanId)}/blast-radius/entity/summary${makeQueryString({
@@ -148,7 +155,7 @@ export const apiClient = {
   getEntityBlastExplorer(
     scanId: string,
     entityId: string,
-    params: { mode?: "blast_radius" | "attack_path" } = {}
+    params: { mode?: BlastAnalysisMode } = {}
   ): Promise<BlastExplorerResponse> {
     return fetchJSON<BlastExplorerResponse>(
       `/scans/${encodeURIComponent(scanId)}/blast-radius/entity/explorer${makeQueryString({
@@ -160,7 +167,7 @@ export const apiClient = {
   getPrincipalBlastSummary(
     scanId: string,
     principalId: string,
-    params: { mode?: "blast_radius" | "attack_path" } = {}
+    params: { mode?: BlastAnalysisMode } = {}
   ): Promise<BlastRadiusSummary> {
     return fetchJSON<BlastRadiusSummary>(
       `/scans/${encodeURIComponent(scanId)}/principals/blast-radius/summary${makeQueryString({
@@ -172,7 +179,7 @@ export const apiClient = {
   getPrincipalBlastExplorer(
     scanId: string,
     principalId: string,
-    params: { mode?: "blast_radius" | "attack_path" } = {}
+    params: { mode?: BlastAnalysisMode } = {}
   ): Promise<BlastExplorerResponse> {
     return fetchJSON<BlastExplorerResponse>(
       `/scans/${encodeURIComponent(scanId)}/principals/blast-radius/explorer${makeQueryString({
@@ -185,7 +192,7 @@ export const apiClient = {
     scanId: string,
     params: {
       node_id: string;
-      mode?: "blast_radius" | "attack_path";
+      mode?: BlastAnalysisMode;
       finding_id?: string;
       entity_id?: string;
       principal_id?: string;
@@ -284,6 +291,36 @@ export const apiClient = {
   },
   getAlertEvents(limit = 50): Promise<AlertEventsResponse> {
     return fetchJSON<AlertEventsResponse>(`/alerts/events${makeQueryString({ limit })}`);
+  },
+  listIdentities(
+    scanId: string,
+    params: { account_id?: string; region?: string; purpose?: string; trust?: string; broad?: string; evidence?: string; workload?: string; type?: string; q?: string; page?: number; page_size?: number }
+  ): Promise<IdentityListResponse> {
+    return fetchJSON<IdentityListResponse>(`/scans/${encodeURIComponent(scanId)}/identities${makeQueryString(params)}`);
+  },
+  getIdentityProfile(scanId: string, arn: string, impact: boolean, workloadArn?: string): Promise<RoleEntitlementProfile> {
+    return fetchJSON<RoleEntitlementProfile>(
+      `/scans/${encodeURIComponent(scanId)}/identities/profile${makeQueryString({
+        arn,
+        impact: impact ? "true" : undefined,
+        workload_arn: impact && workloadArn ? workloadArn : undefined
+      })}`
+    );
+  },
+  inventorySummary(scanId: string, params: { account_id?: string; region?: string }): Promise<InventorySummary> {
+    return fetchJSON<InventorySummary>(`/scans/${encodeURIComponent(scanId)}/inventory/summary${makeQueryString(params)}`);
+  },
+  inventoryResources(
+    scanId: string,
+    params: { account_id?: string; region?: string; service?: string; resource_type?: string; category?: string; q?: string; page?: number; page_size?: number; sort?: string }
+  ): Promise<InventoryListResponse> {
+    return fetchJSON<InventoryListResponse>(`/scans/${encodeURIComponent(scanId)}/inventory/resources${makeQueryString(params)}`);
+  },
+  inventoryResource(scanId: string, id: string): Promise<InventoryDetail> {
+    return fetchJSON<InventoryDetail>(`/scans/${encodeURIComponent(scanId)}/inventory/resource${makeQueryString({ id })}`);
+  },
+  listWorkloads(scanId: string): Promise<WorkloadListResponse> {
+    return fetchJSON<WorkloadListResponse>(`/scans/${encodeURIComponent(scanId)}/workloads${makeQueryString({ page_size: 100 })}`);
   },
   queryInvestigation(payload: InvestigationQueryRequest): Promise<InvestigationQueryResponse> {
     return fetchJSON<InvestigationQueryResponse>("/query", {

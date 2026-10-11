@@ -45,17 +45,21 @@ func RunStatements(ctx context.Context, ex Execer, stmts []Statement) error {
 // Asset modeling note:
 //   - All infrastructure resources are stored under a single :Asset label.
 //   - models.AssetNode.AssetType is persisted as `asset_type` and is the discriminator.
-//   - There are intentionally no per-type labels like :DnsRecord or :S3Bucket in this phase.
+//   - There are intentionally no per-type labels like :DnsRecord or :S3Bucket.
+//   - An asset observation is MERGEd on (arn, scan_id). ARN stays the stable identity.
+//     A later scan creates another node instead of overwriting the earlier one.
 //
 // OWNED_BY projection note:
-//   - Canonical ownership is always projected from AssetNode.account_id.
-//   - Relationship rows with RelOwnedBy are additionally projected when TargetARN looks like an
-//     IAM account-root ARN (arn:aws:iam::<account-id>:root or :*), mapping to AwsAccount.
+//   - Ownership is projected from AssetNode.account_id for collected resources in the scan.
+//   - External principals do not get OWNED_BY. Their account_id is the owning account when
+//     known, and discovered_in_account_id records where the trust was observed.
+//   - Relationship rows with RelOwnedBy are projected when TargetARN is an IAM account-root ARN.
 //
 // JSON map fields note:
 //   - Asset properties and finding evidence are persisted as JSON strings
-//     (`properties_json`, `evidence_json`) for deterministic writes and model fidelity.
-//   - Nested map keys are not promoted to first-class graph properties in this foundation step.
+//     (`properties_json`, `evidence_json`).
+//   - Scalar relationship properties are also first-class relationship properties.
+//     The full map is always stored as properties_json.
 //
 // Order: AwsAccount → ScanSnapshot → Asset → Finding → Asset-OWNED_BY → graph rels → CAPTURED → AFFECTS.
 func CompileWriteScan(
@@ -64,117 +68,17 @@ func CompileWriteScan(
 	rels []models.Relationship,
 	findings []models.Finding,
 ) []Statement {
-	var out []Statement
-
-	accountIDs := collectAccountIDs(meta, assets, findings)
-	for _, id := range accountIDs {
-		out = append(out, Statement{
-			Cypher: `MERGE (a:AwsAccount {account_id: $account_id})`,
-			Params: map[string]any{"account_id": id},
-		})
-	}
-
-	out = append(out, mergeScanSnapshotStatement(meta))
-
-	sortedAssets := append([]models.AssetNode(nil), assets...)
-	sort.Slice(sortedAssets, func(i, j int) bool { return sortedAssets[i].ARN < sortedAssets[j].ARN })
-	for _, n := range sortedAssets {
-		out = append(out, mergeAssetStatement(n))
-	}
-
-	sortedFindings := append([]models.Finding(nil), findings...)
-	sort.Slice(sortedFindings, func(i, j int) bool { return sortedFindings[i].ID < sortedFindings[j].ID })
-	for _, f := range sortedFindings {
-		out = append(out, mergeFindingStatement(f))
-	}
-
-	for _, n := range sortedAssets {
-		if strings.TrimSpace(n.AccountID) == "" {
-			continue
-		}
-		out = append(out, Statement{
-			Cypher: `
-MATCH (x:Asset {arn: $arn})
-MATCH (acc:AwsAccount {account_id: $account_id})
-MERGE (x)-[:OWNED_BY]->(acc)
-`,
-			Params: map[string]any{"arn": n.ARN, "account_id": n.AccountID},
-		})
-	}
-
-	sortedRels := append([]models.Relationship(nil), rels...)
-	sort.Slice(sortedRels, func(i, j int) bool {
-		if sortedRels[i].SourceARN != sortedRels[j].SourceARN {
-			return sortedRels[i].SourceARN < sortedRels[j].SourceARN
-		}
-		if sortedRels[i].TargetARN != sortedRels[j].TargetARN {
-			return sortedRels[i].TargetARN < sortedRels[j].TargetARN
-		}
-		return sortedRels[i].RelType < sortedRels[j].RelType
-	})
-	for _, r := range sortedRels {
-		if r.RelType == models.RelOwnedBy {
-			if accID, ok := accountIDFromIAMRootARN(r.TargetARN); ok {
-				out = append(out, Statement{
-					Cypher: `
-MATCH (src:Asset {arn: $src_arn})
-MERGE (acc:AwsAccount {account_id: $account_id})
-MERGE (src)-[:OWNED_BY]->(acc)
-`,
-					Params: map[string]any{"src_arn": r.SourceARN, "account_id": accID},
-				})
-			}
-			continue
-		}
-		typ, err := cypherRelType(r.RelType)
-		if err != nil {
-			continue
-		}
-		out = append(out, Statement{
-			Cypher: fmt.Sprintf(`
-MATCH (src:Asset {arn: $src_arn})
-MATCH (dst:Asset {arn: $dst_arn})
-MERGE (src)-[:%s]->(dst)
-`, typ),
-			Params: map[string]any{"src_arn": r.SourceARN, "dst_arn": r.TargetARN},
-		})
-	}
-
-	for _, f := range sortedFindings {
-		out = append(out, Statement{
-			Cypher: `
-MATCH (s:ScanSnapshot {scan_id: $scan_id})
-MATCH (f:Finding {id: $finding_id})
-MERGE (s)-[:CAPTURED]->(f)
-`,
-			Params: map[string]any{"scan_id": meta.ScanID, "finding_id": f.ID},
-		})
-	}
-
-	assetARNs := make(map[string]struct{}, len(sortedAssets))
-	for _, n := range sortedAssets {
-		assetARNs[n.ARN] = struct{}{}
-	}
-	for _, f := range sortedFindings {
-		if _, ok := assetARNs[f.AffectedARN]; !ok {
-			continue
-		}
-		out = append(out, Statement{
-			Cypher: `
-MATCH (fn:Finding {id: $finding_id})
-MATCH (ax:Asset {arn: $affected_arn})
-MERGE (fn)-[:AFFECTS]->(ax)
-`,
-			Params: map[string]any{"finding_id": f.ID, "affected_arn": f.AffectedARN},
-		})
-	}
-
-	return out
+	return CompileScanProjection(meta, assets, rels, findings).Statements
 }
 
 // WriteScan compiles and runs all writes (schema must be applied separately).
 func WriteScan(ctx context.Context, ex Execer, meta models.ScanSnapshot, assets []models.AssetNode, rels []models.Relationship, findings []models.Finding) error {
-	return RunStatements(ctx, ex, CompileWriteScan(meta, assets, rels, findings))
+	proj := CompileScanProjection(meta, assets, rels, findings)
+	logProjectionIntegrity(proj.Integrity)
+	if err := RunStatements(ctx, ex, proj.Statements); err != nil {
+		return wrapGraphWriteError(err)
+	}
+	return nil
 }
 
 func collectAccountIDs(meta models.ScanSnapshot, assets []models.AssetNode, findings []models.Finding) []string {
@@ -195,6 +99,12 @@ func collectAccountIDs(meta models.ScanSnapshot, assets []models.AssetNode, find
 		add(id)
 	}
 	for _, a := range assets {
+		if a.AssetType == models.AssetExternalPrincipal {
+			continue
+		}
+		if resolution, _ := a.Properties["resolution_status"].(string); resolution == resolutionUnresolved {
+			continue
+		}
 		add(a.AccountID)
 	}
 	for _, f := range findings {
@@ -253,31 +163,44 @@ func accountIDFromIAMRootARN(arn string) (string, bool) {
 	return m[1], true
 }
 
-func mergeAssetStatement(n models.AssetNode) Statement {
+func mergeAssetStatement(scanID string, n models.AssetNode) Statement {
+	if scanID == "" {
+		scanID = n.ScanID
+	}
 	propsJSON, _ := json.Marshal(n.Properties)
 	return Statement{
 		Cypher: `
-MERGE (x:Asset {arn: $arn})
+MERGE (x:Asset {arn: $arn, scan_id: $scan_id})
 SET x.asset_type = $asset_type,
     x.name = $name,
     x.account_id = $account_id,
     x.region = $region,
-    x.scan_id = $scan_id,
+    x.resolution_status = $resolution_status,
+    x.ownership_status = $ownership_status,
+    x.discovered_in_account_id = $discovered_in_account_id,
+    x.owning_account_id = $owning_account_id,
     x.properties_json = $properties_json
 `,
 		Params: map[string]any{
-			"arn":             n.ARN,
-			"asset_type":      string(n.AssetType),
-			"name":            n.Name,
-			"account_id":      n.AccountID,
-			"region":          n.Region,
-			"scan_id":         n.ScanID,
-			"properties_json": string(propsJSON),
+			"arn":                      n.ARN,
+			"asset_type":               string(n.AssetType),
+			"name":                     n.Name,
+			"account_id":               n.AccountID,
+			"region":                   n.Region,
+			"scan_id":                  scanID,
+			"resolution_status":        stringProp(n.Properties, "resolution_status"),
+			"ownership_status":         stringProp(n.Properties, "ownership_status"),
+			"discovered_in_account_id": stringProp(n.Properties, "discovered_in_account_id"),
+			"owning_account_id":        stringProp(n.Properties, "owning_account_id"),
+			"properties_json":          string(propsJSON),
 		},
 	}
 }
 
-func mergeFindingStatement(f models.Finding) Statement {
+func mergeFindingStatement(scanID string, f models.Finding) Statement {
+	if scanID == "" {
+		scanID = f.ScanID
+	}
 	ev, _ := json.Marshal(f.Evidence)
 	embLine := ""
 	params := map[string]any{
@@ -298,7 +221,7 @@ func mergeFindingStatement(f models.Finding) Statement {
 		"recommendation":          f.Recommendation,
 		"remediation_command":     f.RemediationCmd,
 		"evidence_json":           string(ev),
-		"scan_id":                 f.ScanID,
+		"scan_id":                 scanID,
 	}
 	if len(f.Embedding) == ExpectedVectorDimensions {
 		emb := make([]float64, len(f.Embedding))
@@ -310,7 +233,7 @@ func mergeFindingStatement(f models.Finding) Statement {
 	}
 	return Statement{
 		Cypher: fmt.Sprintf(`
-MERGE (f:Finding {id: $id})
+MERGE (f:Finding {id: $id, scan_id: $scan_id})
 SET f.title = $title,
     f.severity = $severity,
     f.module = $module,
@@ -343,6 +266,38 @@ func cypherRelType(rt models.RelType) (string, error) {
 		return "FRONTS", nil
 	case models.RelTrusts:
 		return "TRUSTS", nil
+	case models.RelPolicyAttachedTo:
+		return "POLICY_ATTACHED_TO", nil
+	case models.RelPolicyContainsStatement:
+		return "POLICY_CONTAINS_STATEMENT", nil
+	case models.RelPolicyPermissionCandidate:
+		return "POLICY_PERMISSION_CANDIDATE", nil
+	case models.RelHasAuthorizationDecision:
+		return "HAS_AUTHORIZATION_DECISION", nil
+	case models.RelAuthorizationTargets:
+		return "AUTHORIZATION_TARGETS", nil
+	case models.RelValidatedAttackTransition:
+		return "VALIDATED_ATTACK_TRANSITION", nil
+	case models.RelEC2UsesInstanceProfile:
+		return "EC2_INSTANCE_USES_INSTANCE_PROFILE", nil
+	case models.RelInstanceProfileContains:
+		return "INSTANCE_PROFILE_CONTAINS_ROLE", nil
+	case models.RelLambdaUsesExecutionRole:
+		return "LAMBDA_USES_EXECUTION_ROLE", nil
+	case models.RelECSTaskDefUsesTaskRole:
+		return "ECS_TASK_DEFINITION_USES_TASK_ROLE", nil
+	case models.RelECSTaskDefUsesExecutionRole:
+		return "ECS_TASK_DEFINITION_USES_EXECUTION_ROLE", nil
+	case models.RelECSTaskUsesTaskDef:
+		return "ECS_TASK_USES_TASK_DEFINITION", nil
+	case models.RelECSServiceRefsTaskDef:
+		return "ECS_SERVICE_REFERENCES_TASK_DEFINITION", nil
+	case models.RelEKSPodIdentityUsesRole:
+		return "EKS_POD_IDENTITY_USES_ROLE", nil
+	case models.RelEKSPodIdentityRefsSA:
+		return "EKS_POD_IDENTITY_REFERENCES_SERVICE_ACCOUNT", nil
+	case models.RelIRSATrustConfiguration:
+		return "IRSA_TRUST_CONFIGURATION", nil
 	default:
 		return "", fmt.Errorf("unsupported rel type: %q", rt)
 	}

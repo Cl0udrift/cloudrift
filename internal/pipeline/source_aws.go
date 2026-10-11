@@ -107,10 +107,11 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 	// Resource-based cross-account exposure (S3 bucket policies), reusing the buckets we
 	// just listed so there is no second ListBuckets pass.
 	progress("collecting", "reading S3 bucket policies")
-	bpPrincipals, bpRels, bpFailed, err := collectors.CollectBucketPoliciesWithConfig(ctx, cfg, accounts, storage)
+	bpPrincipals, bpRels, bpEvidence, bpFailed, err := collectors.CollectBucketPoliciesWithConfig(ctx, cfg, accounts, storage)
 	if err != nil {
 		return Result{}, fmt.Errorf("collect bucket policies: %w", err)
 	}
+	assets = applyBucketEvidence(assets, bpEvidence)
 	assets = append(assets, bpPrincipals...)
 	rels = append(rels, bpRels...)
 	if len(bpFailed) > 0 {
@@ -137,8 +138,40 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 	if err != nil {
 		return Result{}, fmt.Errorf("collect trust: %w", err)
 	}
+	if cfg.Scan.IAMPolicyInventory {
+		progress("collecting", "collecting organization SCP and RCP documents")
+		ids := make([]string, 0, len(accounts))
+		for _, account := range accounts {
+			if account.ID != "" {
+				ids = append(ids, account.ID)
+			}
+		}
+		orgEvidence := collectors.CollectOrgAuthorization(ctx, organizations.NewFromConfig(baseCfg), ids)
+		collectors.ApplyOrgEvidence(trustAssets, orgEvidence)
+		coverage.OrgPolicyDiscovery = orgEvidence.Discovery
+		coverage.CIEMCollection = "enabled"
+		if orgEvidence.Detail != "" && orgEvidence.Discovery != "collected" && orgEvidence.Discovery != "not_in_organization" {
+			slog.Warn("organization authorization evidence incomplete", "discovery", orgEvidence.Discovery, "detail", orgEvidence.Detail)
+		}
+	}
 	assets = append(assets, trustAssets...)
 	rels = append(rels, trustRels...)
+	if coverage.OrgMembershipKnown {
+		assets = append(assets, collectors.OrganizationAccountNodes(coverage)...)
+	}
+	if cfg.Scan.IAMPolicyInventory {
+		progress("collecting", "mapping EC2 instance profiles and Lambda execution roles")
+		workloadAssets, workloadRels, err := collectors.CollectWorkloads(ctx, cfg, accounts)
+		if err != nil {
+			return Result{}, fmt.Errorf("collect workloads: %w", err)
+		}
+		assets = append(assets, workloadAssets...)
+		rels = append(rels, workloadRels...)
+		irsaAssets, irsaRels := collectors.DeriveIRSATrusts(assets)
+		assets = append(assets, irsaAssets...)
+		rels = append(rels, irsaRels...)
+		collectors.MarkUnresolvedRoleReferences(assets, rels)
+	}
 	slog.Info("collector finished", "collector", "trust", "roles", len(trustAssets))
 
 	progress("collecting", "collecting IAM role activity")
@@ -149,4 +182,41 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 	slog.Info("collector finished", "collector", "activity", "records", len(activity))
 
 	return Result{Accounts: accounts, Assets: assets, Rels: rels, Activity: activity, Coverage: coverage}, nil
+}
+
+func applyBucketEvidence(assets []models.AssetNode, facts []collectors.BucketPolicyEvidence) []models.AssetNode {
+	if len(facts) == 0 {
+		return assets
+	}
+	byARN := make(map[string]collectors.BucketPolicyEvidence, len(facts))
+	for _, fact := range facts {
+		byARN[fact.BucketARN] = fact
+	}
+	for i := range assets {
+		fact, ok := byARN[assets[i].ARN]
+		if !ok {
+			continue
+		}
+		if assets[i].Properties == nil {
+			assets[i].Properties = map[string]any{}
+		}
+		setProp(assets[i].Properties, "bucket_policy_status", fact.PolicyStatus)
+		setProp(assets[i].Properties, "bucket_policy_evidence", fact.PolicyEvidence)
+		setProp(assets[i].Properties, "bucket_policy_document", fact.PolicyDocument)
+		setProp(assets[i].Properties, "object_ownership", fact.ObjectOwnership)
+		setProp(assets[i].Properties, "object_ownership_evidence", fact.ObjectOwnershipEvidence)
+		setProp(assets[i].Properties, "bucket_encryption", fact.Encryption)
+		setProp(assets[i].Properties, "bucket_encryption_evidence", fact.EncryptionEvidence)
+		setProp(assets[i].Properties, "kms_key_arn", fact.KMSKeyARN)
+		setProp(assets[i].Properties, "bucket_public_access_block", fact.PublicAccessBlockStatus)
+		setProp(assets[i].Properties, "bucket_public_access_block_evidence", fact.PublicAccessBlockEvidence)
+	}
+	return assets
+}
+
+func setProp(props map[string]any, key, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	props[key] = value
 }

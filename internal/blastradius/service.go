@@ -7,6 +7,8 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	"github.com/Zero0x00/cloudrift/internal/api/schema"
+	"github.com/Zero0x00/cloudrift/internal/graph"
+	"github.com/Zero0x00/cloudrift/internal/iamauth"
 	"github.com/Zero0x00/cloudrift/internal/models"
 	"github.com/Zero0x00/cloudrift/internal/scans"
 )
@@ -46,27 +48,44 @@ func (s *Service) FindingBlast(ctx context.Context, scanID, findingID string, mo
 		return schema.BlastRadiusSummary{}, nil, nil, ReasonUnknownRoot
 	}
 	signals := privilegeSignalsFromFinding(found)
+	if mode == ModePermissionBlast {
+		sum := s.permissionSummary(scanID, strings.TrimSpace(found.AffectedARN), signals)
+		sum.RootType = schema.BlastRootFinding
+		sum.RootID = findingID
+		sum.SourceFindingID = findingID
+		sum.FocalResourceARN = found.AffectedARN
+		return sum, nil, found, ReasonNone
+	}
+	if mode == ModeAttackPath {
+		if sum, ok := s.identityAttackSummaryFor(scanID, strings.TrimSpace(found.AffectedARN)); ok {
+			sum.RootType = schema.BlastRootFinding
+			sum.RootID = findingID
+			sum.SourceFindingID = findingID
+			sum.FocalResourceARN = found.AffectedARN
+			return sum, nil, found, ReasonNone
+		}
+	}
 
 	if s == nil || s.Driver == nil {
-		return fallbackSummary(schema.BlastRootFinding, findingID, scanID, found, signals, ReasonNeo4jDisabled), nil, found, ReasonNeo4jDisabled
+		return fallbackSummary(schema.BlastRootFinding, findingID, scanID, mode, found, signals, ReasonNeo4jDisabled), nil, found, ReasonNeo4jDisabled
 	}
 
 	arn := strings.TrimSpace(found.AffectedARN)
 	row, err := loadFindingContext(ctx, s.Driver, s.DBName, scanID, findingID)
 	if err != nil {
-		return fallbackSummary(schema.BlastRootFinding, findingID, scanID, found, signals, ReasonNeo4jConnectError), nil, found, ReasonNeo4jConnectError
+		return fallbackSummary(schema.BlastRootFinding, findingID, scanID, mode, found, signals, ReasonNeo4jConnectError), nil, found, ReasonNeo4jConnectError
 	}
 	if row != nil && row.AffectedAsset != nil && strings.TrimSpace(*row.AffectedAsset) != "" {
 		arn = strings.TrimSpace(*row.AffectedAsset)
 	}
 	if arn == "" {
-		sum := fallbackSummary(schema.BlastRootFinding, findingID, scanID, found, signals, ReasonNoGraphProjection)
+		sum := fallbackSummary(schema.BlastRootFinding, findingID, scanID, mode, found, signals, ReasonNoGraphProjection)
 		return sum, nil, found, ReasonNoGraphProjection
 	}
 
 	g, err := expandFromAsset(ctx, s.Driver, s.DBName, arn, scanID, V1MaxHops, mode)
 	if err != nil {
-		return fallbackSummary(schema.BlastRootFinding, findingID, scanID, found, signals, ReasonNeo4jConnectError), nil, found, ReasonNeo4jConnectError
+		return fallbackSummary(schema.BlastRootFinding, findingID, scanID, mode, found, signals, ReasonNeo4jConnectError), nil, found, ReasonNeo4jConnectError
 	}
 	g.AddFindingNode(findingID, found.Title, scanID, string(found.Severity), found.AffectedARN)
 	g.ensureMinimalNode(arn)
@@ -82,15 +101,23 @@ func (s *Service) FindingBlast(ctx context.Context, scanID, findingID string, mo
 
 func fallbackSummary(
 	kind schema.BlastRootKind, rootID, scanID string,
+	mode BlastMode,
 	f *models.Finding,
 	signals PrivilegeSignals,
 	reason UnavailableReason,
 ) schema.BlastRadiusSummary {
+	if mode == "" {
+		mode = ModeBlastRadius
+	}
 	s := schema.BlastRadiusSummary{
 		RootType:               kind,
 		RootID:                 rootID,
 		ScanID:                 scanID,
-		Mode:                   "blast_radius",
+		Mode:                   string(mode),
+		AnalysisKind:           analysisKind(mode),
+		PathValidity:           string(ValidityUnknown),
+		AnalysisComplete:       false,
+		StartingAssumption:     startingAssumption(),
 		EscalationPossible:     signals.AdminLike || signals.IAMWriteAccess || signals.HasExternalTrust,
 		GraphAvailable:         false,
 		GraphUnavailableReason: string(reason),
@@ -175,6 +202,18 @@ func (s *Service) PrincipalBlast(ctx context.Context, scanID, principalARN strin
 	if strings.TrimSpace(principalARN) == "" {
 		return schema.BlastRadiusSummary{}, nil, ReasonUnknownRoot
 	}
+	if mode == ModePermissionBlast {
+		_, findings, _ := scans.LoadScanArtifacts(s.OutDir, scanID)
+		sum := s.permissionSummary(scanID, principalARN, privilegeSignalsForPrincipalRoot(findings, principalARN))
+		sum.SourcePrincipalID = EncodePrincipalID(principalARN, "role", "")
+		return sum, nil, ReasonNone
+	}
+	if mode == ModeAttackPath {
+		if sum, ok := s.identityAttackSummaryFor(scanID, principalARN); ok {
+			sum.SourcePrincipalID = EncodePrincipalID(principalARN, "role", "")
+			return sum, nil, ReasonNone
+		}
+	}
 	_, findings, _ := scans.LoadScanArtifacts(s.OutDir, scanID)
 	principalSignals := privilegeSignalsForPrincipalRoot(findings, principalARN)
 	if s.Driver == nil {
@@ -213,6 +252,12 @@ func (s *Service) PrincipalBlastByID(ctx context.Context, scanID, principalID st
 // ExplorerFromFinding returns the curated explorer DTO.
 func (s *Service) ExplorerFromFinding(ctx context.Context, scanID, findingID string, mode BlastMode) schema.BlastExplorerResponse {
 	summary, g, f, re := s.FindingBlast(ctx, scanID, findingID, mode)
+	if mode == ModePermissionBlast {
+		return PermissionExplorerPayload(summary)
+	}
+	if mode == ModeAttackPath && summary.IdentityAttack != nil {
+		return IdentityAttackExplorerPayload(summary)
+	}
 	arn := summary.FocalResourceARN
 	if arn == "" && f != nil {
 		arn = f.AffectedARN
@@ -243,6 +288,12 @@ func (s *Service) ExplorerFromEntity(ctx context.Context, scanID, entityID strin
 // ExplorerFromPrincipalID returns the explorer for an encoded principal id.
 func (s *Service) ExplorerFromPrincipalID(ctx context.Context, scanID, principalID string, mode BlastMode) schema.BlastExplorerResponse {
 	sum, g, _ := s.PrincipalBlastByID(ctx, scanID, principalID, mode)
+	if mode == ModePermissionBlast {
+		return PermissionExplorerPayload(sum)
+	}
+	if mode == ModeAttackPath && sum.IdentityAttack != nil {
+		return IdentityAttackExplorerPayload(sum)
+	}
 	focus := sum.SourcePrincipalARN
 	if strings.TrimSpace(focus) == "" {
 		focus = "principal:" + principalID
@@ -314,6 +365,130 @@ func (s *Service) ExplorerExpandOneHop(
 		resp.ExpansionReason = "no_additional_high_signal_neighbors"
 	}
 	return resp
+}
+
+// permissionSummary runs the hypothetical permission assessment from scan JSON.
+// The session is assumed and was not read from AWS. Organization controls stay
+// unknown unless a later caller supplies them. S3 ACL and Block Public Access
+// stay unevaluated.
+func (s *Service) permissionSummary(scanID, roleARN string, _ PrivilegeSignals) schema.BlastRadiusSummary {
+	assets, _ := scans.LoadAssets(s.OutDir, scanID)
+	rels, _ := scans.LoadRelationships(s.OutDir, scanID)
+	report := AnalyzePermissionBlast(PermissionBlastRequest{
+		ScanID:            scanID,
+		RoleARN:           roleARN,
+		AssumedCompromise: true,
+		SessionSource:     "assumed",
+		Assets:            assets,
+		Relationships:     rels,
+	})
+	s.projectPermissionFacts(scanID, report, assets)
+	return PermissionSummary(scanID, report)
+}
+
+func (s *Service) projectPermissionFacts(scanID string, report schema.PermissionBlastReport, assets []models.AssetNode) {
+	if s == nil || s.Driver == nil || len(report.Decisions) == 0 {
+		return
+	}
+	collected := map[string]struct{}{}
+	for _, asset := range assets {
+		if asset.ARN != "" && asset.AssetType != "unresolved_reference" {
+			collected[asset.ARN] = struct{}{}
+		}
+	}
+	var nodes []models.AssetNode
+	var rels []models.Relationship
+	for _, decision := range report.Decisions {
+		node, edges := iamauth.ProjectCapability(iamauth.AuthorizationDecision{
+			ID:                  decision.DecisionID,
+			ScanID:              scanID,
+			PrincipalARN:        report.RoleARN,
+			Action:              decision.Action,
+			ResourceARN:         decision.ResourceARN,
+			ResourceAccountID:   decision.AccountID,
+			Status:              decision.Status,
+			Reason:              decision.Reason,
+			SameAccount:         decision.SameAccount,
+			EvidenceFingerprint: decision.EvidenceFingerprint,
+			EvaluatorVersion:    iamauth.EvaluatorVersion,
+		}, collectedTarget(collected, decision.ResourceARN))
+		nodes = append(nodes, node)
+		rels = append(rels, edges...)
+	}
+	ex := graph.NewDriverExecer(s.Driver, s.DBName)
+	_ = graph.WriteAuthorizationFacts(context.Background(), ex, scanID, nodes, rels)
+}
+
+func (s *Service) identityAttackSummaryFor(scanID, principalARN string) (schema.BlastRadiusSummary, bool) {
+	assets, err := scans.LoadAssets(s.OutDir, scanID)
+	if err != nil {
+		return schema.BlastRadiusSummary{}, false
+	}
+	if _, ok := findAsset(assets, principalARN); !ok {
+		return schema.BlastRadiusSummary{}, false
+	}
+	rels, err := scans.LoadRelationships(s.OutDir, scanID)
+	if err != nil {
+		return schema.BlastRadiusSummary{}, false
+	}
+	report := AnalyzeIdentityAttack(context.Background(), IdentityAttackRequest{
+		ScanID: scanID, InitialPrincipal: principalARN, SessionSource: "assumed",
+		Assets: assets, Relationships: rels,
+	})
+	if containsNote(report.CoverageNotes, "role_not_in_scan") {
+		return schema.BlastRadiusSummary{}, false
+	}
+	s.projectAttackTransitions(scanID, report, assets)
+	return identityAttackSummary(scanID, principalARN, report), true
+}
+
+func (s *Service) projectAttackTransitions(scanID string, report schema.IdentityAttackReport, assets []models.AssetNode) {
+	if s == nil || s.Driver == nil {
+		return
+	}
+	collected := map[string]struct{}{}
+	for _, asset := range assets {
+		if asset.ARN != "" && asset.AssetType != "unresolved_reference" {
+			collected[asset.ARN] = struct{}{}
+		}
+	}
+	var rels []models.Relationship
+	for _, hop := range report.Transitions {
+		if hop.Feasibility != string(ValidityValidatedPossible) {
+			continue
+		}
+		if _, ok := collected[hop.SourcePrincipal]; !ok {
+			continue
+		}
+		if _, ok := collected[hop.TargetARN]; !ok {
+			continue
+		}
+		rels = append(rels, models.Relationship{
+			SourceARN: hop.SourcePrincipal,
+			TargetARN: hop.TargetARN,
+			RelType:   models.RelValidatedAttackTransition,
+			ScanID:    scanID,
+			Properties: map[string]any{
+				"technique": hop.Technique, "decision": hop.Status, "decision_id": hop.DecisionID,
+				"evidence_fingerprint": hop.EvidenceFingerprint, "context_fingerprint": hop.ContextFingerprint,
+				"evaluator_version": iamauth.EvaluatorVersion,
+				"feasibility":       hop.Feasibility, "evidence": strings.Join(hop.Evidence, "; "),
+				"same_account": hop.SameAccount, "hypothetical": true,
+				"session_origin": hop.SessionOrigin, "session_evidence_class": hop.SessionEvidenceClass,
+				"transition_id": hop.TransitionID,
+			},
+		})
+	}
+	if len(rels) == 0 {
+		return
+	}
+	ex := graph.NewDriverExecer(s.Driver, s.DBName)
+	_ = graph.WriteAuthorizationFacts(context.Background(), ex, scanID, nil, rels)
+}
+
+func collectedTarget(collected map[string]struct{}, arn string) bool {
+	_, ok := collected[arn]
+	return ok
 }
 
 func (s *Service) resolveRootGraph(

@@ -141,6 +141,10 @@ func Run(ctx context.Context, cfg *config.Config, outputDir, toolVersion string,
 		activityIdx := collectors.IndexActivityByRoleARN(res.Activity)
 		findings = append(findings, scorers.ScoreTrust(res.Assets, res.Rels, activityIdx, cfg)...)
 		findings = append(findings, scorers.ScoreResourceExposure(res.Assets, res.Rels, cfg)...)
+		if cfg.Scan.IAMPolicyInventory {
+			progress("scoring", "recording broad IAM entitlement candidates")
+			findings = append(findings, scorers.ScoreEntitlements(res.Assets, res.Rels)...)
+		}
 	}
 
 	// --- Optional Cost Explorer enrichment (no-op unless cfg.Cost.UseCUR). ---
@@ -338,6 +342,8 @@ func buildMetadata(scanID, toolVersion string, accounts []collectors.Account, fi
 		ScannedAccountCount:    len(cov.Scanned),
 		FailedAccountIDs:       failed,
 		CoverageComplete:       cov.Complete(),
+		CIEMCollection:         cov.CIEMCollection,
+		OrgPolicyDiscovery:     cov.OrgPolicyDiscovery,
 	}
 }
 
