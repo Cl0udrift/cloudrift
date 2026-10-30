@@ -39,7 +39,7 @@ func TestCIEMDemo_FindingWorkflow(t *testing.T) {
 	if !assessment.Applicable || assessment.Kind != "role_compromise" || assessment.ExecutionEnabled {
 		t.Fatalf("%+v", assessment)
 	}
-	if assessment.EntryFeasibility != "external_caller_permission_not_inspected" || assessment.PrivilegeEscalation != "NOT_ASSESSED" {
+	if assessment.EntryFeasibility != "external_caller_permission_not_inspected" || assessment.PrivilegeEscalation != "VALIDATED_POSSIBLE" {
 		t.Fatalf("entry=%s escalation=%s", assessment.EntryFeasibility, assessment.PrivilegeEscalation)
 	}
 	if len(assessment.BroadPrivilegeCandidates) == 0 || assessment.ValidatedResourceAccess == false || len(assessment.Recommendations) == 0 {
@@ -105,7 +105,7 @@ func TestCIEMDemo_FindingWorkflow(t *testing.T) {
 	cAssets, _ := scans.LoadAssets(chainDir, "ciem-chain")
 	cRels, _ := scans.LoadRelationships(chainDir, "ciem-chain")
 	chain := ciem.Assess("ciem-chain", chainFindings[0], cAssets, cRels, chainFindings)
-	if chain.ResourceImpactPaths != 1 || chain.ValidatedTransitions != 2 || !chain.ValidatedIdentityMovement || chain.PrivilegeEscalation != "NOT_ASSESSED" {
+	if chain.ResourceImpactPaths != 1 || chain.ValidatedTransitions != 2 || !chain.ValidatedIdentityMovement || chain.PrivilegeEscalation != "NONE_FOUND_IN_MODELED_TECHNIQUES" {
 		t.Fatalf("chain paths=%d transitions=%d move=%v escalation=%s", chain.ResourceImpactPaths, chain.ValidatedTransitions, chain.ValidatedIdentityMovement, chain.PrivilegeEscalation)
 	}
 	if chain.EvidenceCoverage.SessionContext != "SUPPORTED_HYPOTHETICAL_ASSUMPTION" {

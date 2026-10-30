@@ -84,7 +84,7 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 	if ok && !resourceShapeOK(cap.Evaluation, decision.ResourceARN) {
 		return finish(decision, StatusUnknown, ReasonResourceShape)
 	}
-	if (cap.Evaluation == EvalEC2Instance || cap.Evaluation == EvalRDSInstance) && !decision.SameAccount {
+	if (cap.Evaluation == EvalEC2Instance || cap.Evaluation == EvalRDSInstance || cap.Evaluation == EvalIdentityResource) && !decision.SameAccount {
 		// An instance has no resource policy, so no cross-account grant can exist; keep it UNKNOWN rather than assert a deny.
 		decision.MissingEvidence = append(decision.MissingEvidence, ReasonCrossAccountResource)
 		return finish(decision, StatusUnknown, ReasonCrossAccountResource)
@@ -185,7 +185,7 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 	switch cap.Evaluation {
 	case EvalAssumeRole:
 		return finishAssumeRole(decision, identity, trust)
-	case EvalIdentityOnly, EvalEC2Instance, EvalRDSInstance:
+	case EvalIdentityOnly, EvalEC2Instance, EvalRDSInstance, EvalIdentityResource:
 		return finishIdentityOnly(decision, identity)
 	case EvalKMSKey:
 		return finishKMS(decision, identity, resource, delegated, grantAllows(req))
@@ -528,7 +528,7 @@ func missingControls(req AuthorizationRequest) []string {
 		if req.TrustPolicy.State != EvidencePresent {
 			missing = append(missing, ReasonMissingTrust)
 		}
-	case EvalIdentityOnly, EvalEC2Instance, EvalRDSInstance:
+	case EvalIdentityOnly, EvalEC2Instance, EvalRDSInstance, EvalIdentityResource:
 		// IAM control-plane actions, EC2 instances and RDS instances use no trust or resource policy.
 	default:
 		if req.ResourcePolicy.State != EvidencePresent && req.ResourcePolicy.State != EvidenceAbsent {

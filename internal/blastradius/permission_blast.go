@@ -1,6 +1,7 @@
 package blastradius
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -21,9 +22,13 @@ const (
 // SessionSource "verified" means the caller supplied a checked session configuration.
 // Any other value leaves the session policy unknown.
 type PermissionBlastRequest struct {
-	ScanID              string
-	RoleARN             string
-	AssumedCompromise   bool
+	ScanID            string
+	RoleARN           string
+	AssumedCompromise bool
+	// IncludeSelf also evaluates policy-grant actions against the caller role. Only the attack search sets it.
+	IncludeSelf bool
+	// PrivescChains also evaluates iam:PassRole plus Lambda create and invoke for each service-trusted role. Only the attack search sets it.
+	PrivescChains       bool
 	SessionSource       string
 	SessionPolicies     iamauth.PolicySlot
 	PermissionsBoundary iamauth.PolicySlot
@@ -78,7 +83,7 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 	identity, identityNotes := identitySlot(role, req.Assets, req.Relationships)
 	report.CoverageNotes = append(report.CoverageNotes, identityNotes...)
 	for _, action := range iamauth.Catalog() {
-		if action.Support != iamauth.SupportEvaluated || !action.PermissionImpact {
+		if (action.Support != iamauth.SupportEvaluated || !action.PermissionImpact) && !action.ProbeOnly {
 			report.UnsupportedActions = append(report.UnsupportedActions, action.Action)
 		}
 	}
@@ -112,76 +117,79 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 	if boundary.Evidence != "" {
 		report.CoverageNotes = append(report.CoverageNotes, boundary.Evidence)
 	}
+	eval := func(cap iamauth.Capability, target models.AssetNode, reqCtx map[string]string) schema.PermissionDecision {
+		authReq := iamauth.AuthorizationRequest{
+			ScanID:              req.ScanID,
+			PrincipalARN:        report.RoleARN,
+			Action:              cap.Action,
+			ResourceARN:         target.ARN,
+			ResourceAccountID:   target.AccountID,
+			RequestContext:      reqCtx,
+			EvaluatedAt:         when,
+			Identity:            identity,
+			ResourcePolicy:      bucketPolicySlot(target, buckets),
+			TrustPolicy:         trustSlot(target),
+			PermissionsBoundary: boundary,
+			SessionPolicies:     session,
+			SCPs:                scp,
+			RCPs:                rcpForResource(req.Assets, role, target, cap.Action, req.RCPs),
+			S3ObjectACL:         req.S3ObjectACL,
+			S3BlockPublicAccess: req.S3BlockPublicAccess,
+			S3KMSKeyPolicy:      req.S3KMSKeyPolicy,
+		}
+		if cap.Evaluation == iamauth.EvalS3Object {
+			authReq.S3ObjectACL, authReq.S3BlockPublicAccess, authReq.S3KMSKeyPolicy = s3Constraints(target, buckets, authReq.S3ObjectACL, authReq.S3BlockPublicAccess, authReq.S3KMSKeyPolicy)
+		} else {
+			switch cap.Evaluation {
+			case iamauth.EvalSecret:
+				authReq.ResourcePolicy = secretPolicySlot(target)
+				authReq.SecretKMS = secretKMSEvidence(target, keys, req.Assets, role, req.RCPs)
+			case iamauth.EvalLambda:
+				authReq.ResourcePolicy = policySlotFromProps(target, "function_policy", "the function resource policy was not collected")
+			case iamauth.EvalKMSKey:
+				authReq.ResourcePolicy = keyPolicySlot(target)
+				authReq.KMSGrants = grantsOf(target)
+			default:
+				authReq.ResourcePolicy = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "this action does not use a resource policy"}
+			}
+		}
+		decision := iamauth.Evaluate(authReq)
+		hit := schema.PermissionDecision{
+			Action:               cap.Action,
+			Category:             cap.Category,
+			ResourceARN:          target.ARN,
+			AccountID:            target.AccountID,
+			Status:               decision.Status,
+			Reason:               decision.Reason,
+			Evidence:             append([]string{}, decision.Provenance...),
+			SameAccount:          decision.SameAccount,
+			Classification:       classificationOf(target),
+			DecisionID:           decision.ID,
+			EvidenceFingerprint:  decision.EvidenceFingerprint,
+			Explanation:          iamauth.Explain(decision),
+			MissingEvidence:      decision.MissingEvidence,
+			MissingContext:       decision.MissingContext,
+			UnsatisfiedCondition: decision.UnsatisfiedConditions,
+			ExplicitDeny:         statementLabels(decision.ExplicitDeny),
+			AppliedStatements:    statementLabels(decision.ApplicableStatements),
+		}
+		if decision.Reason != "" {
+			hit.Evidence = append(hit.Evidence, decision.Reason)
+		}
+		return hit
+	}
 	var decisions []schema.PermissionDecision
 	for _, cap := range iamauth.Catalog() {
 		if cap.Support != iamauth.SupportEvaluated || !cap.PermissionImpact || !categoryAllowed(req.Categories, cap.Category) {
 			continue
 		}
-		targets := targetsFor(cap, targetSet{objects: objects, roles: roles, secrets: secrets, keys: keys, instances: instances, functions: functions, databases: databases})
+		targets := targetsFor(cap, targetSet{objects: objects, roles: roles, secrets: secrets, keys: keys, instances: instances, functions: functions, databases: databases, self: selfTargets(req.IncludeSelf, role)})
 		for _, target := range targets {
 			if len(decisions) >= limit {
 				report.Truncated = true
 				break
 			}
-			authReq := iamauth.AuthorizationRequest{
-				ScanID:              req.ScanID,
-				PrincipalARN:        report.RoleARN,
-				Action:              cap.Action,
-				ResourceARN:         target.ARN,
-				ResourceAccountID:   target.AccountID,
-				RequestContext:      req.RequestContext,
-				EvaluatedAt:         when,
-				Identity:            identity,
-				ResourcePolicy:      bucketPolicySlot(target, buckets),
-				TrustPolicy:         trustSlot(target),
-				PermissionsBoundary: boundary,
-				SessionPolicies:     session,
-				SCPs:                scp,
-				RCPs:                rcpForResource(req.Assets, role, target, cap.Action, req.RCPs),
-				S3ObjectACL:         req.S3ObjectACL,
-				S3BlockPublicAccess: req.S3BlockPublicAccess,
-				S3KMSKeyPolicy:      req.S3KMSKeyPolicy,
-			}
-			if cap.Evaluation == iamauth.EvalS3Object {
-				authReq.S3ObjectACL, authReq.S3BlockPublicAccess, authReq.S3KMSKeyPolicy = s3Constraints(target, buckets, authReq.S3ObjectACL, authReq.S3BlockPublicAccess, authReq.S3KMSKeyPolicy)
-			} else {
-				switch cap.Evaluation {
-				case iamauth.EvalSecret:
-					authReq.ResourcePolicy = secretPolicySlot(target)
-					authReq.SecretKMS = secretKMSEvidence(target, keys, req.Assets, role, req.RCPs)
-				case iamauth.EvalLambda:
-					authReq.ResourcePolicy = policySlotFromProps(target, "function_policy", "the function resource policy was not collected")
-				case iamauth.EvalKMSKey:
-					authReq.ResourcePolicy = keyPolicySlot(target)
-					authReq.KMSGrants = grantsOf(target)
-				default:
-					authReq.ResourcePolicy = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "this action does not use a resource policy"}
-				}
-			}
-			decision := iamauth.Evaluate(authReq)
-			hit := schema.PermissionDecision{
-				Action:               cap.Action,
-				Category:             cap.Category,
-				ResourceARN:          target.ARN,
-				AccountID:            target.AccountID,
-				Status:               decision.Status,
-				Reason:               decision.Reason,
-				Evidence:             append([]string{}, decision.Provenance...),
-				SameAccount:          decision.SameAccount,
-				Classification:       classificationOf(target),
-				DecisionID:           decision.ID,
-				EvidenceFingerprint:  decision.EvidenceFingerprint,
-				Explanation:          iamauth.Explain(decision),
-				MissingEvidence:      decision.MissingEvidence,
-				MissingContext:       decision.MissingContext,
-				UnsatisfiedCondition: decision.UnsatisfiedConditions,
-				ExplicitDeny:         statementLabels(decision.ExplicitDeny),
-				AppliedStatements:    statementLabels(decision.ApplicableStatements),
-			}
-			if decision.Reason != "" {
-				hit.Evidence = append(hit.Evidence, decision.Reason)
-			}
-			decisions = append(decisions, hit)
+			decisions = append(decisions, eval(cap, target, req.RequestContext))
 		}
 		if report.Truncated {
 			break
@@ -194,6 +202,9 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 		return decisions[i].ResourceARN < decisions[j].ResourceARN
 	})
 	report.Decisions = decisions
+	if req.PrivescChains {
+		report.PrivescChains = privescChains(req, role, roles, functions, eval)
+	}
 	fillCounts(&report)
 	report.AnalysisComplete = !report.Truncated && identity.State == iamauth.EvidencePresent && !hasMissingControl(decisions)
 	report.ImpactSummary = impactText(report)
@@ -526,7 +537,7 @@ func sortAssets(assets []models.AssetNode) {
 	sort.Slice(assets, func(i, j int) bool { return assets[i].ARN < assets[j].ARN })
 }
 
-type targetSet struct{ objects, roles, secrets, keys, instances, functions, databases []models.AssetNode }
+type targetSet struct{ objects, roles, secrets, keys, instances, functions, databases, self []models.AssetNode }
 
 func targetsFor(cap iamauth.Capability, t targetSet) []models.AssetNode {
 	objects, roles := t.objects, t.roles
@@ -543,7 +554,13 @@ func targetsFor(cap iamauth.Capability, t targetSet) []models.AssetNode {
 		return t.keys
 	case iamauth.EvalS3Object:
 		return objects
-	case iamauth.EvalAssumeRole, iamauth.EvalIdentityOnly:
+	case iamauth.EvalAssumeRole:
+		return roles
+	case iamauth.EvalIdentityOnly:
+		// A role that can grant itself a policy escalates without assuming anything.
+		if cap.AttackTechnique == "GRANT_ROLE_POLICY" {
+			return append(append([]models.AssetNode{}, roles...), t.self...)
+		}
 		return roles
 	default:
 		return nil
@@ -1061,4 +1078,72 @@ func statementLabels(refs []iamauth.StatementRef) []string {
 		out = append(out, ref.Effect+" "+label+" ("+ref.PolicyType+")")
 	}
 	return out
+}
+
+func selfTargets(include bool, role models.AssetNode) []models.AssetNode {
+	if !include {
+		return nil
+	}
+	return []models.AssetNode{role}
+}
+
+func combineSteps(steps []schema.PermissionDecision) string {
+	status := iamauth.StatusAllowed
+	for _, s := range steps {
+		switch s.Status {
+		case iamauth.StatusDenied:
+			return iamauth.StatusDenied
+		case iamauth.StatusAllowed:
+		case iamauth.StatusConditional:
+			if status == iamauth.StatusAllowed {
+				status = iamauth.StatusConditional
+			}
+		default:
+			status = iamauth.StatusUnknown
+		}
+	}
+	return status
+}
+
+// trustsService reports whether an unconditional Allow statement in the role trust policy names the service.
+func trustsService(role models.AssetNode, service string) bool {
+	doc, _ := permStringProp(role.Properties, "trust_policy_document")
+	var parsed struct {
+		Statement json.RawMessage
+	}
+	if json.Unmarshal([]byte(doc), &parsed) != nil || len(parsed.Statement) == 0 {
+		return false
+	}
+	var list []map[string]any
+	if json.Unmarshal(parsed.Statement, &list) != nil {
+		var one map[string]any
+		if json.Unmarshal(parsed.Statement, &one) != nil {
+			return false
+		}
+		list = []map[string]any{one}
+	}
+	for _, st := range list {
+		if st["Effect"] != "Allow" || st["Condition"] != nil {
+			continue
+		}
+		principal, _ := st["Principal"].(map[string]any)
+		if containsString(principal["Service"], service) && (containsString(st["Action"], "sts:AssumeRole") || containsString(st["Action"], "sts:*")) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(v any, want string) bool {
+	switch t := v.(type) {
+	case string:
+		return strings.EqualFold(t, want)
+	case []any:
+		for _, e := range t {
+			if s, ok := e.(string); ok && strings.EqualFold(s, want) {
+				return true
+			}
+		}
+	}
+	return false
 }

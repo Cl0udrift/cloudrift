@@ -487,7 +487,13 @@ const EDGE_LEGEND: { title: string; line: string; stroke: string; dash?: string;
     note: "Modeled authorization under an assumed compromise. Not an observed incident.",
     items: [
       ["ASSUME_ROLE hop", "Validated sts:AssumeRole opens a distinct target-role session."],
-      ["READ_S3_OBJECT", "Validated s3:GetObject for that session and one collected object."]
+      ["READ_S3_OBJECT", "Validated s3:GetObject for that session and one collected object."],
+      ["READ_SECRET", "Validated secretsmanager:GetSecretValue, including the key decrypt leg."],
+      ["REWRITE_TRUST", "Validated iam:UpdateAssumeRolePolicy. The session can name itself as trusted by the target role."],
+      ["PASS_ROLE_*", "Validated iam:PassRole plus the service calls that run code as the passed role (Lambda, CloudFormation, Glue, Data Pipeline). The session obtains that role's credentials."],
+      ["EDIT_LAMBDA_CODE", "Validated lambda:UpdateFunctionCode and lambda:InvokeFunction on a function whose execution role is another role in the scan."],
+      ["CREATE_POLICY_VERSION", "Validated iam:CreatePolicyVersion on a customer managed policy attached to the session's role or a reachable role."],
+      ["GRANT_ROLE_POLICY", "Validated iam:AttachRolePolicy or iam:PutRolePolicy. On the session's own role this is privilege escalation."]
     ]
   }
 ];
@@ -533,9 +539,25 @@ function IdentityAttackHops({ report }: { report: IdentityAttackReport }) {
         <li>Unknown transitions: {report.unknown_transitions}</li>
         <li>Denied transitions: {report.denied_transitions}</li>
         <li>Unique readable objects: {(report.impacted_resources ?? []).length}</li>
-        <li>Privilege escalation: {report.privilege_escalation || "NOT_ASSESSED"}. An object read is not privilege escalation.</li>
+        <li>
+          Privilege escalation: {report.privilege_escalation || "NOT_ASSESSED"}.
+          {report.privilege_escalation === "NONE_FOUND_IN_MODELED_TECHNIQUES"
+            ? " Only the techniques in the legend are modeled, so this is not a claim that none exists."
+            : " An object read is not privilege escalation."}
+        </li>
         <li>Cross-account validated hops: {report.cross_account_transitions}</li>
       </ul>
+      {(report.escalations ?? []).length > 0 ? (
+        <ul className="space-y-1 rounded border border-red-300 bg-red-50 p-2 text-red-950 dark:border-red-800/50 dark:bg-red-950/40 dark:text-red-100">
+          {(report.escalations ?? []).map((e) => (
+            <li key={`${e.kind}|${e.source_principal}|${e.target_arn}`} className="break-all">
+              <span className="font-semibold">{e.kind}</span> · hop {e.depth + 1}
+              <span className="block">{e.explanation}</span>
+              <span className="block opacity-80">{e.target_arn}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {report.truncated ? (
         <p>
           Search stopped early

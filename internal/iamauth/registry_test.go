@@ -17,7 +17,7 @@ func TestRegistry_EvaluableActionsMatchEvaluator(t *testing.T) {
 			t.Fatalf("incomplete registry row: %+v", cap)
 		}
 		if cap.Support == SupportEvaluated {
-			if cap.Evaluation == EvalUnsupported || !cap.PermissionImpact || len(cap.UnsupportedSemantics) == 0 {
+			if cap.Evaluation == EvalUnsupported || cap.PermissionImpact == cap.ProbeOnly || len(cap.UnsupportedSemantics) == 0 {
 				t.Fatalf("evaluated action is not bounded: %+v", cap)
 			}
 			continue

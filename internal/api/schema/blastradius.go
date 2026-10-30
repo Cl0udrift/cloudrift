@@ -104,6 +104,19 @@ type AttackTransition struct {
 	TransitionID string `json:"transition_id,omitempty"`
 }
 
+// AttackEscalation is a validated hop that gives a session more privilege than it started with.
+// It is modeled capability from collected policy, not evidence that anyone did it.
+type AttackEscalation struct {
+	// Kind is SELF_POLICY_GRANT, TRUST_REWRITE or GRANT_ON_REACHABLE_ROLE.
+	Kind            string `json:"kind"`
+	SourcePrincipal string `json:"source_principal"`
+	TargetARN       string `json:"target_arn"`
+	Technique       string `json:"technique"`
+	TransitionID    string `json:"transition_id,omitempty"`
+	Depth           int    `json:"depth"`
+	Explanation     string `json:"explanation"`
+}
+
 // IdentityAttackReport is a bounded search from one assumed role session.
 type IdentityAttackReport struct {
 	Assumption                 string             `json:"assumption"`
@@ -125,15 +138,18 @@ type IdentityAttackReport struct {
 	// result is truncated.
 	ResourceImpactPathsDiscovered int `json:"resource_impact_paths_discovered"`
 	// ReachableIdentityCount excludes the initial role.
-	ReachableIdentityCount    int                `json:"reachable_identity_count"`
-	CrossAccountTransitions   int                `json:"cross_account_transitions"`
-	MissingPrerequisites      []string           `json:"missing_prerequisites,omitempty"`
-	UnsupportedTechniques     []string           `json:"unsupported_techniques,omitempty"`
-	Truncated                 bool               `json:"truncated"`
-	CoverageNotes             []string           `json:"coverage_notes,omitempty"`
-	StatesExplored            int                `json:"states_explored"`
-	Paths                     []BlastPathVariant `json:"paths,omitempty"`
+	ReachableIdentityCount  int                `json:"reachable_identity_count"`
+	CrossAccountTransitions int                `json:"cross_account_transitions"`
+	MissingPrerequisites    []string           `json:"missing_prerequisites,omitempty"`
+	UnsupportedTechniques   []string           `json:"unsupported_techniques,omitempty"`
+	Truncated               bool               `json:"truncated"`
+	CoverageNotes           []string           `json:"coverage_notes,omitempty"`
+	StatesExplored          int                `json:"states_explored"`
+	Paths                   []BlastPathVariant `json:"paths,omitempty"`
+	// PrivilegeEscalation is VALIDATED_POSSIBLE, NONE_FOUND_IN_MODELED_TECHNIQUES or NOT_ASSESSED.
+	// NONE_FOUND covers only the modeled techniques. It is not a claim that no escalation exists.
 	PrivilegeEscalation       string             `json:"privilege_escalation,omitempty"`
+	Escalations               []AttackEscalation `json:"escalations,omitempty"`
 	ValidatedIdentityMovement bool               `json:"validated_identity_movement"`
 	ValidatedResourceAccess   bool               `json:"validated_resource_access"`
 }
@@ -167,6 +183,17 @@ type PermissionBucketScope struct {
 	Note      string `json:"note"`
 }
 
+// PrivescChain is a set of calls that together give the caller another identity's privileges, such as
+// iam:PassRole plus the service calls that return the passed role's credentials. Kind names the technique.
+// Status is VALIDATED_ALLOWED only when every step is allowed.
+type PrivescChain struct {
+	Kind    string               `json:"kind"`
+	Service string               `json:"service"`
+	RoleARN string               `json:"role_arn"`
+	Status  string               `json:"status"`
+	Steps   []PermissionDecision `json:"steps"`
+}
+
 // PermissionBlastReport is the assumed-compromise permission impact for one role.
 type PermissionBlastReport struct {
 	AssumedCompromise              bool                    `json:"assumed_compromise"`
@@ -181,6 +208,7 @@ type PermissionBlastReport struct {
 	UnknownResourceCount           int                     `json:"unknown_resource_count"`
 	UnresolvedReferenceCount       int                     `json:"unresolved_reference_count"`
 	Decisions                      []PermissionDecision    `json:"decisions,omitempty"`
+	PrivescChains                  []PrivescChain          `json:"privesc_chains,omitempty"`
 	BucketScopes                   []PermissionBucketScope `json:"bucket_scopes,omitempty"`
 	BroadPrivilegeCandidates       []string                `json:"broad_privilege_candidates,omitempty"`
 	CrossAccountResourceARNs       []string                `json:"cross_account_resource_arns,omitempty"`

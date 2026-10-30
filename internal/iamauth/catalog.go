@@ -15,12 +15,14 @@ const (
 	EvalS3Object     = "s3_object_policy"
 	EvalAssumeRole   = "assume_role"
 	EvalIdentityOnly = "identity_only"
-	EvalEC2Instance  = "ec2_instance_identity"
-	EvalLambda       = "lambda_function_policy"
-	EvalRDSInstance  = "rds_instance_identity"
-	EvalSecret       = "secret_resource_policy"
-	EvalKMSKey       = "kms_key_policy"
-	EvalUnsupported  = "unsupported"
+	// EvalIdentityResource is an identity-policy-only decision on a same-account resource the caller would create or edit.
+	EvalIdentityResource = "identity_resource"
+	EvalEC2Instance      = "ec2_instance_identity"
+	EvalLambda           = "lambda_function_policy"
+	EvalRDSInstance      = "rds_instance_identity"
+	EvalSecret           = "secret_resource_policy"
+	EvalKMSKey           = "kms_key_policy"
+	EvalUnsupported      = "unsupported"
 )
 
 // Capability is the authoritative action registry.
@@ -40,8 +42,10 @@ type Capability struct {
 	Consequence          string
 	InventorySupported   bool
 	PermissionImpact     bool
-	AttackTechnique      string
-	SupportVersion       string
+	// ProbeOnly rows are evaluated against a hypothetical resource the caller would create, never against collected ones.
+	ProbeOnly       bool
+	AttackTechnique string
+	SupportVersion  string
 }
 
 // Catalog is the authoritative capability registry. A row is not an authorization result.
@@ -107,6 +111,60 @@ func Catalog() []Capability {
 			Consequence:    "Replace function code if the evaluated request is allowed. Code signing and function state are not evaluated.",
 		},
 		{
+			Action: "lambda:CreateFunction", Service: "lambda", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalLambda, ProbeOnly: true,
+			ResourceShape:  "hypothetical function ARN the caller would create",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Create a function that runs with a passed role if the evaluated request is allowed.",
+		},
+		{
+			Action: "lambda:InvokeFunction", Service: "lambda", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalLambda, ProbeOnly: true,
+			ResourceShape:  "hypothetical function ARN the caller would create",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Run a function the caller created if the evaluated request is allowed.",
+		},
+		{
+			Action: "lambda:AddPermission", Service: "lambda", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
+			ResourceShape:  "hypothetical function ARN the caller would create",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Let another account invoke a function the caller created, if the evaluated request is allowed.",
+		},
+		{
+			Action: "cloudformation:CreateStack", Service: "cloudformation", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
+			ResourceShape:  "hypothetical stack ARN the caller would create",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Create a stack that runs with a passed role if the evaluated request is allowed.",
+		},
+		{
+			Action: "glue:CreateDevEndpoint", Service: "glue", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
+			ResourceShape:  "hypothetical dev endpoint ARN the caller would create",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Create a Glue dev endpoint that runs with a passed role if the evaluated request is allowed.",
+		},
+		{
+			Action: "glue:GetDevEndpoint", Service: "glue", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
+			ResourceShape:  "hypothetical dev endpoint ARN the caller would create",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Read the address of a dev endpoint the caller created if the evaluated request is allowed.",
+		},
+		{
+			Action: "datapipeline:CreatePipeline", Service: "datapipeline", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
+			ResourceShape:  "hypothetical pipeline ARN the caller would create",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Create a pipeline if the evaluated request is allowed.",
+		},
+		{
+			Action: "datapipeline:PutPipelineDefinition", Service: "datapipeline", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
+			ResourceShape:  "hypothetical pipeline ARN the caller would create",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Define a pipeline that runs with a passed role if the evaluated request is allowed.",
+		},
+		{
+			Action: "iam:CreatePolicyVersion", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
+			ResourceShape:  "customer managed policy ARN attached to a reachable role",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Publish a new default version of a managed policy if the evaluated request is allowed.",
+		},
+		{
 			Action: "rds:DeleteDBInstance", Service: "rds", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalRDSInstance,
 			ResourceShape:  "DB instance ARN arn:aws:rds:region:account:db:name",
 			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
@@ -127,6 +185,12 @@ func Catalog() []Capability {
 			Consequence:    "Write an inline policy on a role if the evaluated request is allowed.",
 		},
 		{
+			Action: "iam:UpdateAssumeRolePolicy", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
+			ResourceShape:  "role ARN whose trust policy is rewritten",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Rewrite a role trust policy if the evaluated request is allowed. The caller can then name itself as a trusted principal.",
+		},
+		{
 			Action: "iam:PassRole", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
 			ResourceShape:   "role ARN being passed",
 			RequiredPolicy:  []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
@@ -144,7 +208,7 @@ func Catalog() []Capability {
 		detail := registryDetail[rows[i].Action]
 		rows[i].UnsupportedSemantics = detail.unsupported
 		rows[i].InventorySupported = detail.inventory
-		rows[i].PermissionImpact = rows[i].Support == SupportEvaluated
+		rows[i].PermissionImpact = rows[i].Support == SupportEvaluated && !rows[i].ProbeOnly
 		rows[i].AttackTechnique = detail.technique
 		rows[i].SupportVersion = EvaluatorVersion
 	}
@@ -188,12 +252,46 @@ var registryDetail = map[string]registryFacts{
 		technique: "ASSUME_ROLE",
 	},
 	"iam:AttachRolePolicy": {
-		unsupported: []string{"authorization to attach a policy is not proof of privilege escalation"},
+		unsupported: []string{"the policy to attach is not chosen; the attack search assumes an administrative policy"},
 		inventory:   true,
+		technique:   "GRANT_ROLE_POLICY",
 	},
 	"iam:PutRolePolicy": {
-		unsupported: []string{"authorization to write an inline policy is not proof of privilege escalation"},
+		unsupported: []string{"the policy to write is not chosen; the attack search assumes an administrative policy"},
 		inventory:   true,
+		technique:   "GRANT_ROLE_POLICY",
+	},
+	"lambda:CreateFunction": {
+		unsupported: []string{"the probe uses a fixed function name and Region, so a policy scoped to other names or Regions is UNKNOWN", "code signing configuration", "VPC and layer permissions the call may also need"},
+	},
+	"lambda:InvokeFunction": {
+		unsupported: []string{"the probe uses a fixed function name and Region", "invocation through event sources instead of a direct call"},
+	},
+	"lambda:AddPermission": {
+		unsupported: []string{"the probe uses a fixed function name and Region"},
+	},
+	"cloudformation:CreateStack": {
+		unsupported: []string{"the probe uses a fixed stack name and Region; template contents and stack policy are not evaluated"},
+	},
+	"glue:CreateDevEndpoint": {
+		unsupported: []string{"the probe uses a fixed endpoint name and Region; network and security configuration requirements"},
+	},
+	"glue:GetDevEndpoint": {
+		unsupported: []string{"the probe uses a fixed endpoint name and Region"},
+	},
+	"datapipeline:CreatePipeline": {
+		unsupported: []string{"the probe uses a fixed pipeline name and Region"},
+	},
+	"datapipeline:PutPipelineDefinition": {
+		unsupported: []string{"the probe uses a fixed pipeline name and Region"},
+	},
+	"iam:CreatePolicyVersion": {
+		unsupported: []string{"the five-version limit per policy; policies attached to groups or users, which are not collected"},
+	},
+	"iam:UpdateAssumeRolePolicy": {
+		unsupported: []string{"conditions the rewritten trust policy would carry", "service-side propagation delay"},
+		inventory:   true,
+		technique:   "REWRITE_TRUST",
 	},
 	"iam:PassRole": {
 		unsupported: []string{"permission to pass a role is not permission to assume or use that role", "service-side acceptance of the passed role"},

@@ -14,12 +14,16 @@ import (
 )
 
 const (
-	techniqueAssumeRole  = "ASSUME_ROLE"
-	techniqueReadObject  = "READ_S3_OBJECT"
-	defaultAttackStates  = 24
-	defaultAssumeDepth   = 2
-	maxAttackTransitions = 80
-	maxAttackPaths       = 12
+	techniqueAssumeRole   = "ASSUME_ROLE"
+	techniqueReadObject   = "READ_S3_OBJECT"
+	techniqueReadSecret   = "READ_SECRET"
+	techniqueRewriteTrust = "REWRITE_TRUST"
+	techniqueGrantPolicy  = "GRANT_ROLE_POLICY"
+	techniquePolicyVer    = "CREATE_POLICY_VERSION"
+	defaultAttackStates   = 24
+	defaultAssumeDepth    = 2
+	maxAttackTransitions  = 80
+	maxAttackPaths        = 12
 )
 
 // IdentityAttackRequest is the assumed-compromise search for one role session.
@@ -60,6 +64,11 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 		UnsupportedTechniques: []string{
 			"sts:AssumeRoleWithSAML",
 			"sts:AssumeRoleWithWebIdentity",
+			"iam:PassRole combined with ec2:RunInstances (needs instance profile evidence)",
+			"iam:PassRole combined with ECS, SageMaker, CodeStar or Lambda event source mappings",
+			"iam:SetDefaultPolicyVersion (needs policy version documents)",
+			"escalation through IAM users and groups (users and groups are not collected)",
+			"glue:UpdateDevEndpoint on existing endpoints (endpoints are not collected)",
 			"network_reachability",
 			"workload_credential_access",
 		},
@@ -99,6 +108,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 	reachable := map[string]struct{}{}
 	evalCache := map[string]schema.PermissionBlastReport{}
 	var missing []string
+	var grants []schema.AttackTransition
 	queue := []attackSearchState{{
 		principal: report.InitialPrincipal,
 		roles:     []string{report.InitialPrincipal},
@@ -127,6 +137,8 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 				ScanID:            req.ScanID,
 				RoleARN:           state.principal,
 				AssumedCompromise: true,
+				IncludeSelf:       true,
+				PrivescChains:     true,
 				SessionSource:     report.SessionContextSource,
 				RequestContext:    state.context,
 				Assets:            req.Assets,
@@ -138,13 +150,9 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 		roleNode := findRole(req.Assets, state.principal)
 		sessionState := observedSessionState(roleNode)
 		sessionClass := sessionEvidenceClass(roleNode)
-		var next []string
-		for _, decision := range blast.Decisions {
-			cap, known := iamauth.CapabilityFor(decision.Action)
-			if !known || cap.AttackTechnique == "" {
-				continue
-			}
-			technique := cap.AttackTechnique
+		var next []nextHop
+		for _, ad := range attackDecisions(blast) {
+			decision, technique := ad.PermissionDecision, ad.technique
 			key := state.principal + "\n" + technique + "\n" + decision.ResourceARN + "\n" + contextFP
 			hop := schema.AttackTransition{
 				Technique:           technique,
@@ -171,7 +179,8 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 				hop.MissingPrerequisites = []string{decision.Reason}
 				missing = append(missing, decision.Reason)
 			}
-			cycle := technique == techniqueAssumeRole && containsRole(state.roles, decision.ResourceARN)
+			opensSession := technique == techniqueAssumeRole || technique == techniqueRewriteTrust || isChainSession(technique)
+			cycle := opensSession && containsRole(state.roles, decision.ResourceARN)
 			hop.Cycle = cycle
 			_, seen := seenTransition[key]
 			if !seen {
@@ -187,14 +196,14 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 					if !decision.SameAccount {
 						report.CrossAccountTransitions++
 					}
-					if technique == techniqueAssumeRole {
+					if opensSession {
 						report.ValidatedRoleTransitions++
 						if decision.ResourceARN != report.InitialPrincipal {
 							reachable[decision.ResourceARN] = struct{}{}
 						}
 					}
 				case string(ValidityConditional):
-					if technique == techniqueAssumeRole {
+					if opensSession {
 						report.ConditionalRoleTransitions++
 					}
 				case "DENIED":
@@ -206,15 +215,28 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 			if hop.Feasibility != string(ValidityValidatedPossible) {
 				continue
 			}
-			if technique == techniqueAssumeRole {
-				if !cycle && state.depth < depthLimit {
-					next = append(next, decision.ResourceARN)
+			if technique == techniqueRewriteTrust {
+				addEscalation(&report, "TRUST_REWRITE", hop, "This session may rewrite the trust policy of "+decision.ResourceARN+", so it can name itself as trusted and then assume it.")
+			}
+			if isChainSession(technique) {
+				addEscalation(&report, technique, hop, "This session can obtain the credentials of "+decision.ResourceARN+" through "+technique+": "+strings.Join(decision.Evidence, ", ")+".")
+			}
+			if technique == techniqueGrantPolicy || technique == techniquePolicyVer {
+				if decision.ResourceARN == state.principal {
+					addEscalation(&report, "SELF_POLICY_GRANT", hop, "This session may change a policy that applies to its own role, so it can grant itself any permission.")
+				} else {
+					grants = append(grants, hop)
 				}
-				if state.depth >= 1 {
+			}
+			if opensSession {
+				if !cycle && state.depth < depthLimit {
+					next = append(next, nextHop{target: decision.ResourceARN, origin: originFor(technique)})
+				}
+				if technique == techniqueAssumeRole && state.depth >= 1 {
 					report.CoverageNotes = append(report.CoverageNotes, "AWS role chaining limits a role session that calls AssumeRole to one hour. Session duration was not collected.")
 				}
 			}
-			if technique == techniqueReadObject {
+			if technique == techniqueReadObject || technique == techniqueReadSecret {
 				impacted[decision.ResourceARN] = struct{}{}
 				report.ResourceImpactPathsDiscovered++
 				if !recordAttackPath(seenPath, append(append([]string{}, state.roles...), decision.ResourceARN), technique, pathLimit) {
@@ -223,20 +245,25 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 				}
 			}
 		}
-		sort.Strings(next)
-		for _, target := range next {
-			roles := append(append([]string{}, state.roles...), target)
+		sort.Slice(next, func(i, j int) bool { return next[i].target < next[j].target })
+		for _, hop := range next {
+			roles := append(append([]string{}, state.roles...), hop.target)
 			queue = append(queue, attackSearchState{
-				principal: target,
+				principal: hop.target,
 				depth:     state.depth + 1,
 				roles:     roles,
-				origin:    "modeled_assume_role",
+				origin:    hop.origin,
 			})
 		}
 	}
 	report.ReachableIdentityCount = len(reachable)
 	report.ImpactedResources = mapKeys(impacted)
-	report.PrivilegeEscalation = "NOT_ASSESSED"
+	for _, grant := range grants {
+		if _, ok := reachable[grant.TargetARN]; ok {
+			addEscalation(&report, "GRANT_ON_REACHABLE_ROLE", grant, "This session can reach "+grant.TargetARN+" and may attach or write a policy on it.")
+		}
+	}
+	report.PrivilegeEscalation = escalationState(report)
 	report.ValidatedIdentityMovement = report.ValidatedRoleTransitions > 0
 	report.ValidatedResourceAccess = len(report.ImpactedResources) > 0
 	report.MissingPrerequisites = uniqueSorted(missing)
@@ -433,7 +460,7 @@ func identityAttackSummary(scanID, principal string, report schema.IdentityAttac
 		AttackPathCount:          report.ResourceImpactPathCount,
 		ValidatedTransitionCount: report.ValidatedTransitionCount,
 		ReachableIdentityCount:   report.ReachableIdentityCount,
-		EscalationPossible:       report.ValidatedTransitionCount > 0,
+		EscalationPossible:       len(report.Escalations) > 0 || report.ValidatedTransitionCount > 0,
 		AnalysisComplete:         !report.Truncated,
 		GraphAvailable:           !containsNote(report.CoverageNotes, "role_not_in_scan") && !containsNote(report.CoverageNotes, "invalid_request"),
 		SummaryText:              attackSummaryText(report),
@@ -447,6 +474,86 @@ func identityAttackSummary(scanID, principal string, report schema.IdentityAttac
 	return sum
 }
 
+type attackDecision struct {
+	schema.PermissionDecision
+	technique string
+}
+
+// attackDecisions lists the decisions that are attack hops. A PassRole chain is one hop that
+// carries the PassRole decision ID and a fingerprint over every step.
+func attackDecisions(blast schema.PermissionBlastReport) []attackDecision {
+	var out []attackDecision
+	for _, d := range blast.Decisions {
+		if cap, ok := iamauth.CapabilityFor(d.Action); ok && cap.AttackTechnique != "" {
+			out = append(out, attackDecision{d, cap.AttackTechnique})
+		}
+	}
+	for _, c := range blast.PrivescChains {
+		h := sha256.New()
+		var evidence []string
+		for _, step := range c.Steps {
+			h.Write([]byte(step.EvidenceFingerprint + "|"))
+			evidence = append(evidence, step.Action+" "+step.Status)
+		}
+		out = append(out, attackDecision{schema.PermissionDecision{
+			Action: c.Steps[0].Action, Category: c.Steps[0].Category, ResourceARN: c.RoleARN, Status: c.Status,
+			Reason: chainReason(c), SameAccount: true, DecisionID: c.Steps[0].DecisionID,
+			EvidenceFingerprint: hex.EncodeToString(h.Sum(nil))[:16], Evidence: evidence,
+		}, c.Kind})
+	}
+	return out
+}
+
+// isChainSession is true for chain techniques that end in a session as another role.
+func isChainSession(technique string) bool {
+	return strings.HasPrefix(technique, "PASS_ROLE_") || technique == "EDIT_LAMBDA_CODE"
+}
+
+func chainReason(c schema.PrivescChain) string {
+	for _, s := range c.Steps {
+		if s.Status != iamauth.StatusAllowed {
+			return s.Action + ": " + s.Reason
+		}
+	}
+	return ""
+}
+
+type nextHop struct{ target, origin string }
+
+func originFor(technique string) string {
+	switch technique {
+	case techniqueRewriteTrust:
+		return "modeled_trust_rewrite"
+	}
+	if isChainSession(technique) {
+		return "modeled_" + strings.ToLower(technique)
+	}
+	return "modeled_assume_role"
+}
+
+func addEscalation(report *schema.IdentityAttackReport, kind string, hop schema.AttackTransition, why string) {
+	for _, e := range report.Escalations {
+		if e.TransitionID == hop.TransitionID && e.Kind == kind {
+			return
+		}
+	}
+	report.Escalations = append(report.Escalations, schema.AttackEscalation{
+		Kind: kind, SourcePrincipal: hop.SourcePrincipal, TargetARN: hop.TargetARN, Technique: hop.Technique,
+		TransitionID: hop.TransitionID, Depth: hop.Depth, Explanation: why,
+	})
+}
+
+func escalationState(report schema.IdentityAttackReport) string {
+	switch {
+	case len(report.Escalations) > 0:
+		return "VALIDATED_POSSIBLE"
+	case report.Truncated:
+		return "NOT_ASSESSED"
+	default:
+		return "NONE_FOUND_IN_MODELED_TECHNIQUES"
+	}
+}
+
 func attackSummaryText(report schema.IdentityAttackReport) string {
 	text := "Complete resource paths: " + itoaU(report.ResourceImpactPathCount) +
 		". Validated transitions: " + itoaU(report.ValidatedTransitionCount) +
@@ -454,7 +561,8 @@ func attackSummaryText(report schema.IdentityAttackReport) string {
 		". Conditional role transitions: " + itoaU(report.ConditionalRoleTransitions) +
 		". Unknown transitions: " + itoaU(report.UnknownTransitions) +
 		". Denied transitions: " + itoaU(report.DeniedTransitions) +
-		". Potentially readable objects: " + itoaU(len(report.ImpactedResources)) + "."
+		". Privilege escalations: " + itoaU(len(report.Escalations)) +
+		". Potentially readable resources: " + itoaU(len(report.ImpactedResources)) + "."
 	if report.Truncated {
 		text += " The search stopped early, so these counts are incomplete."
 	}
@@ -503,8 +611,11 @@ func IdentityAttackExplorerPayload(sum schema.BlastRadiusSummary) schema.BlastEx
 	addNode(focus, "iam_role", true)
 	for _, hop := range report.Transitions {
 		subtype := "iam_role"
-		if hop.Technique == techniqueReadObject {
+		switch hop.Technique {
+		case techniqueReadObject:
 			subtype = "s3_object"
+		case techniqueReadSecret:
+			subtype = string(models.AssetSecret)
 		}
 		addNode(hop.TargetARN, subtype, false)
 		for i := range resp.Nodes {

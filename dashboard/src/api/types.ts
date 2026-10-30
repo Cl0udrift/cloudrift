@@ -514,6 +514,7 @@ export interface CIEMAssessment {
   resource_impact_paths: number;
   validated_transitions: number;
   privilege_escalation?: string;
+  escalations?: { kind: string; source_principal: string; target_arn: string; technique: string; depth: number; explanation: string }[];
   validated_identity_movement: boolean;
   validated_resource_access: boolean;
   truncated: boolean;
@@ -1017,6 +1018,7 @@ export interface IdentityAttackReport {
   resource_impact_paths_discovered?: number;
   reachable_identity_count?: number;
   privilege_escalation?: string;
+  escalations?: { kind: string; source_principal: string; target_arn: string; technique: string; depth: number; explanation: string }[];
   validated_identity_movement?: boolean;
   validated_resource_access?: boolean;
   cross_account_transitions: number;
