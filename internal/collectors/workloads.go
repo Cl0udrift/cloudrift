@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
@@ -69,40 +71,107 @@ func OrganizationAccountNodes(cov Coverage) []models.AssetNode {
 	return out
 }
 
-// CollectWorkloads maps EC2 instance profiles and Lambda execution roles.
-// A regional failure is recorded and does not discard other regions.
+// describeAccountRegions is replaced in tests. The default calls DescribeRegions
+// with the account's assumed audit credentials.
+var describeAccountRegions = func(ctx context.Context, account Account) RegionDiscoveryResult {
+	return DiscoverEnabledRegions(ctx, account.ID, *account.Session, ec2.NewFromConfig(*account.Session))
+}
+
+// regionalWorkloadClients is replaced in tests so planning can run without AWS.
+var regionalWorkloadClients = func(cfg awsv2.Config) WorkloadClients {
+	return WorkloadClients{
+		EC2: ec2.NewFromConfig(cfg), IAM: iam.NewFromConfig(cfg), Lambda: lambda.NewFromConfig(cfg),
+		ECS: ecs.NewFromConfig(cfg), EKS: eks.NewFromConfig(cfg),
+	}
+}
+
+type regionJob struct {
+	account Account
+	region  string
+}
+
+// CollectWorkloads maps EC2, Lambda, ECS, and EKS in the Regions selected for
+// each account. Account-global collectors are not invoked here. A failed
+// automatic discovery scans no Regions for that account and does not fall back
+// to us-east-1. One Region's failure stays on that Region.
 func CollectWorkloads(ctx context.Context, cfg *config.Config, accounts []Account) ([]models.AssetNode, []models.Relationship, error) {
-	regions := cfg.AWS.Regions
-	if len(regions) == 0 {
-		regions = []string{"us-east-1"}
+	mode, explicit, err := config.ResolveRegionMode(cfg)
+	if err != nil {
+		return nil, nil, err
 	}
 	var assets []models.AssetNode
-	var rels []models.Relationship
+	var jobs []regionJob
 	for _, account := range accounts {
 		if account.Session == nil {
 			continue
 		}
-		for _, region := range regions {
-			regional := account.Session.Copy()
-			regional.Region = region
-			nodes, edges, err := CollectRegionalWorkloads(ctx, account.ID, region, WorkloadClients{
-				EC2: ec2.NewFromConfig(regional), IAM: iam.NewFromConfig(regional), Lambda: lambda.NewFromConfig(regional),
-				ECS: ecs.NewFromConfig(regional), EKS: eks.NewFromConfig(regional),
-			}, time.Now().UTC())
-			if err != nil {
-				warnPartial(ctx, "workloads", err)
-				assets = append(assets, models.AssetNode{
-					ARN:       "arn:cloudrift:workload-collection:::" + account.ID + ":" + region,
-					AssetType: "workload_collection_status", AccountID: account.ID, Region: region,
-					Properties: map[string]any{"status": "partial", "error": err.Error()},
-				})
-				continue
-			}
-			assets = append(assets, nodes...)
-			rels = append(rels, edges...)
+		var plan RegionDiscoveryResult
+		if mode == config.RegionModeAuto {
+			plan = describeAccountRegions(ctx, account)
+		} else {
+			plan = explicitRegionPlan(account.ID, mode, explicit)
+		}
+		assets = append(assets, regionDiscoveryAsset(plan))
+		if plan.Status != "succeeded" {
+			continue
+		}
+		for _, region := range plan.Selected {
+			jobs = append(jobs, regionJob{account: account, region: region})
 		}
 	}
+	workers := 1
+	if cfg != nil && cfg.Scan.RoleAssumptionConcurrency > 0 {
+		workers = cfg.Scan.RoleAssumptionConcurrency
+	}
+	var mu sync.Mutex
+	var rels []models.Relationship
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for _, job := range jobs {
+		if ctx.Err() != nil {
+			mu.Lock()
+			assets = append(assets, cancelledRegion(job.account.ID, job.region))
+			mu.Unlock()
+			continue
+		}
+		wg.Add(1)
+		go func(job regionJob) {
+			defer wg.Done()
+			select {
+			case <-ctx.Done():
+				mu.Lock()
+				assets = append(assets, cancelledRegion(job.account.ID, job.region))
+				mu.Unlock()
+				return
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			}
+			regional := job.account.Session.Copy()
+			regional.Region = job.region
+			nodes, edges, err := CollectRegionalWorkloads(ctx, job.account.ID, job.region, regionalWorkloadClients(regional), time.Now().UTC())
+			mu.Lock()
+			defer mu.Unlock()
+			assets = append(assets, nodes...)
+			rels = append(rels, edges...)
+			if err != nil {
+				warnPartial(ctx, "workloads", err)
+				assets = append(assets, CollectionStatus(job.account.ID, job.region, "workloads", "regional", "failed", err.Error()))
+			}
+		}(job)
+	}
+	wg.Wait()
+	sort.Slice(assets, func(i, j int) bool { return assets[i].ARN < assets[j].ARN })
+	sort.Slice(rels, func(i, j int) bool {
+		if rels[i].SourceARN != rels[j].SourceARN {
+			return rels[i].SourceARN < rels[j].SourceARN
+		}
+		return rels[i].TargetARN < rels[j].TargetARN
+	})
 	return assets, rels, nil
+}
+
+func cancelledRegion(accountID, region string) models.AssetNode {
+	return CollectionStatus(accountID, region, "workloads", "regional", "failed", "cancelled")
 }
 
 // CollectRegionalWorkloads reads one account and region through the supplied clients.
@@ -112,20 +181,22 @@ func CollectRegionalWorkloads(ctx context.Context, accountID, region string, cli
 	if clients.EC2 != nil && clients.IAM != nil {
 		nodes, edges, err := collectEC2(ctx, accountID, region, clients.EC2, clients.IAM, collectedAt)
 		if err != nil {
-			return nil, nil, err
+			assets = append(assets, CollectionStatus(accountID, region, "ec2", "regional", "failed", err.Error()))
+		} else {
+			assets = append(assets, nodes...)
+			assets = append(assets, CollectionStatus(accountID, region, "ec2", "regional", "succeeded", ""))
+			rels = append(rels, edges...)
 		}
-		assets = append(assets, nodes...)
-		assets = append(assets, CollectionStatus(accountID, region, "ec2", "regional", "succeeded", ""))
-		rels = append(rels, edges...)
 	}
 	if clients.Lambda != nil {
 		nodes, edges, err := collectLambda(ctx, accountID, region, clients.Lambda, collectedAt)
 		if err != nil {
-			return assets, rels, err
+			assets = append(assets, CollectionStatus(accountID, region, "lambda", "regional", "failed", err.Error()))
+		} else {
+			assets = append(assets, nodes...)
+			assets = append(assets, CollectionStatus(accountID, region, "lambda", "regional", "succeeded", ""))
+			rels = append(rels, edges...)
 		}
-		assets = append(assets, nodes...)
-		assets = append(assets, CollectionStatus(accountID, region, "lambda", "regional", "succeeded", ""))
-		rels = append(rels, edges...)
 	}
 	if clients.ECS != nil || clients.EKS != nil {
 		nodes, edges, err := collectContainers(ctx, accountID, region, clients.ECS, clients.EKS, collectedAt)

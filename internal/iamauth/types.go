@@ -2,7 +2,7 @@ package iamauth
 
 import "time"
 
-const EvaluatorVersion = "iam-authz-4.1.0"
+const EvaluatorVersion = "iam-authz-4.5.0"
 
 const (
 	StatusAllowed     = "VALIDATED_ALLOWED"
@@ -58,6 +58,9 @@ const (
 	ReasonMissingBPA           = "missing_s3_block_public_access_evidence"
 	ReasonCrossAccountResource = "cross_account_requires_resource_policy"
 	ReasonMissingKMS           = "missing_kms_key_policy"
+	ReasonKMSNotAllowed        = "kms_decrypt_not_allowed"
+	ReasonKMSCrossAccountAWS   = "aws_managed_key_is_not_shareable"
+	ReasonResourceShape        = "resource_arn_shape_not_supported"
 	ReasonSimulator            = "simulator_disagreement"
 )
 
@@ -86,6 +89,38 @@ type AuthorizationRequest struct {
 	// key policy was not evaluated.
 	S3KMSKeyPolicy string
 	Simulator      *SimulatorObservation
+	// SecretKMS describes the key that encrypts the secret for secretsmanager:GetSecretValue.
+	// Nil means the key was not collected, which keeps the decision UNKNOWN.
+	SecretKMS *SecretKMSEvidence
+	// KMSGrants are the collected grants on the key for kms:Decrypt requests.
+	KMSGrants []KMSGrant
+}
+
+// KMSGrant is one collected key grant. Constrained is true when the grant carries any
+// encryption-context constraint, which the evaluator does not resolve.
+type KMSGrant struct {
+	GranteePrincipal string
+	Operations       []string
+	Constrained      bool
+}
+
+// Secret key modes for SecretKMSEvidence.Mode.
+const (
+	SecretKeyAWSManaged      = "aws_managed"
+	SecretKeyCustomerManaged = "customer_managed"
+)
+
+// SecretKMSEvidence is the key leg of a secret read. For a customer managed key the evaluator
+// also runs kms:Decrypt on KeyARN with the same caller controls.
+type SecretKMSEvidence struct {
+	Mode      string
+	KeyARN    string
+	KeyPolicy PolicySlot
+	// RCPs are the resource control policies of the key owner account. Empty falls back to the
+	// request RCPs, which belong to the secret owner account.
+	RCPs PolicySlot
+	// Grants are the collected grants on the customer managed key.
+	Grants []KMSGrant
 }
 
 // PolicySlot is one class of policy evidence.

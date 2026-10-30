@@ -37,6 +37,11 @@ import (
 // iam:SimulatePrincipalPolicy is not called. A supplied simulator note cannot fill
 // missing evidence and cannot silently replace a disagreement.
 func Evaluate(req AuthorizationRequest) AuthorizationDecision {
+	decision := baseDecision(req)
+	return withSimulator(evaluateRequest(req, decision), req.Simulator)
+}
+
+func baseDecision(req AuthorizationRequest) AuthorizationDecision {
 	decision := AuthorizationDecision{
 		ScanID:              strings.TrimSpace(req.ScanID),
 		PrincipalARN:        strings.TrimSpace(req.PrincipalARN),
@@ -49,7 +54,16 @@ func Evaluate(req AuthorizationRequest) AuthorizationDecision {
 		EvidenceFingerprint: EvidenceFingerprint(req),
 	}
 	decision.ID = decisionARN(decision, req.RequestContext)
-	return withSimulator(evaluateBody(req, decision), req.Simulator)
+	return decision
+}
+
+// evaluateRequest runs the action's own evaluation, then the key leg for secret reads.
+func evaluateRequest(req AuthorizationRequest, decision AuthorizationDecision) AuthorizationDecision {
+	d := evaluateBody(req, decision)
+	if cap, ok := CapabilityFor(req.Action); ok && cap.Evaluation == EvalSecret {
+		return combineSecretKey(req, d)
+	}
+	return d
 }
 
 func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) AuthorizationDecision {
@@ -67,6 +81,14 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 	if cap.Evaluation == EvalS3Object && !isObjectARN(decision.ResourceARN) {
 		return finish(decision, StatusUnknown, ReasonS3Scope)
 	}
+	if ok && !resourceShapeOK(cap.Evaluation, decision.ResourceARN) {
+		return finish(decision, StatusUnknown, ReasonResourceShape)
+	}
+	if (cap.Evaluation == EvalEC2Instance || cap.Evaluation == EvalRDSInstance) && !decision.SameAccount {
+		// An instance has no resource policy, so no cross-account grant can exist; keep it UNKNOWN rather than assert a deny.
+		decision.MissingEvidence = append(decision.MissingEvidence, ReasonCrossAccountResource)
+		return finish(decision, StatusUnknown, ReasonCrossAccountResource)
+	}
 	if cap.Evaluation == EvalIdentityOnly && !isIAMRoleARN(decision.ResourceARN) {
 		return finish(decision, StatusUnknown, ReasonRoleResource)
 	}
@@ -81,11 +103,22 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 	session, sErr := loadGroup(req, req.SessionPolicies, "session", false)
 	scp, scpErr := loadGroup(req, req.SCPs, "scp", false)
 	rcp, rcpErr := loadGroup(req, req.RCPs, "rcp", false)
+	groups := []groupResult{identity, resource, trust, boundary, session, scp, rcp}
+	var delegated groupResult
+	if cap.Evaluation == EvalKMSKey {
+		// Root-principal Allows in a key policy only delegate to IAM; they are not direct grants.
+		directSlot, delegatedSlot := splitKeyPolicy(req.ResourcePolicy)
+		var dErr, delErr error
+		resource, dErr = loadGroup(req, directSlot, "resource", false)
+		delegated, delErr = loadGroup(req, delegatedSlot, "resource", false)
+		groups = []groupResult{identity, resource, delegated, trust, boundary, session, scp, rcp}
+		resErr = firstErr(dErr, delErr)
+	}
 	if err := firstErr(idErr, resErr, trustErr, bErr, sErr, scpErr, rcpErr); err != nil {
 		decision.Unsupported = append(decision.Unsupported, err.Error())
 		return finish(decision, StatusUnknown, ReasonMalformed)
 	}
-	for _, g := range []groupResult{identity, resource, trust, boundary, session, scp, rcp} {
+	for _, g := range groups {
 		decision.Provenance = append(decision.Provenance, g.provenance...)
 		decision.ApplicableStatements = append(decision.ApplicableStatements, g.applicable...)
 		decision.ExplicitDeny = append(decision.ExplicitDeny, g.denies...)
@@ -96,10 +129,15 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 	if len(decision.ExplicitDeny) > 0 {
 		return finish(decision, StatusDenied, ReasonExplicitDeny)
 	}
-	for _, g := range []groupResult{identity, resource, trust, boundary, session, scp, rcp} {
+	for _, g := range groups {
 		if g.undecidableDeny {
 			return finish(decision, StatusUnknown, ReasonUndecidableDeny)
 		}
+	}
+	if cap.Evaluation == EvalKMSKey && req.ResourcePolicy.State != EvidencePresent {
+		// Every key has a key policy, so absence is never a valid state.
+		decision.MissingEvidence = append(decision.MissingEvidence, ReasonMissingKMS)
+		return finish(decision, StatusUnknown, ReasonMissingKMS)
 	}
 	if missing := missingControls(req); len(missing) > 0 {
 		decision.MissingEvidence = missing
@@ -147,11 +185,245 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 	switch cap.Evaluation {
 	case EvalAssumeRole:
 		return finishAssumeRole(decision, identity, trust)
-	case EvalIdentityOnly:
+	case EvalIdentityOnly, EvalEC2Instance, EvalRDSInstance:
 		return finishIdentityOnly(decision, identity)
+	case EvalKMSKey:
+		return finishKMS(decision, identity, resource, delegated, grantAllows(req))
 	default:
 		return finishGetObject(decision, identity, resource, req)
 	}
+}
+
+// finishKMS applies KMS key-policy semantics. A key policy that allows the principal directly
+// is enough in the same account. A key policy that only allows an account root delegates to
+// IAM, so the identity policy must also allow. Across accounts both must allow.
+// https://docs.aws.amazon.com/kms/latest/developerguide/key-policy-default.html
+func finishKMS(decision AuthorizationDecision, identity, direct, delegated groupResult, grant bool) AuthorizationDecision {
+	if blockedWithoutAllow(identity) || blockedWithoutAllow(direct) || blockedWithoutAllow(delegated) {
+		return finish(decision, StatusUnknown, ReasonUnsupportedCondition)
+	}
+	// An unconstrained grant to the caller allows the operation without the key or identity policy.
+	var viaPolicy bool
+	if decision.SameAccount {
+		viaPolicy = direct.definiteAllow || (delegated.definiteAllow && identity.definiteAllow)
+	} else {
+		viaPolicy = (direct.definiteAllow || delegated.definiteAllow) && identity.definiteAllow
+	}
+	if grant || viaPolicy {
+		decision.SimulatorNote = "local evaluation only; iam:SimulatePrincipalPolicy was not called"
+		return finish(decision, StatusAllowed, ReasonAllowed)
+	}
+	if identity.conditional || direct.conditional || delegated.conditional {
+		return finish(decision, StatusConditional, ReasonMissingContext)
+	}
+	return finish(decision, StatusUnknown, ReasonNoAllow)
+}
+
+// splitKeyPolicy separates a key policy into statements that grant directly and Allow
+// statements that name an account root. Deny statements stay on the direct side so a Deny
+// aimed at a root principal is still seen. A policy that cannot be parsed is returned
+// unchanged and fails later in loadGroup.
+func splitKeyPolicy(slot PolicySlot) (direct, delegated PolicySlot) {
+	direct = slot
+	delegated = PolicySlot{State: slot.State, Evidence: slot.Evidence}
+	if slot.State != EvidencePresent {
+		return direct, delegated
+	}
+	direct.Documents = nil
+	for _, doc := range slot.Documents {
+		stmts := doc.Statements
+		if len(stmts) == 0 && strings.TrimSpace(doc.Raw) != "" {
+			normalized, err := models.NormalizeIdentityPolicy(doc.ID, doc.PolicyType, "", doc.Raw)
+			if err != nil {
+				return slot, PolicySlot{State: slot.State, Evidence: slot.Evidence}
+			}
+			stmts = viewsFromModel(doc, normalized)
+		}
+		directDoc, delegatedDoc := doc, doc
+		directDoc.Raw, delegatedDoc.Raw = "", ""
+		directDoc.Statements, delegatedDoc.Statements = nil, nil
+		for _, stmt := range stmts {
+			if !strings.EqualFold(stmt.Effect, "Allow") {
+				directDoc.Statements = append(directDoc.Statements, stmt)
+				continue
+			}
+			roots, others := splitRootPrincipals(stmt.Principal)
+			if len(others) > 0 {
+				d := stmt
+				d.Principal = others
+				directDoc.Statements = append(directDoc.Statements, d)
+			}
+			if len(roots) > 0 {
+				d := stmt
+				d.Principal = roots
+				delegatedDoc.Statements = append(delegatedDoc.Statements, d)
+			}
+		}
+		direct.Documents = append(direct.Documents, directDoc)
+		delegated.Documents = append(delegated.Documents, delegatedDoc)
+	}
+	return direct, delegated
+}
+
+// splitRootPrincipals returns principal maps holding the account-root AWS entries and
+// everything else. A statement without an AWS principal key is all "others".
+func splitRootPrincipals(principal map[string]any) (roots, others map[string]any) {
+	var rootItems, otherItems []any
+	for _, item := range scalarList(principal["AWS"]) {
+		item = strings.TrimSpace(item)
+		switch {
+		case strings.HasSuffix(item, ":root"):
+			rootItems = append(rootItems, item)
+		case len(item) == 12 && strings.Trim(item, "0123456789") == "":
+			rootItems = append(rootItems, "arn:aws:iam::"+item+":root")
+		default:
+			otherItems = append(otherItems, item)
+		}
+	}
+	if len(rootItems) > 0 {
+		roots = map[string]any{"AWS": rootItems}
+	}
+	rest := map[string]any{}
+	for k, v := range principal {
+		if k != "AWS" {
+			rest[k] = v
+		}
+	}
+	if len(otherItems) > 0 {
+		rest["AWS"] = otherItems
+	}
+	if len(rest) > 0 || len(rootItems) == 0 {
+		others = rest
+	}
+	return roots, others
+}
+
+// combineSecretKey joins the secret leg with the key leg. The key leg is a full kms:Decrypt
+// evaluation by the same caller against the key, so boundaries, SCPs and key policy all apply.
+func combineSecretKey(req AuthorizationRequest, secret AuthorizationDecision) AuthorizationDecision {
+	if secret.Status == StatusDenied || secret.Status == StatusUnknown {
+		return secret
+	}
+	k := req.SecretKMS
+	if k == nil || (k.Mode != SecretKeyAWSManaged && k.Mode != SecretKeyCustomerManaged) {
+		secret.MissingEvidence = append(secret.MissingEvidence, ReasonMissingKMS)
+		return finish(secret, StatusUnknown, ReasonMissingKMS)
+	}
+	if k.Mode == SecretKeyAWSManaged {
+		if !secret.SameAccount {
+			return finish(secret, StatusUnknown, ReasonKMSCrossAccountAWS)
+		}
+		return secret
+	}
+	kreq := req
+	kreq.Action = "kms:Decrypt"
+	kreq.ResourceARN = k.KeyARN
+	kreq.ResourceAccountID = accountFromARN(k.KeyARN)
+	kreq.ResourcePolicy = k.KeyPolicy
+	kreq.SecretKMS = nil
+	kreq.KMSGrants = k.Grants
+	// Facts of a GetSecretValue call that key policies commonly condition on. Caller-supplied values win.
+	kreq.RequestContext = map[string]string{"kms:CallerAccount": accountFromARN(req.PrincipalARN)}
+	if parts := strings.Split(req.ResourceARN, ":"); len(parts) > 3 && parts[3] != "" {
+		kreq.RequestContext["kms:ViaService"] = "secretsmanager." + parts[3] + ".amazonaws.com"
+	}
+	for key, value := range req.RequestContext {
+		kreq.RequestContext[key] = value
+	}
+	kreq.Simulator = nil
+	if k.RCPs.State != "" {
+		kreq.RCPs = k.RCPs
+	}
+	key := evaluateBody(kreq, baseDecision(kreq))
+
+	merged := secret
+	merged.ApplicableStatements = append(merged.ApplicableStatements, key.ApplicableStatements...)
+	merged.ExplicitDeny = append(merged.ExplicitDeny, key.ExplicitDeny...)
+	merged.UnsatisfiedConditions = append(merged.UnsatisfiedConditions, key.UnsatisfiedConditions...)
+	merged.MissingContext = append(merged.MissingContext, key.MissingContext...)
+	merged.MissingEvidence = append(merged.MissingEvidence, key.MissingEvidence...)
+	merged.Unsupported = append(merged.Unsupported, key.Unsupported...)
+	merged.Provenance = append(merged.Provenance, key.Provenance...)
+	switch {
+	case key.Status == StatusDenied:
+		return finish(merged, StatusDenied, ReasonExplicitDeny)
+	case key.Status == StatusUnknown:
+		reason := key.Reason
+		switch reason {
+		case ReasonMissingResource:
+			reason = ReasonMissingKMS
+		case ReasonNoAllow:
+			reason = ReasonKMSNotAllowed
+		}
+		return finish(merged, StatusUnknown, reason)
+	case key.Status == StatusConditional || secret.Status == StatusConditional:
+		return finish(merged, StatusConditional, ReasonMissingContext)
+	default:
+		return finish(merged, StatusAllowed, ReasonAllowed)
+	}
+}
+
+// resourceShapeOK checks that the target ARN has the shape the action's evaluation needs.
+func resourceShapeOK(evaluation, arn string) bool {
+	switch evaluation {
+	case EvalSecret:
+		return isSecretARN(arn)
+	case EvalKMSKey:
+		return isKMSKeyARN(arn)
+	case EvalEC2Instance:
+		return isEC2InstanceARN(arn)
+	case EvalLambda:
+		return arnHas(arn, ":lambda:", ":function:")
+	case EvalRDSInstance:
+		return arnHas(arn, ":rds:", ":db:")
+	default:
+		return true
+	}
+}
+
+func arnHas(arn string, parts ...string) bool {
+	arn = strings.TrimSpace(arn)
+	if !strings.HasPrefix(arn, "arn:") || strings.Contains(arn, "*") {
+		return false
+	}
+	for _, part := range parts {
+		if !strings.Contains(arn, part) {
+			return false
+		}
+	}
+	return true
+}
+
+func isEC2InstanceARN(arn string) bool {
+	arn = strings.TrimSpace(arn)
+	return strings.HasPrefix(arn, "arn:") && strings.Contains(arn, ":ec2:") && strings.Contains(arn, ":instance/") && !strings.Contains(arn, "*")
+}
+
+// grantAllows reports whether an unconstrained grant gives the caller kms:Decrypt on the key.
+// Constrained grants (encryption context) and grants naming other principals are ignored,
+// which can only withhold an Allow, never create one.
+func grantAllows(req AuthorizationRequest) bool {
+	for _, g := range req.KMSGrants {
+		if g.GranteePrincipal != req.PrincipalARN || g.Constrained {
+			continue
+		}
+		for _, op := range g.Operations {
+			if strings.EqualFold(op, "Decrypt") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isSecretARN(arn string) bool {
+	arn = strings.TrimSpace(arn)
+	return strings.HasPrefix(arn, "arn:") && strings.Contains(arn, ":secretsmanager:") && strings.Contains(arn, ":secret:") && !strings.Contains(arn, "*")
+}
+
+func isKMSKeyARN(arn string) bool {
+	arn = strings.TrimSpace(arn)
+	return strings.HasPrefix(arn, "arn:") && strings.Contains(arn, ":kms:") && strings.Contains(arn, ":key/") && !strings.Contains(arn, "*")
 }
 
 func finishIdentityOnly(decision AuthorizationDecision, identity groupResult) AuthorizationDecision {
@@ -256,8 +528,8 @@ func missingControls(req AuthorizationRequest) []string {
 		if req.TrustPolicy.State != EvidencePresent {
 			missing = append(missing, ReasonMissingTrust)
 		}
-	case EvalIdentityOnly:
-		// IAM control-plane actions are not granted by a role trust policy.
+	case EvalIdentityOnly, EvalEC2Instance, EvalRDSInstance:
+		// IAM control-plane actions, EC2 instances and RDS instances use no trust or resource policy.
 	default:
 		if req.ResourcePolicy.State != EvidencePresent && req.ResourcePolicy.State != EvidenceAbsent {
 			missing = append(missing, ReasonMissingResource)
@@ -488,11 +760,17 @@ func classifyStatement(req AuthorizationRequest, result *groupResult, doc Policy
 	if !actionOK {
 		return
 	}
-	if resourceHasVariable(stmt.Resource) || resourceHasVariable(stmt.NotResource) {
-		result.unsupported = append(result.unsupported, "policy_variable")
-		result.blocked = true
+	resources, missRes := substituteVars(stmt.Resource, req.RequestContext, true)
+	notResources, missNot := substituteVars(stmt.NotResource, req.RequestContext, true)
+	if missing := append(missRes, missNot...); len(missing) > 0 {
+		result.missingContext = append(result.missingContext, missing...)
+		result.conditional = true
+		if strings.EqualFold(effect, "Deny") {
+			result.undecidableDeny = true
+		}
 		return
 	}
+	stmt.Resource, stmt.NotResource = resources, notResources
 	if len(stmt.NotResource) > 0 && resourceMatches(stmt.NotResource, req.ResourceARN) {
 		return
 	}

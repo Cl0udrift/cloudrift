@@ -3,6 +3,7 @@ package iamauth
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -64,6 +65,13 @@ func EvidenceFingerprint(req AuthorizationRequest) string {
 	b.WriteString(req.S3BlockPublicAccess)
 	b.WriteString("\nkms=")
 	b.WriteString(req.S3KMSKeyPolicy)
+	if k := req.SecretKMS; k != nil {
+		b.WriteString("\nsecretkms=" + k.Mode + "|" + k.KeyARN + "\n")
+		writeSlot(&b, "keypolicy", k.KeyPolicy)
+		writeSlot(&b, "keyrcp", k.RCPs)
+		b.WriteString(grantCanon(k.Grants))
+	}
+	b.WriteString(grantCanon(req.KMSGrants))
 	b.WriteString("\nctx=")
 	b.WriteString(canonicalContext(req.RequestContext))
 	sum := sha256.Sum256([]byte(b.String()))
@@ -107,8 +115,19 @@ func writeSlot(b *strings.Builder, name string, slot PolicySlot) {
 func statementCanon(stmts []StatementView) string {
 	parts := make([]string, 0, len(stmts))
 	for _, stmt := range stmts {
-		parts = append(parts, stmt.PolicyID+"|"+stmt.StatementID+"|"+stmt.Effect+"|"+strings.Join(stmt.Action, ",")+"|"+strings.Join(stmt.Resource, ","))
+		parts = append(parts, stmt.PolicyID+"|"+stmt.StatementID+"|"+stmt.Effect+"|"+strings.Join(stmt.Action, ",")+"|"+strings.Join(stmt.Resource, ",")+"|"+strings.Join(stmt.NotAction, ",")+"|"+strings.Join(stmt.NotResource, ",")+"|"+fmt.Sprint(stmt.Principal)+"|"+fmt.Sprint(stmt.NotPrincipal)+"|"+fmt.Sprint(stmt.Condition))
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ";")
+}
+
+func grantCanon(grants []KMSGrant) string {
+	parts := make([]string, 0, len(grants))
+	for _, g := range grants {
+		ops := append([]string{}, g.Operations...)
+		sort.Strings(ops)
+		parts = append(parts, g.GranteePrincipal+"|"+strings.Join(ops, ",")+"|"+fmt.Sprint(g.Constrained))
+	}
+	sort.Strings(parts)
+	return "\ngrants=" + strings.Join(parts, ";")
 }

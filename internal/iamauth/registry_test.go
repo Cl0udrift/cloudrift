@@ -1,6 +1,10 @@
 package iamauth
 
-import "testing"
+import (
+	"os"
+	"regexp"
+	"testing"
+)
 
 func TestRegistry_EvaluableActionsMatchEvaluator(t *testing.T) {
 	seen := map[string]struct{}{}
@@ -32,12 +36,25 @@ func TestRegistry_EvaluableActionsMatchEvaluator(t *testing.T) {
 	if put.AttackTechnique != "" || pass.AttackTechnique != "" {
 		t.Fatal("authorization-evaluable actions became attack techniques")
 	}
-	for _, action := range []string{"secretsmanager:GetSecretValue", "ec2:StopInstances", "lambda:UpdateFunctionCode", "not-an-action"} {
+	for _, action := range []string{"dynamodb:DeleteTable", "not-an-action"} {
 		req := baseGet()
 		req.Action = action
 		d := Evaluate(req)
 		if d.Status == StatusAllowed || d.Status == StatusDenied {
 			t.Fatalf("%s produced %s", action, d.Status)
+		}
+	}
+}
+
+func TestEveryReasonIsExplained(t *testing.T) {
+	src, err := os.ReadFile("types.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range regexp.MustCompile(`(Reason\w+)\s*=\s*"([^"]+)"`).FindAllStringSubmatch(string(src), -1) {
+		code := m[2]
+		if _, ok := reasonText[code]; !ok {
+			t.Errorf("%s (%q) has no plain-language explanation", m[1], code)
 		}
 	}
 }

@@ -9,6 +9,11 @@ type RuntimeStatusResponse struct {
 	Neo4jConfigured  bool     `json:"neo4j_configured"`
 	SlackConfigured  bool     `json:"slack_configured"`
 	EmailConfigured  bool     `json:"email_configured"`
+	// Region planning is configuration only. Discovery has not been called.
+	RegionMode      string   `json:"region_mode"`
+	ExplicitRegions []string `json:"explicit_regions"`
+	CIEMConfigured  bool     `json:"ciem_configured"`
+	RegionPlanNote  string   `json:"region_plan_note"`
 }
 
 type ValidateProfileRequest struct {
@@ -34,11 +39,13 @@ type SSOLoginResponse struct {
 }
 
 type ScanStartRequest struct {
-	Profile   string `json:"profile"`
-	Module    string `json:"module"`
-	NoHTTP    bool   `json:"no_http"`
-	Neo4j     bool   `json:"neo4j"`
-	Provider  string `json:"provider,omitempty"`
+	Profile  string `json:"profile"`
+	Module   string `json:"module"`
+	NoHTTP   bool   `json:"no_http"`
+	Neo4j    bool   `json:"neo4j"`
+	Provider string `json:"provider,omitempty"`
+	// CIEM turns on identity inventory for this run. Region discovery still happens during the scan.
+	CIEM bool `json:"ciem,omitempty"`
 }
 
 type ScanStartResponse struct {

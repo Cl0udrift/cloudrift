@@ -188,13 +188,9 @@ func TestPermissionBlast_UnresolvedUnsupportedAndMissingPolicy(t *testing.T) {
 	if report.UnresolvedReferenceCount != 1 {
 		t.Fatal(report.UnresolvedReferenceCount)
 	}
-	for _, action := range report.UnsupportedActions {
-		if action == "ec2:StopInstances" {
-			goto found
-		}
+	if len(report.UnsupportedActions) != 0 {
+		t.Fatalf("every catalog action is evaluated now: %v", report.UnsupportedActions)
 	}
-	t.Fatal("unsupported action was omitted")
-found:
 	for _, d := range report.Decisions {
 		if d.Action == "ec2:StopInstances" && d.Status == iamauth.StatusAllowed {
 			t.Fatal("unsupported action was validated")
@@ -312,8 +308,8 @@ func TestPermissionBlast_AccountFixture(t *testing.T) {
 	if mustDecision(t, report, iamauth.ActionAssumeRole, otherRole).Status != iamauth.StatusAllowed {
 		t.Fatal("cross-account assume")
 	}
-	if len(report.BroadPrivilegeCandidates) == 0 || len(report.UnsupportedActions) == 0 {
-		t.Fatalf("admin=%v unsupported=%v", report.BroadPrivilegeCandidates, report.UnsupportedActions)
+	if len(report.BroadPrivilegeCandidates) == 0 {
+		t.Fatalf("admin=%v", report.BroadPrivilegeCandidates)
 	}
 	if report.ResourcesEvaluated < 3 {
 		t.Fatal(report.ResourcesEvaluated)
@@ -609,5 +605,67 @@ func writeScanAssets(t *testing.T, dir, scanID string, assets []models.AssetNode
 	rb, _ := json.Marshal(rels)
 	if err := os.WriteFile(filepath.Join(dir, scanID, "relationships.json"), rb, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPermissionBlast_SecretThroughCustomerKey(t *testing.T) {
+	const (
+		secret = "arn:aws:secretsmanager:us-east-1:111111111111:secret:db-AbCdEf"
+		key    = "arn:aws:kms:us-east-1:111111111111:key/k1"
+	)
+	identity := `{"Statement":[
+	  {"Effect":"Allow","Action":"secretsmanager:GetSecretValue","Resource":"` + secret + `"},
+	  {"Effect":"Allow","Action":"kms:Decrypt","Resource":"` + key + `"}]}`
+	secretNode := models.AssetNode{ARN: secret, AssetType: models.AssetSecret, AccountID: "111111111111", Properties: map[string]any{
+		"secret_kms_mode": "customer_managed", "secret_kms_key_arn": key,
+		"secret_policy_status": "confirmed_absent", "secret_policy_evidence": "fixture: GetResourcePolicy returned none",
+	}}
+	keyNode := func(status, doc string) models.AssetNode {
+		return models.AssetNode{ARN: key, AssetType: models.AssetKMSKey, AccountID: "111111111111", Properties: map[string]any{
+			"key_state": "Enabled", "key_policy_status": status, "key_policy_evidence": "fixture", "key_policy_document": doc,
+		}}
+	}
+	rootPolicy := `{"Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::111111111111:root"},"Action":"kms:*","Resource":"*"}]}`
+
+	report := AnalyzePermissionBlast(ready(appRole, identity, secretNode, keyNode("present", rootPolicy)))
+	if d := mustDecision(t, report, "secretsmanager:GetSecretValue", secret); d.Status != iamauth.StatusAllowed {
+		t.Fatalf("secret read: %+v", d)
+	}
+	if d := mustDecision(t, report, "kms:Decrypt", key); d.Status != iamauth.StatusAllowed {
+		t.Fatalf("key decrypt: %+v", d)
+	}
+
+	// The key was not collected: the secret read must stay UNKNOWN, never allowed.
+	report = AnalyzePermissionBlast(ready(appRole, identity, secretNode))
+	if d := mustDecision(t, report, "secretsmanager:GetSecretValue", secret); d.Status != iamauth.StatusUnknown || d.Reason != iamauth.ReasonMissingKMS {
+		t.Fatalf("uncollected key: %+v", d)
+	}
+}
+
+func TestPermissionBlast_EC2InstancesAndKeyGrants(t *testing.T) {
+	const inst = "arn:aws:ec2:us-east-1:111111111111:instance/i-0abc"
+	const dead = "arn:aws:ec2:us-east-1:111111111111:instance/i-dead"
+	mk := func(arn, state string) models.AssetNode {
+		return models.AssetNode{ARN: arn, AssetType: models.AssetEC2Instance, AccountID: "111111111111", Properties: map[string]any{"instance_state": state}}
+	}
+	report := AnalyzePermissionBlast(ready(appRole, allowDoc("ec2:StopInstances", "*"), mk(inst, "running"), mk(dead, "terminated")))
+	if d := mustDecision(t, report, "ec2:StopInstances", inst); d.Status != iamauth.StatusAllowed {
+		t.Fatalf("%+v", d)
+	}
+	for _, d := range report.Decisions {
+		if d.ResourceARN == dead {
+			t.Fatalf("terminated instance became a target: %+v", d)
+		}
+	}
+
+	const key = "arn:aws:kms:us-east-1:111111111111:key/k1"
+	keyNode := models.AssetNode{ARN: key, AssetType: models.AssetKMSKey, AccountID: "111111111111", Properties: map[string]any{
+		"key_state": "Enabled", "key_policy_status": "present", "key_policy_evidence": "fixture",
+		"key_policy_document": `{"Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::999999999999:role/Other"},"Action":"kms:*","Resource":"*"}]}`,
+		"key_grants":          []any{map[string]any{"grantee_principal": appRole, "operations": []any{"Decrypt"}, "constrained": false}},
+	}}
+	report = AnalyzePermissionBlast(ready(appRole, allowDoc("s3:GetObject", "*"), keyNode))
+	if d := mustDecision(t, report, "kms:Decrypt", key); d.Status != iamauth.StatusAllowed {
+		t.Fatalf("grant after JSON-shaped properties: %+v", d)
 	}
 }

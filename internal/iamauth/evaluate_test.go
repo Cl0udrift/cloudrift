@@ -99,7 +99,7 @@ func TestEvaluate_DenyNonmatchingResource(t *testing.T) {
 func TestEvaluate_UnsupportedCondition(t *testing.T) {
 	req := baseGet()
 	req.Identity = statements("id", "Allow", "Allow", []string{"s3:GetObject"}, []string{"arn:aws:s3:::data/readme.txt"}, map[string]any{
-		"IpAddress": map[string]any{"aws:SourceIp": "10.0.0.1/32"},
+		"DateGreaterThan": map[string]any{"aws:CurrentTime": "2020-01-01T00:00:00Z"},
 	})
 	d := Evaluate(req)
 	if d.Status != StatusUnknown || d.Reason != ReasonUnsupportedCondition {
@@ -198,8 +198,8 @@ func TestEvaluate_SCPHierarchy(t *testing.T) {
 		t.Fatalf("missing parent policy: %+v", d)
 	}
 	unsupported := baseGet()
-	unsupported.Action = "secretsmanager:GetSecretValue"
-	unsupported.ResourceARN = "arn:aws:secretsmanager:us-east-1:111111111111:secret:demo"
+	unsupported.Action = "sqs:SendMessage"
+	unsupported.ResourceARN = "arn:aws:sqs:us-east-1:111111111111:demo"
 	if d := Evaluate(unsupported); d.Status != StatusUnknown || d.Reason != ReasonUnsupportedAction || d.Status == StatusAllowed {
 		t.Fatalf("unevaluated RCP service action: %+v", d)
 	}
@@ -297,7 +297,7 @@ func TestEvaluate_PutDeleteAndIdentityControl(t *testing.T) {
 		t.Fatalf("passrole condition: %+v", d)
 	}
 	secret := baseGet()
-	secret.Action = "secretsmanager:GetSecretValue"
+	secret.Action = "dynamodb:DeleteTable"
 	if d := Evaluate(secret); d.Status != StatusUnknown || d.Reason != ReasonUnsupportedAction {
 		t.Fatalf("catalog-only action was scored: %+v", d)
 	}
@@ -496,5 +496,57 @@ func stmt(policyID, sid, effect string, actions, resources []string, cond map[st
 	return StatementView{
 		PolicyID: policyID, StatementID: sid, Effect: effect,
 		Action: actions, Resource: resources, Condition: cond,
+	}
+}
+
+func TestEvaluate_ExtendedOperators(t *testing.T) {
+	cases := []struct {
+		name string
+		cond map[string]any
+		ctx  map[string]string
+		want string
+	}{
+		{"ip in cidr", map[string]any{"IpAddress": map[string]any{"aws:SourceIp": "10.0.0.0/8"}}, map[string]string{"aws:SourceIp": "10.1.2.3"}, StatusAllowed},
+		{"ip outside", map[string]any{"IpAddress": map[string]any{"aws:SourceIp": "10.0.0.0/8"}}, map[string]string{"aws:SourceIp": "192.168.1.1"}, StatusUnknown},
+		{"not ip", map[string]any{"NotIpAddress": map[string]any{"aws:SourceIp": "10.0.0.0/8"}}, map[string]string{"aws:SourceIp": "192.168.1.1"}, StatusAllowed},
+		{"ip garbage", map[string]any{"IpAddress": map[string]any{"aws:SourceIp": "10.0.0.0/8"}}, map[string]string{"aws:SourceIp": "nope"}, StatusUnknown},
+		{"string like", map[string]any{"StringLike": map[string]any{"aws:username": "dev-*"}}, map[string]string{"aws:username": "dev-ann"}, StatusAllowed},
+		{"string not like", map[string]any{"StringNotLike": map[string]any{"aws:username": "dev-*"}}, map[string]string{"aws:username": "dev-ann"}, StatusUnknown},
+		{"ignore case", map[string]any{"StringEqualsIgnoreCase": map[string]any{"aws:username": "ANN"}}, map[string]string{"aws:username": "ann"}, StatusAllowed},
+		{"arn not equals", map[string]any{"ArnNotEquals": map[string]any{"aws:PrincipalArn": "arn:aws:iam::1:role/x"}}, map[string]string{"aws:PrincipalArn": "arn:aws:iam::1:role/y"}, StatusAllowed},
+		{"numeric lt", map[string]any{"NumericLessThan": map[string]any{"aws:MultiFactorAuthAge": "3600"}}, map[string]string{"aws:MultiFactorAuthAge": "60"}, StatusAllowed},
+		{"numeric ge fail", map[string]any{"NumericGreaterThanEquals": map[string]any{"aws:MultiFactorAuthAge": "3600"}}, map[string]string{"aws:MultiFactorAuthAge": "60"}, StatusUnknown},
+		{"key case-insensitive", map[string]any{"StringEquals": map[string]any{"aws:username": "ann"}}, map[string]string{"AWS:UserName": "ann"}, StatusAllowed},
+	}
+	for _, c := range cases {
+		req := baseGet()
+		req.RequestContext = c.ctx
+		req.Identity = statements("id", "Allow", "Allow", []string{"s3:GetObject"}, []string{"arn:aws:s3:::data/readme.txt"}, c.cond)
+		if d := Evaluate(req); d.Status != c.want {
+			t.Errorf("%s: want %s got %s (%s)", c.name, c.want, d.Status, d.Reason)
+		}
+	}
+}
+
+func TestEvaluate_PolicyVariables(t *testing.T) {
+	req := baseGet()
+	req.ResourceARN = "arn:aws:s3:::data/home/ann/file.txt"
+	req.Identity = statements("id", "Allow", "Allow", []string{"s3:GetObject"}, []string{"arn:aws:s3:::data/home/${aws:username}/*"}, nil)
+	req.RequestContext = map[string]string{"aws:username": "ann"}
+	if d := Evaluate(req); d.Status != StatusAllowed {
+		t.Fatalf("resolved variable: %+v", d)
+	}
+	req.RequestContext = map[string]string{"aws:username": "bob"}
+	if d := Evaluate(req); d.Status == StatusAllowed {
+		t.Fatalf("other user must not match: %+v", d)
+	}
+	req.RequestContext = nil
+	d := Evaluate(req)
+	if d.Status != StatusConditional || len(d.MissingContext) == 0 {
+		t.Fatalf("missing variable must be conditional: %+v", d)
+	}
+	req.Identity = statements("id", "Allow", "Allow", []string{"s3:GetObject"}, []string{"arn:aws:s3:::data/${*}"}, nil)
+	if d := Evaluate(req); d.Status == StatusAllowed {
+		t.Fatalf("${*} is a literal asterisk, not a wildcard: %+v", d)
 	}
 }

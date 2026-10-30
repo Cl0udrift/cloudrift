@@ -336,6 +336,9 @@ func writeScenarioScan(outputDir, scanID string, t time.Time, scenario string, s
 		ScenarioID:  scenario,
 		DemoSeed:    seed,
 	}
+	if scenario == "regions-coverage" {
+		meta.RegionMode = "auto"
+	}
 	if err := writeJSONFile(filepath.Join(scanPath, "scan-metadata.json"), meta); err != nil {
 		return "", err
 	}

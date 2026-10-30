@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -13,6 +15,11 @@ type Config struct {
 		OrgRoleName       string   `toml:"org_role_name"`
 		ManagementProfile string   `toml:"management_profile"`
 		Regions           []string `toml:"regions"`
+		// RegionDiscovery is auto, explicit, or legacy_default.
+		// Empty follows the scan: CIEM with no aws.regions list discovers enabled
+		// Regions; a nonempty list is an allowlist; a legacy scan with no list stays
+		// on us-east-1 and is not full-region coverage.
+		RegionDiscovery string `toml:"region_discovery"`
 	} `toml:"aws"`
 	Scan struct {
 		HTTPProbeConcurrency      int    `toml:"http_probe_concurrency"`
@@ -24,6 +31,25 @@ type Config struct {
 		// that trust an external principal. Default false preserves the
 		// external-trust collection path.
 		IAMPolicyInventory bool `toml:"iam_policy_inventory"`
+		// ResourcePolicies collects Secrets Manager secret metadata and resource policies and
+		// KMS customer-managed key policies, so secretsmanager:GetSecretValue and kms:Decrypt can
+		// be evaluated. Opt-in, default false. Needs extra read actions; see docs/audits/resource-policy-collection.md.
+		// Secret values are never read.
+		ResourcePolicies bool `toml:"resource_policies"`
+		// ServiceLastAccessed collects IAM access advisor service last-accessed data per role.
+		// Opt-in, default false. Needs two extra read IAM actions; see docs/audits/service-last-accessed.md.
+		ServiceLastAccessed bool `toml:"service_last_accessed"`
+		// ServiceLastAccessedGranularity is "service" (default) or "action". Action level adds
+		// IAM's tracked actions for the few services AWS tracks (for example iam:PassRole).
+		ServiceLastAccessedGranularity string `toml:"service_last_accessed_granularity"`
+		// ServiceLastAccessedConcurrency bounds parallel jobs. 0 means the default of 8; the cap is 16.
+		ServiceLastAccessedConcurrency int `toml:"service_last_accessed_concurrency"`
+		// ServiceLastAccessedSkipServiceLinked is an optional scope reduction that skips AWS-owned
+		// service-linked roles. Default false: every role is collected.
+		ServiceLastAccessedSkipServiceLinked bool `toml:"service_last_accessed_skip_service_linked"`
+		// ServiceLastAccessedTimeoutSeconds is an optional total budget per account. 0 means none.
+		// Roles not finished in time are recorded as not_collected.
+		ServiceLastAccessedTimeoutSeconds int `toml:"service_last_accessed_timeout_seconds"`
 	} `toml:"scan"`
 	Cost struct {
 		Currency                  string  `toml:"currency"`
@@ -115,6 +141,59 @@ func Default() *Config {
 // Legacy scans stay unchanged until this is selected with --ciem or by setting
 // scan.iam_policy_inventory. Session policies are still not collected from STS.
 // A denied Organizations call is not treated as proof that no SCP or RCP exists.
+const (
+	RegionModeAuto     = "auto"
+	RegionModeExplicit = "explicit"
+	RegionModeLegacy   = "legacy_default"
+)
+
+// ResolveRegionMode decides which Regions a scan may collect.
+// A nonempty aws.regions list is always an allowlist. It conflicts with
+// region_discovery = "auto". CIEM with no list discovers enabled Regions per
+// account. A legacy scan with no list keeps us-east-1 and must not be described
+// as full-region coverage. Failed automatic discovery must not fall back to
+// us-east-1; that decision is applied by the collector, not here.
+func ResolveRegionMode(cfg *Config) (mode string, explicit []string, err error) {
+	if cfg == nil {
+		cfg = Default()
+	}
+	discovery := strings.ToLower(strings.TrimSpace(cfg.AWS.RegionDiscovery))
+	switch discovery {
+	case "", RegionModeAuto, RegionModeExplicit, RegionModeLegacy:
+	default:
+		return "", nil, fmt.Errorf("aws.region_discovery must be auto, explicit, or legacy_default")
+	}
+	seen := map[string]struct{}{}
+	for _, region := range cfg.AWS.Regions {
+		region = strings.TrimSpace(region)
+		if region == "" {
+			continue
+		}
+		if _, ok := seen[region]; ok {
+			continue
+		}
+		seen[region] = struct{}{}
+		explicit = append(explicit, region)
+	}
+	sort.Strings(explicit)
+	if len(explicit) > 0 && discovery == RegionModeAuto {
+		return "", nil, fmt.Errorf("aws.regions is an explicit allowlist and conflicts with aws.region_discovery = \"auto\"")
+	}
+	if discovery == RegionModeExplicit && len(explicit) == 0 {
+		return "", nil, fmt.Errorf("aws.region_discovery = \"explicit\" requires a nonempty aws.regions list")
+	}
+	if len(explicit) > 0 {
+		return RegionModeExplicit, explicit, nil
+	}
+	if discovery == RegionModeLegacy {
+		return RegionModeLegacy, []string{"us-east-1"}, nil
+	}
+	if discovery == RegionModeAuto || cfg.Scan.IAMPolicyInventory {
+		return RegionModeAuto, nil, nil
+	}
+	return RegionModeLegacy, []string{"us-east-1"}, nil
+}
+
 func EnableCIEM(cfg *Config) {
 	if cfg == nil {
 		return

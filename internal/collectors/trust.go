@@ -581,37 +581,60 @@ func (c *managedPolicyCache) get(ctx context.Context, client IAMAPI, arn, name, 
 
 func fetchManagedPolicy(ctx context.Context, client IAMAPI, arn, name, accountID string) collectedPolicy {
 	out := collectedPolicy{
-		ARN:             arn,
-		Name:            name,
-		PolicyType:      models.PolicyTypeManaged,
-		AccountID:       accountID,
-		RetrievalStatus: models.PolicyRetrievalMissing,
+		ARN: arn, Name: name, PolicyType: models.PolicyTypeManaged, AccountID: accountID,
+		RetrievalStatus: models.PolicyRetrievalMissing, VersionVerification: models.PolicyVersionMissing,
 	}
-	policy, err := client.GetPolicy(ctx, &iam.GetPolicyInput{PolicyArn: awsv2.String(arn)})
-	if err != nil || policy == nil || policy.Policy == nil {
-		return out
+	const attempts = 3
+	for attempt := 0; attempt < attempts; attempt++ {
+		policy, err := client.GetPolicy(ctx, &iam.GetPolicyInput{PolicyArn: awsv2.String(arn)})
+		if err != nil || policy == nil || policy.Policy == nil {
+			return out
+		}
+		versionID := strings.TrimSpace(awsv2.ToString(policy.Policy.DefaultVersionId))
+		out.VersionID = versionID
+		if versionID == "" {
+			out.VersionVerification = models.PolicyVersionMissing
+			return out
+		}
+		ver, err := client.GetPolicyVersion(ctx, &iam.GetPolicyVersionInput{
+			PolicyArn: awsv2.String(arn),
+			VersionId: awsv2.String(versionID),
+		})
+		if err != nil || ver == nil || ver.PolicyVersion == nil {
+			out.VersionVerification = models.PolicyVersionMissing
+			return out
+		}
+		returned := strings.TrimSpace(awsv2.ToString(ver.PolicyVersion.VersionId))
+		out.Document = decodeIAMDocument(awsv2.ToString(ver.PolicyVersion.Document))
+		if returned != "" && returned != versionID {
+			out.VersionVerification = models.PolicyVersionMismatch
+			out.RetrievalStatus = models.PolicyRetrievalPartial
+			return out
+		}
+		if strings.TrimSpace(out.Document) == "" {
+			out.VersionVerification = models.PolicyVersionMissing
+			return out
+		}
+		if _, nerr := models.NormalizeIdentityPolicy(arn, models.PolicyTypeManaged, accountID, out.Document); nerr != nil {
+			out.RetrievalStatus = models.PolicyRetrievalMalformed
+			out.VersionVerification = models.PolicyVersionMissing
+			return out
+		}
+		confirm, cerr := client.GetPolicy(ctx, &iam.GetPolicyInput{PolicyArn: awsv2.String(arn)})
+		if cerr != nil || confirm == nil || confirm.Policy == nil {
+			out.VersionVerification = models.PolicyVersionIndeterminate
+			out.RetrievalStatus = models.PolicyRetrievalPartial
+			return out
+		}
+		confirmed := strings.TrimSpace(awsv2.ToString(confirm.Policy.DefaultVersionId))
+		if confirmed == versionID {
+			out.RetrievalStatus = models.PolicyRetrievalOK
+			out.VersionVerification = models.PolicyVersionVerified
+			return out
+		}
+		out.VersionVerification = models.PolicyVersionIndeterminate
+		out.RetrievalStatus = models.PolicyRetrievalPartial
 	}
-	versionID := strings.TrimSpace(awsv2.ToString(policy.Policy.DefaultVersionId))
-	out.VersionID = versionID
-	if versionID == "" {
-		return out
-	}
-	ver, err := client.GetPolicyVersion(ctx, &iam.GetPolicyVersionInput{
-		PolicyArn: awsv2.String(arn),
-		VersionId: awsv2.String(versionID),
-	})
-	if err != nil || ver == nil || ver.PolicyVersion == nil {
-		return out
-	}
-	out.Document = decodeIAMDocument(awsv2.ToString(ver.PolicyVersion.Document))
-	if strings.TrimSpace(out.Document) == "" {
-		return out
-	}
-	if _, err := models.NormalizeIdentityPolicy(arn, models.PolicyTypeManaged, accountID, out.Document); err != nil {
-		out.RetrievalStatus = models.PolicyRetrievalMalformed
-		return out
-	}
-	out.RetrievalStatus = models.PolicyRetrievalOK
 	return out
 }
 

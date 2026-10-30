@@ -3,19 +3,70 @@ package schema
 // InventorySummary is the canonical count contract for one scan and filter.
 // TotalAssets equals the sum of Service counts. Each counted asset belongs to one service.
 type InventorySummary struct {
-	ScanID       string                 `json:"scan_id"`
-	Timestamp    string                 `json:"timestamp,omitempty"`
-	Synthetic    bool                   `json:"synthetic"`
-	DataOrigin   string                 `json:"data_origin,omitempty"`
-	TotalAssets  int                    `json:"total_assets"`
-	AccountCount int                    `json:"account_count"`
-	RegionCount  int                    `json:"region_count"`
-	ServiceCount int                    `json:"service_count"`
-	AccountsNote string                 `json:"accounts_note"`
-	CoverageNote string                 `json:"coverage_note"`
-	Services     []InventoryServiceCard `json:"services"`
-	Categories   []InventoryCategory    `json:"categories"`
-	Distribution []InventoryBar         `json:"distribution"`
+	ScanID         string                    `json:"scan_id"`
+	Timestamp      string                    `json:"timestamp,omitempty"`
+	Synthetic      bool                      `json:"synthetic"`
+	DataOrigin     string                    `json:"data_origin,omitempty"`
+	TotalAssets    int                       `json:"total_assets"`
+	AccountCount   int                       `json:"account_count"`
+	RegionCount    int                       `json:"region_count"`
+	ServiceCount   int                       `json:"service_count"`
+	AccountsNote   string                    `json:"accounts_note"`
+	CoverageNote   string                    `json:"coverage_note"`
+	Collection     InventoryCollectionStatus `json:"collection"`
+	RegionCoverage InventoryRegionCoverage   `json:"region_coverage"`
+	Services       []InventoryServiceCard    `json:"services"`
+	Categories     []InventoryCategory       `json:"categories"`
+	Distribution   []InventoryBar            `json:"distribution"`
+}
+
+// InventoryCollectionStatus separates account reach from collector completion.
+// Older scans leave SupportedInventory as not_recorded.
+type InventoryCollectionStatus struct {
+	AccountScope       string `json:"account_scope"`
+	RegionDiscovery    string `json:"region_discovery"`
+	RegionalCollectors string `json:"regional_collectors"`
+	ServiceCollection  string `json:"service_collection"`
+	SupportedInventory string `json:"supported_inventory"`
+	Note               string `json:"note"`
+}
+
+// InventoryRegionCoverage is the persisted region-discovery result for this scan.
+// Older scans leave Recorded false. A successful empty Region is not a failure.
+type InventoryRegionCoverage struct {
+	Recorded bool                      `json:"recorded"`
+	Note     string                    `json:"note"`
+	Accounts []InventoryAccountRegions `json:"accounts"`
+}
+
+// InventoryAccountRegions is one account's region discovery and scan result.
+type InventoryAccountRegions struct {
+	AccountID     string               `json:"account_id"`
+	Partition     string               `json:"partition,omitempty"`
+	RegionMode    string               `json:"region_mode,omitempty"`
+	Discovery     string               `json:"discovery"`
+	ErrorCategory string               `json:"error_category,omitempty"`
+	Enabled       int                  `json:"enabled"`
+	Selected      int                  `json:"selected"`
+	Succeeded     int                  `json:"succeeded"`
+	Partial       int                  `json:"partial"`
+	Failed        int                  `json:"failed"`
+	Excluded      int                  `json:"excluded"`
+	Unknown       int                  `json:"unknown"`
+	Regions       []InventoryRegionRow `json:"regions"`
+}
+
+// InventoryRegionRow is one Region outcome. Disabled and failed Regions stay visible.
+type InventoryRegionRow struct {
+	Region   string                   `json:"region"`
+	State    string                   `json:"state"`
+	Services []InventoryRegionService `json:"services,omitempty"`
+}
+
+// InventoryRegionService is one regional collector result inside a Region.
+type InventoryRegionService struct {
+	Service string `json:"service"`
+	Status  string `json:"status"`
 }
 
 // InventoryCategory is one primary class. Each counted asset belongs to one category and one service.

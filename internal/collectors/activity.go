@@ -11,6 +11,7 @@ import (
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 
 	"github.com/Zero0x00/cloudrift/internal/config"
+	"github.com/Zero0x00/cloudrift/internal/models"
 )
 
 // roleActivityConcurrency bounds parallel per-role GetRole calls. An account can hold
@@ -24,6 +25,54 @@ type RoleActivity struct {
 	AccountID     string     `json:"account_id"`
 	LastUsedAt    *time.Time `json:"last_used_at,omitempty"`
 	DaysSinceUsed int        `json:"days_since_used"`
+	// LastUsedRegion is the Region of the last use reported by IAM, when present.
+	LastUsedRegion string `json:"last_used_region,omitempty"`
+	// Status says what IAM reported. Never infer "unused" from a missing record.
+	Status string `json:"status,omitempty"`
+}
+
+// Role activity states recorded on role assets as role_last_used_status.
+const (
+	ActivityUsed            = "used"
+	ActivityNotUsedInWindow = "not_used_in_tracking_window" // IAM returned RoleLastUsed with no date
+	ActivityNotReported     = "not_reported"                // IAM returned no RoleLastUsed field
+	ActivityNotCollected    = "not_collected"               // GetRole did not succeed for this role
+)
+
+// StampRoleActivity records last-used evidence on role assets so it persists in the scan.
+// A role with no activity record is marked not_collected, never "unused". Note that
+// IAM only tracks roles for a bounded window (about 400 days), and last-used covers
+// the role as a whole, not individual permissions.
+func StampRoleActivity(assets []models.AssetNode, rows []RoleActivity) {
+	byARN := IndexActivityByRoleARN(rows)
+	for i := range assets {
+		if assets[i].AssetType != models.AssetIAMRole {
+			continue
+		}
+		if assets[i].Properties == nil {
+			assets[i].Properties = map[string]any{}
+		}
+		row, ok := byARN[assets[i].ARN]
+		if !ok {
+			assets[i].Properties["role_last_used_status"] = ActivityNotCollected
+			continue
+		}
+		status := row.Status
+		if status == "" { // records from older collectors
+			status = ActivityNotReported
+			if row.LastUsedAt != nil {
+				status = ActivityUsed
+			}
+		}
+		assets[i].Properties["role_last_used_status"] = status
+		if row.LastUsedAt != nil {
+			assets[i].Properties["role_last_used"] = row.LastUsedAt.UTC().Format(time.RFC3339)
+			assets[i].Properties["role_days_since_used"] = row.DaysSinceUsed
+		}
+		if row.LastUsedRegion != "" {
+			assets[i].Properties["role_last_used_region"] = row.LastUsedRegion
+		}
+	}
 }
 
 type IAMActivityAPI interface {
@@ -138,6 +187,17 @@ func collectActivityFromClient(ctx context.Context, accountID string, client IAM
 				DaysSinceUsed: -1,
 			}
 
+			switch {
+			case getOut.Role == nil || getOut.Role.RoleLastUsed == nil:
+				activity.Status = ActivityNotReported
+			case getOut.Role.RoleLastUsed.LastUsedDate == nil:
+				activity.Status = ActivityNotUsedInWindow
+			default:
+				activity.Status = ActivityUsed
+			}
+			if getOut.Role != nil && getOut.Role.RoleLastUsed != nil {
+				activity.LastUsedRegion = awsv2.ToString(getOut.Role.RoleLastUsed.Region)
+			}
 			if getOut.Role != nil && getOut.Role.RoleLastUsed != nil && getOut.Role.RoleLastUsed.LastUsedDate != nil {
 				lastUsed := getOut.Role.RoleLastUsed.LastUsedDate.UTC()
 				lastUsedDay := lastUsed.Truncate(24 * time.Hour)

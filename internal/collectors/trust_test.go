@@ -218,6 +218,9 @@ type fakeIAMAPI struct {
 	extraRoles             []iamtypes.Role
 	rolePages              int
 	getPolicyCalls         atomic.Int32
+	defaultVersions        []string
+	versionCursor          atomic.Int32
+	returnedVersionID      string
 }
 
 func (f *fakeIAMAPI) ListRoles(_ context.Context, _ *iam.ListRolesInput, _ ...func(*iam.Options)) (*iam.ListRolesOutput, error) {
@@ -279,6 +282,13 @@ func (f *fakeIAMAPI) GetPolicy(_ context.Context, in *iam.GetPolicyInput, _ ...f
 	if version == "" {
 		version = "v1"
 	}
+	if len(f.defaultVersions) > 0 {
+		index := int(f.versionCursor.Add(1) - 1)
+		if index >= len(f.defaultVersions) {
+			index = len(f.defaultVersions) - 1
+		}
+		version = f.defaultVersions[index]
+	}
 	return &iam.GetPolicyOutput{Policy: &iamtypes.Policy{Arn: in.PolicyArn, DefaultVersionId: awsv2.String(version)}}, nil
 }
 
@@ -288,8 +298,12 @@ func (f *fakeIAMAPI) GetPolicyVersion(_ context.Context, in *iam.GetPolicyVersio
 	if !ok {
 		return nil, errPolicyMissing
 	}
+	versionID := in.VersionId
+	if f.returnedVersionID != "" {
+		versionID = awsv2.String(f.returnedVersionID)
+	}
 	return &iam.GetPolicyVersionOutput{PolicyVersion: &iamtypes.PolicyVersion{
-		VersionId:        in.VersionId,
+		VersionId:        versionID,
 		Document:         awsv2.String(url.QueryEscape(doc)),
 		IsDefaultVersion: true,
 	}}, nil
@@ -387,7 +401,7 @@ func TestBoundaryDocument_CIEMInventory(t *testing.T) {
 	if byName["Bad"].Properties["permissions_boundary_status"] != "malformed" {
 		t.Fatal(byName["Bad"].Properties["permissions_boundary_status"])
 	}
-	if calls := client.getPolicyCalls.Load(); calls != 3 {
+	if calls := client.getPolicyCalls.Load(); calls != 4 {
 		t.Fatalf("shared boundary fetched %d times", calls)
 	}
 	legacy := &fakeIAMAPI{roles: []iamtypes.Role{role("Bound", boundARN)}, managedDocs: map[string]string{boundARN: allow}}

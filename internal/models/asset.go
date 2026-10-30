@@ -24,7 +24,10 @@ const (
 	AssetECSTaskDefinition        AssetType = "ecs_task_definition"
 	AssetEKSCluster               AssetType = "eks_cluster"
 	AssetEKSPodIdentity           AssetType = "eks_pod_identity_association"
-	AssetEKSServiceAccountRef    AssetType = "eks_service_account_ref"
+	AssetEKSServiceAccountRef     AssetType = "eks_service_account_ref"
+	AssetSecret                   AssetType = "secret"
+	AssetRDSInstance              AssetType = "rds_instance"
+	AssetKMSKey                   AssetType = "kms_key"
 	AssetIRSATrust                AssetType = "irsa_trust"
 )
 

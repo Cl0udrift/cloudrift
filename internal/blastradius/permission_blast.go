@@ -83,6 +83,9 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 		}
 	}
 	objects, roles, buckets, unresolved := classifyInventory(req.Assets, report.RoleARN)
+	secrets, keys := assetsOfType(req.Assets, models.AssetSecret), assetsOfType(req.Assets, models.AssetKMSKey)
+	instances := liveInstances(assetsOfType(req.Assets, models.AssetEC2Instance))
+	functions, databases := assetsOfType(req.Assets, models.AssetLambdaFunction), assetsOfType(req.Assets, models.AssetRDSInstance)
 	report.UnresolvedReferenceCount = len(unresolved)
 	if len(unresolved) > 0 {
 		report.CoverageNotes = append(report.CoverageNotes, "Unresolved references were not evaluated as confirmed resources.")
@@ -114,7 +117,7 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 		if cap.Support != iamauth.SupportEvaluated || !cap.PermissionImpact || !categoryAllowed(req.Categories, cap.Category) {
 			continue
 		}
-		targets := targetsFor(cap, objects, roles)
+		targets := targetsFor(cap, targetSet{objects: objects, roles: roles, secrets: secrets, keys: keys, instances: instances, functions: functions, databases: databases})
 		for _, target := range targets {
 			if len(decisions) >= limit {
 				report.Truncated = true
@@ -142,21 +145,38 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 			if cap.Evaluation == iamauth.EvalS3Object {
 				authReq.S3ObjectACL, authReq.S3BlockPublicAccess, authReq.S3KMSKeyPolicy = s3Constraints(target, buckets, authReq.S3ObjectACL, authReq.S3BlockPublicAccess, authReq.S3KMSKeyPolicy)
 			} else {
-				authReq.ResourcePolicy = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "this action does not use a resource policy"}
+				switch cap.Evaluation {
+				case iamauth.EvalSecret:
+					authReq.ResourcePolicy = secretPolicySlot(target)
+					authReq.SecretKMS = secretKMSEvidence(target, keys, req.Assets, role, req.RCPs)
+				case iamauth.EvalLambda:
+					authReq.ResourcePolicy = policySlotFromProps(target, "function_policy", "the function resource policy was not collected")
+				case iamauth.EvalKMSKey:
+					authReq.ResourcePolicy = keyPolicySlot(target)
+					authReq.KMSGrants = grantsOf(target)
+				default:
+					authReq.ResourcePolicy = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "this action does not use a resource policy"}
+				}
 			}
 			decision := iamauth.Evaluate(authReq)
 			hit := schema.PermissionDecision{
-				Action:              cap.Action,
-				Category:            cap.Category,
-				ResourceARN:         target.ARN,
-				AccountID:           target.AccountID,
-				Status:              decision.Status,
-				Reason:              decision.Reason,
-				Evidence:            append([]string{}, decision.Provenance...),
-				SameAccount:         decision.SameAccount,
-				Classification:      classificationOf(target),
-				DecisionID:          decision.ID,
-				EvidenceFingerprint: decision.EvidenceFingerprint,
+				Action:               cap.Action,
+				Category:             cap.Category,
+				ResourceARN:          target.ARN,
+				AccountID:            target.AccountID,
+				Status:               decision.Status,
+				Reason:               decision.Reason,
+				Evidence:             append([]string{}, decision.Provenance...),
+				SameAccount:          decision.SameAccount,
+				Classification:       classificationOf(target),
+				DecisionID:           decision.ID,
+				EvidenceFingerprint:  decision.EvidenceFingerprint,
+				Explanation:          iamauth.Explain(decision),
+				MissingEvidence:      decision.MissingEvidence,
+				MissingContext:       decision.MissingContext,
+				UnsatisfiedCondition: decision.UnsatisfiedConditions,
+				ExplicitDeny:         statementLabels(decision.ExplicitDeny),
+				AppliedStatements:    statementLabels(decision.ApplicableStatements),
 			}
 			if decision.Reason != "" {
 				hit.Evidence = append(hit.Evidence, decision.Reason)
@@ -506,8 +526,21 @@ func sortAssets(assets []models.AssetNode) {
 	sort.Slice(assets, func(i, j int) bool { return assets[i].ARN < assets[j].ARN })
 }
 
-func targetsFor(cap iamauth.Capability, objects, roles []models.AssetNode) []models.AssetNode {
+type targetSet struct{ objects, roles, secrets, keys, instances, functions, databases []models.AssetNode }
+
+func targetsFor(cap iamauth.Capability, t targetSet) []models.AssetNode {
+	objects, roles := t.objects, t.roles
 	switch cap.Evaluation {
+	case iamauth.EvalEC2Instance:
+		return t.instances
+	case iamauth.EvalLambda:
+		return t.functions
+	case iamauth.EvalRDSInstance:
+		return t.databases
+	case iamauth.EvalSecret:
+		return t.secrets
+	case iamauth.EvalKMSKey:
+		return t.keys
 	case iamauth.EvalS3Object:
 		return objects
 	case iamauth.EvalAssumeRole, iamauth.EvalIdentityOnly:
@@ -931,4 +964,101 @@ func PermissionExplorerPayload(sum schema.BlastRadiusSummary) schema.BlastExplor
 		})
 	}
 	return resp
+}
+
+func assetsOfType(assets []models.AssetNode, kind models.AssetType) []models.AssetNode {
+	var out []models.AssetNode
+	for _, asset := range assets {
+		if asset.AssetType == kind && !assetUnresolved(asset) {
+			out = append(out, asset)
+		}
+	}
+	sortAssets(out)
+	return out
+}
+
+func policySlotFromProps(target models.AssetNode, prefix, missingNote string) iamauth.PolicySlot {
+	status, _ := permStringProp(target.Properties, prefix+"_status")
+	evidence, _ := permStringProp(target.Properties, prefix+"_evidence")
+	doc, _ := permStringProp(target.Properties, prefix+"_document")
+	if evidence == "" {
+		evidence = missingNote
+	}
+	var docs []iamauth.PolicyDocument
+	if doc != "" {
+		docs = []iamauth.PolicyDocument{{ID: target.ARN, PolicyType: "resource", Raw: doc}}
+	}
+	return iamauth.SlotFromStatus(status, evidence, docs)
+}
+
+func secretPolicySlot(secret models.AssetNode) iamauth.PolicySlot {
+	return policySlotFromProps(secret, "secret_policy", "secret resource policy was not collected")
+}
+
+func keyPolicySlot(key models.AssetNode) iamauth.PolicySlot {
+	return policySlotFromProps(key, "key_policy", "key policy was not collected")
+}
+
+// secretKMSEvidence resolves the key behind a secret. A customer key that was not collected, or is
+// not Enabled, yields a customer-managed request with a missing key policy, which stays UNKNOWN.
+func secretKMSEvidence(secret models.AssetNode, keys, assets []models.AssetNode, role models.AssetNode, rcpOverride iamauth.PolicySlot) *iamauth.SecretKMSEvidence {
+	mode, _ := permStringProp(secret.Properties, "secret_kms_mode")
+	switch mode {
+	case iamauth.SecretKeyAWSManaged:
+		return &iamauth.SecretKMSEvidence{Mode: iamauth.SecretKeyAWSManaged}
+	case iamauth.SecretKeyCustomerManaged:
+		keyARN, _ := permStringProp(secret.Properties, "secret_kms_key_arn")
+		ev := &iamauth.SecretKMSEvidence{Mode: iamauth.SecretKeyCustomerManaged, KeyARN: keyARN,
+			KeyPolicy: iamauth.PolicySlot{State: iamauth.EvidenceMissing, Evidence: "the customer managed key is not in the scan, so its key policy was not collected"}}
+		for _, key := range keys {
+			if key.ARN != keyARN {
+				continue
+			}
+			ev.KeyPolicy = keyPolicySlot(key)
+			ev.Grants = grantsOf(key)
+			if state, _ := permStringProp(key.Properties, "key_state"); state != "" && state != "Enabled" {
+				ev.KeyPolicy = iamauth.PolicySlot{State: iamauth.EvidenceMissing, Evidence: "the key state is " + state + ", so decrypt was not evaluated"}
+			}
+			ev.RCPs = rcpForResource(assets, role, key, "kms:Decrypt", rcpOverride)
+			break
+		}
+		return ev
+	default:
+		return nil // unresolved key: the decision stays UNKNOWN
+	}
+}
+
+// liveInstances drops instances that can no longer be stopped or terminated.
+func liveInstances(instances []models.AssetNode) []models.AssetNode {
+	var out []models.AssetNode
+	for _, instance := range instances {
+		if state, _ := permStringProp(instance.Properties, "instance_state"); state == "terminated" || state == "shutting-down" {
+			continue
+		}
+		out = append(out, instance)
+	}
+	return out
+}
+
+func grantsOf(key models.AssetNode) []iamauth.KMSGrant {
+	var out []iamauth.KMSGrant
+	for _, item := range attachmentItems(key.Properties["key_grants"]) {
+		grant := iamauth.KMSGrant{GranteePrincipal: propString(item, "grantee_principal")}
+		grant.Constrained, _ = item["constrained"].(bool)
+		grant.Operations = permStringListProp(item, "operations")
+		out = append(out, grant)
+	}
+	return out
+}
+
+func statementLabels(refs []iamauth.StatementRef) []string {
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		label := ref.PolicyID
+		if ref.StatementID != "" {
+			label += " / " + ref.StatementID
+		}
+		out = append(out, ref.Effect+" "+label+" ("+ref.PolicyType+")")
+	}
+	return out
 }

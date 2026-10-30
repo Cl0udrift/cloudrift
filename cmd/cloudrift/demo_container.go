@@ -13,7 +13,7 @@ func containerScenarioIDs() []string {
 		"eks-pod-id", "eks-sa-absent", "eks-missing-role",
 		"irsa-trust", "irsa-exact", "irsa-wildcard", "irsa-no-k8s",
 		"share-ecs-lambda", "ct-deny", "ct-missing-scp", "ct-assume", "ct-shared-object", "ct-hist-a", "ct-hist-b",
-		"inv-mixed", "inv-pages",
+		"inv-mixed", "inv-pages", "regions-coverage",
 	}
 }
 
@@ -126,6 +126,8 @@ func containerScenario(scanID, scenario string) ([]models.AssetNode, []models.Re
 		return mixedInventory(scanID)
 	case "inv-pages":
 		return inventoryPages(scanID)
+	case "regions-coverage":
+		return regionCoverageScenario()
 	default:
 		return nil, nil, false
 	}
@@ -264,4 +266,31 @@ func sharedECSLambda(scanID string) ([]models.AssetNode, []models.Relationship) 
 	edges = append(edges, defRoleEdges(def, role.ARN, "")...)
 	edges = append(edges, models.Relationship{SourceARN: fn.ARN, TargetARN: role.ARN, RelType: models.RelLambdaUsesExecutionRole, Properties: map[string]any{"kind": "CONFIGURED_ROLE_ATTACHMENT", "mechanism": "lambda_execution_role", "relationship_id": "shared-lambda"}})
 	return append([]models.AssetNode{role, def, fn, bucket, obj}, nodes...), edges
+}
+
+func regionCoverageScenario() ([]models.AssetNode, []models.Relationship, bool) {
+	core := collectors.CollectionStatus(demoAcctCore, "", "region_discovery", "account", "succeeded", "auto")
+	core.Properties["partition"] = "aws"
+	core.Properties["region_mode"] = "auto"
+	core.Properties["selected_regions"] = "us-east-1,us-west-2"
+	core.Properties["not_enabled"] = "af-south-1"
+	core.Properties["evidence_origin"] = "ec2:DescribeRegions"
+	var assets []models.AssetNode
+	assets = append(assets, core)
+	for _, region := range []string{"us-east-1", "us-west-2"} {
+		for _, svc := range []string{"ec2", "lambda", "ecs", "eks"} {
+			status := "succeeded"
+			if region == "us-west-2" && svc == "lambda" {
+				status = "failed"
+			}
+			assets = append(assets, collectors.CollectionStatus(demoAcctCore, region, svc, "regional", status, ""))
+		}
+	}
+	failed := collectors.CollectionStatus(demoAcctData, "", "region_discovery", "account", "failed", "access_denied")
+	failed.Properties["partition"] = "aws"
+	failed.Properties["region_mode"] = "auto"
+	failed.Properties["error_category"] = "access_denied"
+	failed.Properties["evidence_origin"] = "ec2:DescribeRegions"
+	assets = append(assets, failed)
+	return assets, nil, true
 }

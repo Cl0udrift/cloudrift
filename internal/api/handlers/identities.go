@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -36,6 +37,10 @@ func ListIdentities(outputDir string) http.HandlerFunc {
 			Workload:     strings.TrimSpace(r.URL.Query().Get("workload")),
 			WorkloadType: strings.TrimSpace(r.URL.Query().Get("type")),
 			Region:       strings.TrimSpace(r.URL.Query().Get("region")),
+			Category:     strings.TrimSpace(r.URL.Query().Get("category")),
+			Unknown:      r.URL.Query().Get("unknown") == "true",
+			Idle:         r.URL.Query().Get("idle") == "true",
+			IdleDays:     idleDaysParam(r.URL.Query().Get("idle_days")),
 		})
 		total := len(items)
 		totalPages := 0
@@ -62,6 +67,15 @@ func ListIdentities(outputDir string) http.HandlerFunc {
 	}
 }
 
+// idleDaysParam accepts 1 to 3650; anything else falls back to the default threshold.
+func idleDaysParam(raw string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n < 1 || n > 3650 {
+		return 0
+	}
+	return n
+}
+
 func GetIdentityProfile(outputDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
@@ -81,6 +95,8 @@ func GetIdentityProfile(outputDir string) http.HandlerFunc {
 				impact.Assumption = workloadAssumption(workload, role.ARN, ciem.WorkloadsForRole(role.ARN, assets, rels))
 			}
 			profile.Impact = &impact
+			profile.EvaluatedCount = impact.ValidatedAllowed + impact.ValidatedDenied + impact.Conditional + impact.Unknown
+			profile.ValidatedTransitions = impact.ValidatedTransitions
 		}
 		writeJSON(w, http.StatusOK, profile)
 	}

@@ -15,6 +15,11 @@ const (
 	EvalS3Object     = "s3_object_policy"
 	EvalAssumeRole   = "assume_role"
 	EvalIdentityOnly = "identity_only"
+	EvalEC2Instance  = "ec2_instance_identity"
+	EvalLambda       = "lambda_function_policy"
+	EvalRDSInstance  = "rds_instance_identity"
+	EvalSecret       = "secret_resource_policy"
+	EvalKMSKey       = "kms_key_policy"
 	EvalUnsupported  = "unsupported"
 )
 
@@ -51,10 +56,18 @@ func Catalog() []Capability {
 			Consequence:     "Read object bytes if the evaluated request is allowed.",
 		},
 		{
-			Action: "secretsmanager:GetSecretValue", Service: "secretsmanager", Category: CategoryDataRead, Support: SupportCatalogOnly, Evaluation: EvalUnsupported,
-			ResourceShape:  "secret ARN",
-			RequiredPolicy: []string{"identity policy", "secret resource policy", "KMS key policy when a customer key encrypts the secret"},
-			Consequence:    "Read a secret value. Not scored until KMS and secret resource-policy rules are implemented.",
+			Action: "secretsmanager:GetSecretValue", Service: "secretsmanager", Category: CategoryDataRead, Support: SupportEvaluated, Evaluation: EvalSecret,
+			ResourceShape:  "secret ARN arn:aws:secretsmanager:region:account:secret:name",
+			RequiredPolicy: []string{"identity policy", "secret resource policy or confirmed absence", "kms:Decrypt on the customer managed key when one encrypts the secret", "boundary", "session policy", "SCP", "RCP"},
+			Prerequisites:  []string{"concrete secret ARN in the scan", "secret encryption key resolved to aws/secretsmanager or a collected customer managed key"},
+			Consequence:    "Read a secret value if the evaluated request is allowed, including the key decrypt leg.",
+		},
+		{
+			Action: "kms:Decrypt", Service: "kms", Category: CategoryDataRead, Support: SupportEvaluated, Evaluation: EvalKMSKey,
+			ResourceShape:  "key ARN arn:aws:kms:region:account:key/id",
+			RequiredPolicy: []string{"identity policy", "key policy", "boundary", "session policy", "SCP", "RCP"},
+			Prerequisites:  []string{"customer managed key in the scan with a collected default key policy"},
+			Consequence:    "Decrypt data under the key if the evaluated request is allowed. Grants and encryption context are not evaluated.",
 		},
 		{
 			Action: "s3:PutObject", Service: "s3", Category: CategoryDataModify, Support: SupportEvaluated, Evaluation: EvalS3Object,
@@ -73,24 +86,32 @@ func Catalog() []Capability {
 			Consequence:     "Delete an object if the evaluated request is allowed.",
 		},
 		{
-			Action: "ec2:StopInstances", Service: "ec2", Category: CategoryInfrastructureControl, Support: SupportCatalogOnly, Evaluation: EvalUnsupported,
-			ResourceShape: "instance ARN",
-			Consequence:   "Stop an instance. Not scored; EC2 authorization and instance state are not evaluated.",
+			Action: "ec2:StopInstances", Service: "ec2", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalEC2Instance,
+			ResourceShape:  "instance ARN arn:aws:ec2:region:account:instance/id",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Prerequisites:  []string{"concrete instance ARN in the scan", "same account as the caller: EC2 instances have no resource policy"},
+			Consequence:    "Stop an instance if the evaluated request is allowed. Instance state and tag conditions are not assumed.",
 		},
 		{
-			Action: "ec2:TerminateInstances", Service: "ec2", Category: CategoryInfrastructureControl, Support: SupportCatalogOnly, Evaluation: EvalUnsupported,
-			ResourceShape: "instance ARN",
-			Consequence:   "Terminate an instance. Not scored.",
+			Action: "ec2:TerminateInstances", Service: "ec2", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalEC2Instance,
+			ResourceShape:  "instance ARN arn:aws:ec2:region:account:instance/id",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Prerequisites:  []string{"concrete instance ARN in the scan", "same account as the caller: EC2 instances have no resource policy"},
+			Consequence:    "Terminate an instance if the evaluated request is allowed. Termination protection is an API-level check and is not evaluated.",
 		},
 		{
-			Action: "lambda:UpdateFunctionCode", Service: "lambda", Category: CategoryInfrastructureControl, Support: SupportCatalogOnly, Evaluation: EvalUnsupported,
-			ResourceShape: "function ARN",
-			Consequence:   "Replace function code. Not scored.",
+			Action: "lambda:UpdateFunctionCode", Service: "lambda", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalLambda,
+			ResourceShape:  "function ARN arn:aws:lambda:region:account:function:name",
+			RequiredPolicy: []string{"identity policy", "function resource policy or confirmed absence", "boundary", "session policy", "SCP"},
+			Prerequisites:  []string{"concrete function ARN in the scan", "function policy collected with lambda:GetPolicy"},
+			Consequence:    "Replace function code if the evaluated request is allowed. Code signing and function state are not evaluated.",
 		},
 		{
-			Action: "rds:DeleteDBInstance", Service: "rds", Category: CategoryInfrastructureControl, Support: SupportCatalogOnly, Evaluation: EvalUnsupported,
-			ResourceShape: "DB instance ARN",
-			Consequence:   "Delete a database. Not scored.",
+			Action: "rds:DeleteDBInstance", Service: "rds", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalRDSInstance,
+			ResourceShape:  "DB instance ARN arn:aws:rds:region:account:db:name",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Prerequisites:  []string{"concrete DB instance ARN in the scan", "same account as the caller: RDS instances have no resource policy"},
+			Consequence:    "Delete a DB instance if the evaluated request is allowed. Deletion protection is an API-level check and is not evaluated.",
 		},
 		{
 			Action: "iam:AttachRolePolicy", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
@@ -143,8 +164,7 @@ var s3Limits = []string{
 	"bucket owner enforced versus ACL-enabled object ownership, unless declared",
 	"KMS decrypt required to read an encrypted object",
 	"VPC endpoint policies and resource control beyond a supplied RCP",
-	"policy variables such as ${aws:username}",
-	"condition operators other than StringEquals, StringNotEquals, ArnEquals, ArnLike, Bool, and Null",
+	"Date conditions and ForAnyValue/ForAllValues set operators",
 }
 
 var registryDetail = map[string]registryFacts{
@@ -180,19 +200,25 @@ var registryDetail = map[string]registryFacts{
 		inventory:   true,
 	},
 	"secretsmanager:GetSecretValue": {
-		unsupported: []string{"secret resource policy", "KMS key policy", "validated secret read"},
+		unsupported: []string{"grants with constraints", "kms:EncryptionContext conditions unless supplied as request context", "VPC endpoint policies", "secret replicas in other Regions"},
+		inventory:   true,
+		technique:   "READ_SECRET",
+	},
+	"kms:Decrypt": {
+		unsupported: []string{"grants with constraints or retiring-principal semantics", "kms:EncryptionContext conditions unless supplied as request context", "VPC endpoint policies", "key state beyond Enabled"},
+		inventory:   true,
 	},
 	"ec2:StopInstances": {
-		unsupported: []string{"EC2 authorization", "instance state"},
+		unsupported: []string{"instance state", "ec2:ResourceTag conditions unless tags are supplied as request context"},
 	},
 	"ec2:TerminateInstances": {
-		unsupported: []string{"EC2 authorization", "instance state"},
+		unsupported: []string{"instance state", "termination protection (DisableApiTermination)", "ec2:ResourceTag conditions unless tags are supplied as request context"},
 	},
 	"lambda:UpdateFunctionCode": {
-		unsupported: []string{"Lambda resource policy", "function code replacement"},
+		unsupported: []string{"code signing configuration", "function state", "lambda:FunctionUrlAuthType and qualifier-specific policies"},
 	},
 	"rds:DeleteDBInstance": {
-		unsupported: []string{"RDS authorization", "database deletion"},
+		unsupported: []string{"deletion protection", "DB instance status", "rds:db-tag conditions unless tags are supplied as request context"},
 	},
 }
 

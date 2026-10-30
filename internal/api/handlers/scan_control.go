@@ -75,6 +75,17 @@ func (s *scanControlCenter) SetAlertService(svc *alerting.Service) {
 	s.alertSvc = svc
 }
 
+func regionPlanNote(mode string, regions []string) string {
+	switch mode {
+	case config.RegionModeAuto:
+		return "Automatic: after this scan starts, Cloudrift will discover enabled Regions separately for every assumed account. Discovery has not run yet."
+	case config.RegionModeExplicit:
+		return "Explicit: this scan will read only the configured Region allowlist (" + strings.Join(regions, ", ") + "). Regions outside that list are not scanned."
+	default:
+		return "Legacy: with CIEM off and no aws.regions list, regional workloads stay on us-east-1. That is not full enabled-Region coverage. Turning on CIEM for this run switches an empty list to automatic discovery."
+	}
+}
+
 func (s *scanControlCenter) RuntimeStatus() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg, err := config.Load(s.configPath)
@@ -83,6 +94,15 @@ func (s *scanControlCenter) RuntimeStatus() http.HandlerFunc {
 			return
 		}
 		profiles := discoverAWSProfiles()
+		mode, regions, modeErr := config.ResolveRegionMode(cfg)
+		note := regionPlanNote(mode, regions)
+		if modeErr != nil {
+			mode = ""
+			note = modeErr.Error()
+		}
+		if regions == nil {
+			regions = []string{}
+		}
 		resp := schema.RuntimeStatusResponse{
 			AWSProfiles:      profiles,
 			DefaultProfile:   defaultProfile(cfg),
@@ -90,6 +110,10 @@ func (s *scanControlCenter) RuntimeStatus() http.HandlerFunc {
 			Neo4jConfigured:  neo4jConfigured(cfg),
 			SlackConfigured:  strings.TrimSpace(os.Getenv("CLOUDRIFT_SLACK_WEBHOOK_URL")) != "",
 			EmailConfigured:  strings.TrimSpace(os.Getenv("CLOUDRIFT_ALERT_EMAIL_TO")) != "",
+			RegionMode:       mode,
+			ExplicitRegions:  regions,
+			CIEMConfigured:   cfg.Scan.IAMPolicyInventory,
+			RegionPlanNote:   note,
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
@@ -224,6 +248,9 @@ func (s *scanControlCenter) runScanAsync(req schema.ScanStartRequest, cfg *confi
 	// Honor the dashboard profile picker: the selected profile drives credential loading.
 	if req.Profile != "" {
 		cfg.AWS.ManagementProfile = req.Profile
+	}
+	if req.CIEM {
+		config.EnableCIEM(cfg)
 	}
 	// Capture the coverage warning (if any) streamed by the pipeline so the final
 	// completion message reflects partial coverage instead of a misleading "scan completed".

@@ -22,6 +22,21 @@ const (
 	// EvaluationIdentityPolicyOnly means SCP, RCP, permission boundary, session
 	// policy, and resource policy were not evaluated.
 	EvaluationIdentityPolicyOnly = "identity_policy_document_only"
+
+	// Candidate evidence states. They are not authorization outcomes.
+	EvidenceDeclared    = "DECLARED"
+	EvidenceConditional = "CONDITIONAL"
+	EvidenceUnknown     = "UNKNOWN_EVIDENCE"
+	EvidenceUnsupported = "UNSUPPORTED_CONSTRUCT"
+	EvidenceDeny        = "DENY_EVIDENCE"
+
+	// Policy version verification describes the snapshot, not the policy as it exists now.
+	PolicyVersionVerified      = "verified"
+	PolicyVersionUnverified    = "unverified"
+	PolicyVersionMismatch      = "mismatch"
+	PolicyVersionIndeterminate = "indeterminate"
+	PolicyVersionMissing       = "missing"
+	PolicyVersionNotApplicable = "not_applicable"
 )
 
 // IAMPolicyStatement is one normalized identity-policy statement.

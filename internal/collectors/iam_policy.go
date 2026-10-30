@@ -13,12 +13,13 @@ import (
 // IdentityPolicyInput is one inline or managed policy document for a role.
 // RetrievalStatus missing or malformed keeps the policy visible and emits no statements.
 type IdentityPolicyInput struct {
-	ARN             string
-	Name            string
-	PolicyType      string
-	VersionID       string
-	Document        string
-	RetrievalStatus string
+	ARN                 string
+	Name                string
+	PolicyType          string
+	VersionID           string
+	Document            string
+	RetrievalStatus     string
+	VersionVerification string
 }
 
 // BuildIdentityPolicyEvidence projects policy, statement, and unevaluated candidate
@@ -28,14 +29,15 @@ func BuildIdentityPolicyEvidence(role models.AssetNode, policies []IdentityPolic
 	collected := make([]collectedPolicy, 0, len(policies))
 	for _, policy := range policies {
 		collected = append(collected, collectedPolicy{
-			ARN:             policy.ARN,
-			Name:            policy.Name,
-			PolicyType:      policy.PolicyType,
-			VersionID:       policy.VersionID,
-			Document:        policy.Document,
-			RetrievalStatus: policy.RetrievalStatus,
-			RoleARN:         role.ARN,
-			AccountID:       role.AccountID,
+			ARN:                 policy.ARN,
+			Name:                policy.Name,
+			PolicyType:          policy.PolicyType,
+			VersionID:           policy.VersionID,
+			Document:            policy.Document,
+			RetrievalStatus:     policy.RetrievalStatus,
+			VersionVerification: policy.VersionVerification,
+			RoleARN:             role.ARN,
+			AccountID:           role.AccountID,
 		})
 	}
 	return policyEvidenceGraph(role, collected)
@@ -44,14 +46,15 @@ func BuildIdentityPolicyEvidence(role models.AssetNode, policies []IdentityPolic
 // collectedPolicy is one inline or managed policy retrieved for a role.
 // RetrievalStatus missing or malformed keeps the policy visible and emits no statements.
 type collectedPolicy struct {
-	ARN             string
-	Name            string
-	PolicyType      string
-	VersionID       string
-	Document        string
-	RetrievalStatus string
-	RoleARN         string
-	AccountID       string
+	ARN                 string
+	Name                string
+	PolicyType          string
+	VersionID           string
+	Document            string
+	RetrievalStatus     string
+	VersionVerification string
+	RoleARN             string
+	AccountID           string
 }
 
 func policyEvidenceGraph(role models.AssetNode, policies []collectedPolicy) ([]models.AssetNode, []models.Relationship) {
@@ -78,13 +81,15 @@ func policyEvidenceGraph(role models.AssetNode, policies []collectedPolicy) ([]m
 			AccountID: role.AccountID,
 			Region:    "global",
 			Properties: map[string]any{
-				"policy_type":       p.PolicyType,
-				"policy_version_id": p.VersionID,
-				"retrieval_status":  status,
-				"policy_document":   p.Document,
-				"attached_role_arn": role.ARN,
-				"resolution_status": "collected",
-				"evaluation_status": models.EvaluationUnevaluated,
+				"policy_type":                 p.PolicyType,
+				"policy_version_id":           p.VersionID,
+				"policy_version_verification": versionVerification(p),
+				"policy_document_fingerprint": documentFingerprint(p.Document),
+				"retrieval_status":            status,
+				"policy_document":             p.Document,
+				"attached_role_arn":           role.ARN,
+				"resolution_status":           "collected",
+				"evaluation_status":           models.EvaluationUnevaluated,
 			},
 		}
 		nodes = append(nodes, policyNode)
@@ -189,6 +194,27 @@ func policyEvidenceGraph(role models.AssetNode, policies []collectedPolicy) ([]m
 		return rels[i].SourceARN < rels[j].SourceARN
 	})
 	return nodes, rels
+}
+
+func versionVerification(p collectedPolicy) string {
+	if p.VersionVerification != "" {
+		return p.VersionVerification
+	}
+	if p.PolicyType == models.PolicyTypeInline && p.RetrievalStatus == models.PolicyRetrievalOK {
+		return models.PolicyVersionNotApplicable
+	}
+	if p.RetrievalStatus != models.PolicyRetrievalOK {
+		return models.PolicyVersionMissing
+	}
+	return models.PolicyVersionUnverified
+}
+
+func documentFingerprint(document string) string {
+	if strings.TrimSpace(document) == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(document))
+	return hex.EncodeToString(sum[:8])
 }
 
 func inlinePolicyARN(accountID, roleName, policyName string) string {

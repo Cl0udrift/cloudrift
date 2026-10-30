@@ -32,4 +32,10 @@ type ScanSnapshot struct {
 	// org_policy_discovery access_denied is not policy absence.
 	CIEMCollection     string `json:"ciem_collection,omitempty"`
 	OrgPolicyDiscovery string `json:"org_policy_discovery,omitempty"`
+	// RegionMode is auto, explicit, or legacy_default. Omitted on older scans.
+	RegionMode string `json:"region_mode,omitempty"`
+	// SupportedInventoryComplete is true only when supported collectors, including
+	// every regional service, finished successfully. It is omitted when the scan
+	// has no collection-status evidence. coverage_complete records reached accounts.
+	SupportedInventoryComplete *bool `json:"supported_inventory_complete,omitempty"`
 }

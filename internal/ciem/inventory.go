@@ -21,7 +21,17 @@ type InventoryFilter struct {
 	Workload     string
 	WorkloadType string
 	Region       string
+	// Category keeps roles whose broad candidates include it. Unknown keeps roles with unknown or unsupported policy evidence.
+	Category string
+	Unknown  bool
+	// Idle keeps roles IAM reported as unused in its tracking window, or last used at least IdleDays ago.
+	Idle bool
+	// IdleDays overrides the default threshold when positive.
+	IdleDays int
 }
+
+// DefaultIdleDays is the last-used age at which a role is listed as idle unless overridden.
+const DefaultIdleDays = 90
 
 // ListRoles returns every collected IAM role. It does not run permission blast
 // or identity-attack search.
@@ -54,28 +64,41 @@ func ListRoles(assets []models.AssetNode, rels []models.Relationship, filter Inv
 
 func summarizeRole(role models.AssetNode, assets []models.AssetNode, rels []models.Relationship) schema.IdentityListItem {
 	labels := ClassifyRole(role, rels, assets)
-	candidates := declaredCandidates(role)
+	permissions := PermissionCandidates("", role, assets, rels)
+	candidates := broadCandidates(permissions)
+	unknown := 0
+	for _, item := range permissions {
+		if item.Outcome == models.EvidenceUnknown || item.Outcome == models.EvidenceUnsupported {
+			unknown++
+		}
+	}
 	workloads := WorkloadsForRole(role.ARN, assets, rels)
 	status := strProp(role, "resolution_status")
 	if status == "" {
 		status = "collected"
 	}
 	return schema.IdentityListItem{
-		RoleARN:               role.ARN,
-		AccountID:             role.AccountID,
-		AccountName:           strProp(role, "account_name"),
-		Name:                  role.Name,
-		Path:                  strProp(role, "path"),
-		RoleID:                strProp(role, "role_id"),
-		CreatedAt:             strProp(role, "create_date"),
-		LastUsed:              strProp(role, "role_last_used"),
-		OUPath:                strProp(role, "ou_path"),
-		Classifications:       labels,
-		TrustedPrincipalCount: trustCount(role.ARN, rels),
-		BroadCandidates:       candidates,
-		WorkloadCount:         len(workloads),
-		EvidenceCompleteness:  evidenceLabel(role),
-		CollectionStatus:      status,
+		RoleARN:                   role.ARN,
+		AccountID:                 role.AccountID,
+		AccountName:               strProp(role, "account_name"),
+		Name:                      role.Name,
+		Path:                      strProp(role, "path"),
+		RoleID:                    strProp(role, "role_id"),
+		CreatedAt:                 strProp(role, "create_date"),
+		LastUsed:                  strProp(role, "role_last_used"),
+		LastUsedStatus:            strProp(role, "role_last_used_status"),
+		LastUsedRegion:            strProp(role, "role_last_used_region"),
+		DaysSinceUsed:             daysSinceUsed(role),
+		ServiceLastAccessedStatus: strProp(role, "service_last_accessed_status"),
+		OUPath:                    strProp(role, "ou_path"),
+		Classifications:           labels,
+		TrustedPrincipalCount:     trustCount(role.ARN, rels),
+		BroadCandidates:           candidates,
+		UnknownEvidenceCount:      unknown,
+		ControlsMissing:           controlsMissing(role),
+		WorkloadCount:             len(workloads),
+		EvidenceCompleteness:      evidenceLabel(role),
+		CollectionStatus:          status,
 	}
 }
 
@@ -113,6 +136,15 @@ func matchRole(item schema.IdentityListItem, filter InventoryFilter) bool {
 		if !containsFold(item.Classifications, ClassInternalCrossAccount) && !containsFold(item.Classifications, ClassSameAccount) {
 			return false
 		}
+	}
+	if filter.Category != "" && !containsFold(item.BroadCandidates, filter.Category) {
+		return false
+	}
+	if filter.Idle && !IsIdleAfter(item, filter.IdleDays) {
+		return false
+	}
+	if filter.Unknown && item.UnknownEvidenceCount == 0 {
+		return false
 	}
 	if filter.Broad == "candidate" && len(item.BroadCandidates) == 0 {
 		return false
@@ -158,30 +190,68 @@ func containsFold(values []string, want string) bool {
 	return false
 }
 
-func declaredCandidates(role models.AssetNode) []string {
-	vis := scorers.DeriveRolePermissionVisibility(role)
+// broadCandidates lists categories of broad-scope declared or conditional candidates
+// from the canonical extractor. Narrow, Deny, unknown and unsupported items are excluded.
+func broadCandidates(permissions []schema.PermissionCandidate) []string {
 	var out []string
-	if vis.Capabilities.AdminLike {
-		out = append(out, "administrative_wildcard")
-	}
-	docs := stringList(role.Properties, "inline_policy_documents")
-	joined := strings.ToLower(strings.Join(docs, "\n"))
-	if strings.Contains(joined, "sts:assumerole") && strings.Contains(joined, `"resource":"*"`) {
-		out = append(out, "broad_assume_role")
-	}
-	if strings.Contains(joined, "iam:passrole") {
-		out = append(out, "broad_passrole")
-	}
-	if strings.Contains(joined, `"action":"*"`) || strings.Contains(joined, "s3:*") || strings.Contains(joined, `"action":"s3:*"`) {
-		if !vis.Capabilities.AdminLike && (strings.Contains(joined, "s3:*") || strings.Contains(joined, "s3:getobject")) && strings.Contains(joined, `"resource":"*"`) {
-			out = append(out, "broad_s3_access")
+	for _, item := range permissions {
+		if (item.Outcome == models.EvidenceDeclared || item.Outcome == models.EvidenceConditional) && item.ExposureClass != "narrow" && item.Category != "" {
+			out = append(out, item.Category)
 		}
-	}
-	if vis.Capabilities.IAMWriteAccess && !vis.Capabilities.AdminLike && strings.Contains(joined, "iam:attachrolepolicy") {
-		out = append(out, "iam_policy_modification")
 	}
 	sort.Strings(out)
 	return unique(out)
+}
+
+func tallyCandidates(items []schema.PermissionCandidate) (declared, conditional, unknown, deny, eligible int) {
+	for _, item := range items {
+		if item.Eligible {
+			eligible++
+		}
+		switch item.Outcome {
+		case "DECLARED":
+			declared++
+		case "CONDITIONAL":
+			conditional++
+		case "DENY_EVIDENCE":
+			deny++
+		default:
+			unknown++
+		}
+	}
+	return declared, conditional, unknown, deny, eligible
+}
+
+func entitlementAssessment(eligible, unknown int, items []schema.PermissionCandidate, iamRecorded bool) string {
+	unconditional, conditional := false, false
+	for _, item := range items {
+		if !item.Eligible {
+			continue
+		}
+		if item.ExposureClass == "conditional" {
+			conditional = true
+		} else {
+			unconditional = true
+		}
+	}
+	if unconditional {
+		return "DECLARED_UNCONDITIONAL_EXPOSURE"
+	}
+	if conditional {
+		return "DECLARED_CONDITIONAL_EXPOSURE"
+	}
+	if eligible > 0 {
+		return "DECLARED_UNCONDITIONAL_EXPOSURE"
+	}
+	if !iamRecorded || unknown > 0 {
+		return "INSUFFICIENT_EVIDENCE"
+	}
+	for _, item := range items {
+		if item.VersionVerification == models.PolicyVersionUnverified || item.VersionVerification == models.PolicyVersionMissing {
+			return "INSUFFICIENT_EVIDENCE"
+		}
+	}
+	return "NO_DECLARED_SENSITIVE_PATTERN"
 }
 
 func evidenceLabel(role models.AssetNode) string {
@@ -221,32 +291,59 @@ func stringList(props map[string]any, key string) []string {
 // Profile assembles entitlement evidence for one role. It does not evaluate impact.
 func Profile(scanID string, role models.AssetNode, assets []models.AssetNode, rels []models.Relationship) schema.RoleEntitlementProfile {
 	labels := ClassifyRole(role, rels, assets)
-	candidates := declaredCandidates(role)
+	permissions := PermissionCandidates(scanID, role, assets, rels)
+	declared, conditional, unknown, deny, eligible := tallyCandidates(permissions)
+	iamRecorded := false
+	for _, asset := range assets {
+		if asset.AssetType == "collection_status" && strProp(asset, "collector") == "iam" {
+			iamRecorded = true
+		}
+	}
 	workloads := WorkloadsForRole(role.ARN, assets, rels)
 	attached, inlineCount := policyInventory(role, assets)
+	trusts, trustNote := TrustEvidence(role, rels, orgMembership(assets))
+	svcStatus, svcCompleted, svcEntries := serviceAccessFromRole(role)
+	annotateServiceActivity(permissions, svcStatus, svcEntries)
 	profile := schema.RoleEntitlementProfile{
-		ScanID:            scanID,
-		RoleARN:           role.ARN,
-		AccountID:         role.AccountID,
-		AccountName:       strProp(role, "account_name"),
-		Name:              role.Name,
-		Path:              strProp(role, "path"),
-		Classifications:   labels,
-		Assumption:        "A usable session for " + role.ARN + " is compromised. This is a hypothesis. It is not proof that any caller can assume the role, and it is not an observed STS session.",
-		CollectionStatus:  firstNonEmpty(strProp(role, "resolution_status"), "collected"),
-		PolicyRetrieval:   firstNonEmpty(strProp(role, "policy_retrieval_status"), "not_recorded"),
-		AttachedPolicies:  attached,
-		InlinePolicyCount: inlineCount,
-		BroadCandidates:   candidates,
-		CandidateNote:     "Declared entitlement candidates come from policy text. They are not evaluated authorization and they are not attack paths.",
-		Trusts:            configuredTrusts(role, rels, orgMembership(assets)),
-		Workloads:         workloads,
-		WorkloadCount:     len(workloads),
-		SharedRole:        len(workloads) > 1,
-		AttachmentNote:    AttachmentNote(role, rels, workloads),
-		EvidenceCoverage:  evidenceCoverage(role, assets),
-		Recommendations:   internalRecommendations(role, labels, candidates, workloads),
-		ExecutionEnabled:  false,
+		ScanID:                    scanID,
+		RoleARN:                   role.ARN,
+		AccountID:                 role.AccountID,
+		AccountName:               strProp(role, "account_name"),
+		Name:                      role.Name,
+		Path:                      strProp(role, "path"),
+		Classifications:           labels,
+		Assumption:                "A usable session for " + role.ARN + " is compromised. This is a hypothesis. It is not proof that any caller can assume the role, and it is not an observed STS session.",
+		CollectionStatus:          firstNonEmpty(strProp(role, "resolution_status"), "collected"),
+		PolicyRetrieval:           firstNonEmpty(strProp(role, "policy_retrieval_status"), "not_recorded"),
+		AttachedPolicies:          attached,
+		InlinePolicyCount:         inlineCount,
+		BroadCandidates:           broadCandidates(permissions),
+		PermissionCandidates:      permissions,
+		ServiceLastAccessedStatus: svcStatus, ServiceLastAccessedCompleted: svcCompleted, ServiceAccess: svcEntries,
+		CandidateCount:        declared,
+		ConditionalCount:      conditional,
+		UnknownCount:          unknown,
+		DenyEvidenceCount:     deny,
+		EligibleExposureCount: eligible,
+		EntitlementAssessment: entitlementAssessment(eligible, unknown, permissions, iamRecorded),
+		AssessmentVersion:     scorers.AssessmentVersion,
+		LastUsed:              strProp(role, "role_last_used"),
+		LastUsedStatus:        strProp(role, "role_last_used_status"),
+		LastUsedRegion:        strProp(role, "role_last_used_region"),
+		DaysSinceUsed:         daysSinceUsed(role),
+		AssessmentSource:      "stored_snapshot",
+		EvaluatedCount:        0,
+		ValidatedTransitions:  0,
+		CandidateNote:         "This profile is derived from stored snapshot evidence. It is not a finding written by the original scan. Zero candidates does not mean the role is safe. A missing document is not an empty policy.",
+		TrustEvidenceNote:     trustNote,
+		Trusts:                trusts,
+		Workloads:             workloads,
+		WorkloadCount:         len(workloads),
+		SharedRole:            len(workloads) > 1,
+		AttachmentNote:        AttachmentNote(role, rels, workloads),
+		EvidenceCoverage:      evidenceCoverage(role, assets),
+		Recommendations:       internalRecommendations(role, labels, broadCandidates(permissions), workloads),
+		ExecutionEnabled:      false,
 	}
 	return profile
 }
@@ -301,6 +398,7 @@ func configuredTrusts(role models.AssetNode, rels []models.Relationship, mem mem
 			PrincipalType: relString(rel, "principal_type"),
 			Kind:          "CONFIGURED_TRUST",
 			Scope:         scope,
+			Evidence:      "relationship",
 			Note:          "Configured trust is not AssumeRole authorization and is not a validated identity transition.",
 		})
 	}
@@ -360,6 +458,32 @@ func internalRecommendations(role models.AssetNode, labels, candidates []string,
 	})
 }
 
+// IsIdle is true only on IAM-reported evidence. Not collected or not recorded is never idle.
+func IsIdle(item schema.IdentityListItem) bool { return IsIdleAfter(item, DefaultIdleDays) }
+
+// IsIdleAfter uses the given threshold in days; zero or less means the default.
+func IsIdleAfter(item schema.IdentityListItem, days int) bool {
+	if days <= 0 {
+		days = DefaultIdleDays
+	}
+	if item.LastUsedStatus == "not_used_in_tracking_window" {
+		return true
+	}
+	return item.LastUsedStatus == "used" && item.DaysSinceUsed != nil && *item.DaysSinceUsed >= days
+}
+
+// daysSinceUsed reads the stored day count. It is nil unless IAM reported a last-used date.
+func daysSinceUsed(role models.AssetNode) *int {
+	switch v := role.Properties["role_days_since_used"].(type) {
+	case int:
+		return &v
+	case float64: // JSON round trip
+		n := int(v)
+		return &n
+	}
+	return nil
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -367,4 +491,21 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// controlsMissing lists boundary, SCP and RCP evidence that is not collected or unusable.
+// Confirmed-absent and not-applicable controls are complete evidence, not missing.
+func controlsMissing(role models.AssetNode) []string {
+	var out []string
+	for name, cov := range map[string]string{
+		"permissions_boundary": coverageFromBoundary(role),
+		"rcp":                  coverageFromControl(role, "rcp"),
+		"scp":                  coverageFromControl(role, "scp"),
+	} {
+		if cov != "COMPLETE_FOR_SUPPORTED_SCOPE" && cov != "NOT_APPLICABLE" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

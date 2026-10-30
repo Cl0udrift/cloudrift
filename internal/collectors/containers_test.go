@@ -73,6 +73,7 @@ type fakeEKS struct {
 	names []string
 	assoc ekstypes.PodIdentityAssociation
 	fail  bool
+	quiet bool
 }
 
 func (f fakeEKS) ListClusters(_ context.Context, in *eks.ListClustersInput, _ ...func(*eks.Options)) (*eks.ListClustersOutput, error) {
@@ -97,6 +98,9 @@ func (f fakeEKS) DescribeCluster(context.Context, *eks.DescribeClusterInput, ...
 }
 
 func (f fakeEKS) ListPodIdentityAssociations(_ context.Context, in *eks.ListPodIdentityAssociationsInput, _ ...func(*eks.Options)) (*eks.ListPodIdentityAssociationsOutput, error) {
+	if f.quiet {
+		return &eks.ListPodIdentityAssociationsOutput{}, nil
+	}
 	if in.NextToken == nil {
 		return &eks.ListPodIdentityAssociationsOutput{
 			Associations: []ekstypes.PodIdentityAssociationSummary{{

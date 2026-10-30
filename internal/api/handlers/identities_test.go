@@ -60,8 +60,9 @@ func TestIdentityInventoryFiltersAndProfile(t *testing.T) {
 	rr = httptest.NewRecorder()
 	ListIdentities(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/id-scan/identities?broad=candidate&evidence=incomplete", nil), "id", "id-scan"))
 	mustDecode(t, rr, &list)
-	if list.TotalItems != 1 || list.Items[0].Name != "Admin" {
-		t.Fatalf("%+v", list)
+	// A managed-policy name alone is not a document-backed candidate.
+	if list.TotalItems != 0 {
+		t.Fatalf("policy-name-only role must not be a broad candidate: %+v", list)
 	}
 
 	rr = httptest.NewRecorder()
@@ -71,7 +72,7 @@ func TestIdentityInventoryFiltersAndProfile(t *testing.T) {
 	}
 	var profile schema.RoleEntitlementProfile
 	mustDecode(t, rr, &profile)
-	if profile.Impact != nil || profile.ExecutionEnabled || len(profile.BroadCandidates) == 0 {
+	if profile.Impact != nil || profile.ExecutionEnabled || len(profile.BroadCandidates) != 0 {
 		t.Fatalf("%+v", profile)
 	}
 

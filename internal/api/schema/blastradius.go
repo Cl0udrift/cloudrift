@@ -151,6 +151,13 @@ type PermissionDecision struct {
 	Classification      string   `json:"classification,omitempty"`
 	DecisionID          string   `json:"decision_id,omitempty"`
 	EvidenceFingerprint string   `json:"evidence_fingerprint,omitempty"`
+	// Explanation is a plain-language reason. The fields below are the raw facts behind it.
+	Explanation          string   `json:"explanation,omitempty"`
+	MissingEvidence      []string `json:"missing_evidence,omitempty"`
+	MissingContext       []string `json:"missing_context,omitempty"`
+	UnsatisfiedCondition []string `json:"unsatisfied_conditions,omitempty"`
+	ExplicitDeny         []string `json:"explicit_deny,omitempty"`
+	AppliedStatements    []string `json:"applied_statements,omitempty"`
 }
 
 // PermissionBucketScope records a bucket whose objects were not in the scan.

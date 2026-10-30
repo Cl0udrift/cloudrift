@@ -40,6 +40,10 @@ type awsSource struct{}
 func NewAWSSource() Source { return awsSource{} }
 
 func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progress) (Result, error) {
+	regionMode, _, err := config.ResolveRegionMode(cfg)
+	if err != nil {
+		return Result{}, err
+	}
 	// Credential selection: explicit management_profile wins; otherwise fall back to the
 	// AWS default chain (env/AWS_PROFILE/SSO/instance role).
 	var loadOpts []func(*awsconfig.LoadOptions) error
@@ -92,7 +96,8 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 		return Result{}, fmt.Errorf("collect storage: %w", err)
 	}
 	assets = append(assets, storage...)
-	slog.Info("collector finished", "collector", "storage", "buckets", len(storage), "failed_accounts", len(storageFailed))
+	bucketAssets, statusRecords := collectors.CountBuckets(storage)
+	slog.Info("collector finished", "collector", "storage", "buckets", bucketAssets, "status_records", statusRecords, "failed_accounts", len(storageFailed))
 	// Bucket-enumeration gaps directly weaken the reclaimable verdict, so fold them into
 	// coverage (Complete() becomes false, triggering the pipeline's reclaimable guard).
 	if len(storageFailed) > 0 {
@@ -160,6 +165,9 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 		assets = append(assets, collectors.OrganizationAccountNodes(coverage)...)
 	}
 	if cfg.Scan.IAMPolicyInventory {
+		if regionMode == config.RegionModeAuto {
+			progress("collecting", "discovering enabled Regions for each assumed account")
+		}
 		progress("collecting", "mapping EC2 instance profiles and Lambda execution roles")
 		workloadAssets, workloadRels, err := collectors.CollectWorkloads(ctx, cfg, accounts)
 		if err != nil {
@@ -174,6 +182,17 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 	}
 	slog.Info("collector finished", "collector", "trust", "roles", len(trustAssets))
 
+	if cfg.Scan.ResourcePolicies {
+		progress("collecting", "collecting Secrets Manager and KMS resource policies")
+		policyAssets, err := collectors.CollectResourcePolicies(ctx, cfg, accounts)
+		if err != nil {
+			return Result{}, fmt.Errorf("collect resource policies: %w", err)
+		}
+		assets = append(assets, policyAssets...)
+		collectors.CollectLambdaPolicies(ctx, cfg, accounts, assets)
+		slog.Info("collector finished", "collector", "resource-policies", "assets", len(policyAssets))
+	}
+
 	progress("collecting", "collecting IAM role activity")
 	activity, err := collectors.CollectActivityWithConfig(ctx, cfg, accounts)
 	if err != nil {
@@ -181,7 +200,16 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 	}
 	slog.Info("collector finished", "collector", "activity", "records", len(activity))
 
-	return Result{Accounts: accounts, Assets: assets, Rels: rels, Activity: activity, Coverage: coverage}, nil
+	var serviceAccess []collectors.RoleServiceAccess
+	if cfg.Scan.ServiceLastAccessed {
+		progress("collecting", "collecting IAM service last-accessed data")
+		serviceAccess = collectors.CollectServiceLastAccessed(ctx, cfg, accounts)
+		slog.Info("collector finished", "collector", "service-last-accessed", "records", len(serviceAccess))
+	}
+
+	coverage.RegionMode = regionMode
+	return Result{Accounts: accounts, Assets: assets, Rels: rels, Activity: activity, Coverage: coverage,
+		ServiceAccessRequested: cfg.Scan.ServiceLastAccessed, ServiceAccess: serviceAccess}, nil
 }
 
 func applyBucketEvidence(assets []models.AssetNode, facts []collectors.BucketPolicyEvidence) []models.AssetNode {

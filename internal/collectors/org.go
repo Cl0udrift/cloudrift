@@ -31,6 +31,9 @@ type Coverage struct {
 	// KnownOrgAccountIDs includes members that could not be assumed.
 	OrgMembershipKnown bool     `json:"org_membership_known,omitempty"`
 	KnownOrgAccountIDs []string `json:"known_org_account_ids,omitempty"`
+	// RegionMode is auto, explicit, or legacy_default. legacy_default is the
+	// historical us-east-1 workload scope, not full enabled-Region coverage.
+	RegionMode string `json:"region_mode,omitempty"`
 }
 
 // Complete reports whether every discovered account was successfully assumed.

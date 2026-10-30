@@ -30,7 +30,10 @@ type Result struct {
 	Assets   []models.AssetNode
 	Rels     []models.Relationship
 	Activity []collectors.RoleActivity
-	Coverage collectors.Coverage
+	// ServiceAccessRequested is true when scan.service_last_accessed was on. Rows are only stamped then.
+	ServiceAccessRequested bool
+	ServiceAccess          []collectors.RoleServiceAccess
+	Coverage               collectors.Coverage
 }
 
 // Progress reports scan stage transitions. stage is a short machine key (e.g. "collecting",
@@ -100,6 +103,12 @@ func Run(ctx context.Context, cfg *config.Config, outputDir, toolVersion string,
 		progress("coverage", fmt.Sprintf(
 			"partial coverage: %d of %d accounts scanned, %d failed - findings may be incomplete",
 			len(cov.Scanned), cov.Discovered, len(cov.Failed)))
+	}
+
+	// Persist role last-used evidence with the scan so Identities can show it later.
+	collectors.StampRoleActivity(res.Assets, res.Activity)
+	if res.ServiceAccessRequested {
+		collectors.StampServiceAccess(res.Assets, res.ServiceAccess)
 	}
 
 	var findings []models.Finding
@@ -297,6 +306,9 @@ func persist(outputDir, scanID, toolVersion string, res Result, findings []model
 	}
 
 	meta := buildMetadata(scanID, toolVersion, res.Accounts, findings, res.Coverage)
+	if recorded, complete := models.CollectionRecord(res.Assets); recorded {
+		meta.SupportedInventoryComplete = &complete
+	}
 	if err := writeJSONFile(filepath.Join(scanPath, "scan-metadata.json"), meta); err != nil {
 		return err
 	}
@@ -344,6 +356,7 @@ func buildMetadata(scanID, toolVersion string, accounts []collectors.Account, fi
 		CoverageComplete:       cov.Complete(),
 		CIEMCollection:         cov.CIEMCollection,
 		OrgPolicyDiscovery:     cov.OrgPolicyDiscovery,
+		RegionMode:             cov.RegionMode,
 	}
 }
 

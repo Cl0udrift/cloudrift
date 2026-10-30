@@ -81,7 +81,7 @@ func Summarize(scan models.ScanSnapshot, assets []models.AssetNode, rels []model
 		ScanID: scan.ScanID, Timestamp: ts, Synthetic: scan.Synthetic, DataOrigin: scan.DataOrigin,
 		TotalAssets: len(items), AccountCount: len(accounts), RegionCount: len(regions), ServiceCount: represented,
 		AccountsNote: "Accounts and regions count distinct values on discovered inventory assets in this filter. Organization membership records are not added.",
-		CoverageNote: coverageNote, Services: cards, Categories: categoriesFor(items), Distribution: bars,
+		CoverageNote: coverageNote, Collection: CollectionStatus(scan, assets, filter), RegionCoverage: RegionCoverage(scan, assets, filter), Services: cards, Categories: categoriesFor(items), Distribution: bars,
 	}
 }
 

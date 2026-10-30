@@ -224,7 +224,7 @@ func TestSecurityScenarios_BucketWithoutObjectsAndUnsupportedInventory(t *testin
 		t.Fatal(err)
 	}
 	inventory := analyzeDemo(t, dir, "demo-inventory", roleARN(demoAcctCore, "SecInventoryObserver"), nil)
-	if !containsString(inventory.UnsupportedActions, "secretsmanager:GetSecretValue") || !containsString(inventory.UnsupportedActions, "ec2:StopInstances") {
+	if len(inventory.UnsupportedActions) != 0 {
 		t.Fatalf("unsupported catalog: %v", inventory.UnsupportedActions)
 	}
 	for _, hit := range inventory.Decisions {

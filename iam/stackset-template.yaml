@@ -45,6 +45,7 @@ Resources:
                   - iam:GetInstanceProfile
                   - ec2:DescribeInstances
                   - ec2:DescribeIamInstanceProfileAssociations
+                  - ec2:DescribeRegions
                   - lambda:ListFunctions
                   - ecs:ListClusters
                   - ecs:ListServices
