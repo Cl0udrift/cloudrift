@@ -1,7 +1,10 @@
+import { MetricCard } from "../components/ui/MetricCard";
+import { CollectionChip } from "../components/ui/StatusChip";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { apiClient } from "../api/client";
+import type { InventoryRegionCoverage } from "../api/types";
 import { formatQueryError } from "../api/httpError";
 import { PageHeader } from "../components/PageHeader";
 import { ScanRequired } from "../components/ScanRequired";
@@ -67,19 +70,13 @@ export function InventoryPage() {
 
   return (
     <section className="space-y-6">
-      <PageHeader title="AWS Inventory" description="Explore resources discovered in the selected AWS scan." />
+      <PageHeader title="AWS Inventory" description="Resources discovered in the selected scan." />
       {!selectedScanId ? (
         <ScanRequired />
       ) : (
         <>
           <div className="flex flex-wrap items-end justify-between gap-3 text-sm text-slate-600 dark:text-slate-300">
-            <div>
-              <p>Scan <span className="font-mono">{selectedScanId}</span></p>
-              <p>{summary.data?.timestamp || currentScan?.timestamp || "Timestamp not recorded"}</p>
-              {(summary.data?.synthetic || currentScan?.synthetic) && (
-                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">Synthetic / demo</p>
-              )}
-            </div>
+            <p className="cr-helper">{summary.data?.timestamp || currentScan?.timestamp || "Timestamp not recorded"}</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <input className="hs-input" placeholder="Account ID" value={accountID} onChange={(e) => patch({ account_id: e.target.value })} aria-label="Account ID" />
               <input className="hs-input" placeholder="Region" value={region} onChange={(e) => patch({ region: e.target.value })} aria-label="Region" />
@@ -90,13 +87,40 @@ export function InventoryPage() {
           {summary.data ? (
             <>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <Metric label="Discovered assets" value={summary.data.total_assets} />
-                <Metric label="Accounts represented" value={summary.data.account_count} />
-                <Metric label="Regions represented" value={summary.data.region_count} />
-                <Metric label="Services represented" value={summary.data.service_count} />
+                <MetricCard label="Discovered assets" value={summary.data.total_assets} context="Infrastructure only; evidence records excluded" />
+                <MetricCard label="Accounts" value={summary.data.account_count} context="With discovered assets" />
+                <MetricCard label="Regions" value={summary.data.region_count} context="With discovered assets" />
+                <MetricCard label="Services" value={summary.data.service_count} context="With discovered assets" />
               </div>
-              <p className="text-sm text-slate-600 dark:text-slate-400">{summary.data.accounts_note}</p>
-              <p className="text-sm text-slate-600 dark:text-slate-400">{summary.data.coverage_note}</p>
+              <details>
+                <summary className="hs-focus-ring w-fit cursor-pointer rounded text-xs font-medium text-cyan-800 dark:text-cyan-300">How these counts work</summary>
+                <p className="cr-helper mt-1">{summary.data.accounts_note}</p>
+                <p className="cr-helper mt-1">{summary.data.coverage_note}</p>
+                {summary.data.collection ? <p className="cr-helper mt-1">{summary.data.collection.note}</p> : null}
+              </details>
+              {summary.data.collection ? (
+                <div className="hs-card p-4">
+                  <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Collection completeness</h2>
+                  <dl className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
+                    {([
+                      ["Account scope", summary.data.collection.account_scope],
+                      ["Region discovery", summary.data.collection.region_discovery],
+                      ["Regional collectors", summary.data.collection.regional_collectors],
+                      ["Service collection", summary.data.collection.service_collection],
+                      ["Supported inventory", summary.data.collection.supported_inventory]
+                    ] as [string, string][]).map(([label, value]) => (
+                      <div key={label}>
+                        <dt className="cr-kpi-label">{label}</dt>
+                        <dd className="mt-1"><CollectionChip status={value} /></dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              ) : null}
+              <details open={(summary.data.region_coverage?.accounts ?? []).some((a) => a.partial > 0 || a.failed > 0 || a.unknown > 0)}>
+                <summary className="hs-focus-ring mb-2 w-fit cursor-pointer rounded text-xs font-medium text-cyan-800 dark:text-cyan-300">Region coverage (opens automatically when a Region is partial, failed or unknown)</summary>
+                <RegionCoveragePanel coverage={summary.data.region_coverage} />
+              </details>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {summary.data.services.map((card) => (
                   <button
@@ -111,13 +135,15 @@ export function InventoryPage() {
                       <span className="font-medium text-slate-900 dark:text-slate-100">{card.name}</span>
                     </span>
                     <p className="mt-3 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-100">{card.count}</p>
-                    <p className="text-xs text-slate-500">{card.coverage}</p>
+                    <div className="mt-1"><CollectionChip status={card.coverage} /></div>
                     <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{card.coverage_text}</p>
                     <p className="mt-2 text-xs text-slate-500">{card.resource_types.join(", ")}</p>
                     {card.finding_count > 0 ? <p className="mt-1 text-xs text-slate-500">{card.finding_count} linked findings</p> : null}
                   </button>
                 ))}
               </div>
+              <details>
+                <summary className="hs-focus-ring mb-2 w-fit cursor-pointer rounded text-xs font-medium text-cyan-800 dark:text-cyan-300">Resources by service (same counts as the service cards)</summary>
               <section className="hs-card p-4">
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Resources by service</h3>
                 <p className="mt-1 text-xs text-slate-500">Same counts as the service cards. Services whose collection was not recorded are omitted rather than drawn as zero.</p>
@@ -137,6 +163,7 @@ export function InventoryPage() {
                   </ul>
                 )}
               </section>
+              </details>
             </>
           ) : null}
           <section className="space-y-3">
@@ -274,11 +301,60 @@ export function InventoryPage() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+function RegionCoveragePanel({ coverage }: { coverage?: InventoryRegionCoverage }) {
+  if (!coverage) {
+    return null;
+  }
   return (
     <div className="hs-card p-4">
-      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-100">{value}</p>
+      <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Region coverage</h2>
+      <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{coverage.note}</p>
+      {coverage.accounts.length === 0 ? null : (
+        <div className="mt-3 space-y-3">
+          {coverage.accounts.map((account) => (
+            <div key={account.account_id}>
+              <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                {account.account_id}
+                {account.region_mode ? ` · ${account.region_mode}` : ""}
+                {account.partition ? ` · ${account.partition}` : ""}
+                {` · discovery ${account.discovery}`}
+              </p>
+              <p className="text-xs text-slate-500">
+                enabled {account.enabled} · selected {account.selected} · succeeded {account.succeeded} · partial {account.partial} · failed {account.failed} · excluded {account.excluded} · unknown {account.unknown}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1" role="img" aria-label={`Region grid: ${account.regions.length} Regions`}>
+                {account.regions.map((row) => {
+                  const tone = row.state === "REGION_SCAN_SUCCEEDED" ? "bg-emerald-500" : row.state === "REGION_SCAN_PARTIAL" ? "bg-amber-400" : row.state === "REGION_SCAN_FAILED" || row.state === "REGION_DISCOVERY_FAILED" ? "bg-rose-500" : row.state === "REGION_NOT_ENABLED" ? "border border-slate-500 bg-transparent" : "bg-slate-500";
+                  return <span key={row.region + row.state} title={`${row.region} · ${row.state}`} className={`h-3.5 w-3.5 rounded-sm ${tone}`} />;
+                })}
+                <span className="cr-helper ml-2">Green succeeded · amber partial · red failed · hollow not enabled · grey unknown</span>
+              </div>
+              {(() => {
+                // Disabled opt-in Regions are collapsed. Scanned, partial, failed and unknown Regions stay visible.
+                const quiet = account.regions.filter((row) => row.state === "REGION_NOT_ENABLED");
+                const rows = account.regions.filter((row) => row.state !== "REGION_NOT_ENABLED");
+                const renderRow = (row: (typeof account.regions)[number]) => (
+                  <li key={`${account.account_id}:${row.region}:${row.state}`} className="flex flex-wrap items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                    <span className="w-32 font-medium">{row.region || "discovery"}</span> <CollectionChip status={row.state} />
+                    {row.services && row.services.length > 0 ? <span className="text-slate-500">{row.services.map((svc) => `${svc.service} ${svc.status}`).join(", ")}</span> : null}
+                  </li>
+                );
+                return (
+                  <>
+                    <ul className="mt-1 space-y-1">{rows.map(renderRow)}</ul>
+                    {quiet.length > 0 ? (
+                      <details className="mt-2 text-xs">
+                        <summary className="hs-focus-ring cursor-pointer text-slate-600 dark:text-slate-300">{quiet.length} Regions not enabled for this account (not scanned)</summary>
+                        <ul className="mt-1 space-y-1">{quiet.map(renderRow)}</ul>
+                      </details>
+                    ) : null}
+                  </>
+                );
+              })()}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -290,7 +366,11 @@ const serviceIcons: Record<string, string> = {
   iam: "/icons/aws/iam.svg",
   route53: "/icons/aws/route53.svg",
   cloudfront: "/icons/aws/cloudfront.svg",
-  acm: "/icons/aws/acm.svg"
+  acm: "/icons/aws/acm.svg",
+  ecs: "/icons/aws/ecs.svg",
+  eks: "/icons/aws/eks.svg",
+  apigateway: "/icons/aws/apigateway.svg",
+  api_gateway: "/icons/aws/apigateway.svg"
 };
 
 function ServiceMark({ service, name }: { service: string; name: string }) {

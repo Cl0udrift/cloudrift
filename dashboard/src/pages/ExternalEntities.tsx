@@ -144,7 +144,8 @@ export function ExternalEntitiesPage() {
     <section className="space-y-6">
       <PageHeader
         title="External entities"
-        description="Entity-centric aggregation of external_access findings, grouped by (external_principal, principal_type, external_account_id) from trust evidence. Missing evidence in any dimension is bucketed as 'unknown' and may merge multiple unidentified entries. Rows are ordered by highest severity first, then total monthly risk — not a pure cost ranking. Flags like stale / privileged / admin-like mean AT LEAST ONE distinct trusted role for that entity meets the signal; other roles for the same entity may not. Unfiltered total matches summary.external_entity_count."
+        description="External principals grouped from trust findings, highest severity first."
+        details="Entity-centric aggregation of external_access findings, grouped by (external_principal, principal_type, external_account_id) from trust evidence. Missing evidence in any dimension is bucketed as 'unknown' and may merge multiple unidentified entries. Rows are ordered by highest severity first, then total monthly risk — not a pure cost ranking. Flags like stale / privileged / admin-like mean AT LEAST ONE distinct trusted role for that entity meets the signal; other roles for the same entity may not. Unfiltered total matches summary.external_entity_count."
       />
       {!selectedScanId ? (
         <ScanRequired />
@@ -334,23 +335,24 @@ export function ExternalEntitiesPage() {
                     <td className="px-3 py-2 text-center tabular-nums text-xs">
                       {formatCount(row.external_access_finding_count)}
                     </td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-col items-start gap-1.5">
+                    <td className="whitespace-nowrap px-3 py-2">
+                      <div className="flex flex-col items-start gap-1">
                         <button
                           type="button"
                           onClick={() => goToFindingsForRow(row)}
                           className="hs-focus-ring text-xs font-medium text-cyan-700 hover:underline dark:text-cyan-400"
                         >
-                          Matching findings
+                          Findings
                         </button>
                         {selectedScanId && row.entity_id ? (
                           <Link
                             to={`/blast-explorer?scan=${encodeURIComponent(selectedScanId)}&entity=${encodeURIComponent(
                               row.entity_id
                             )}&mode=blast_radius`}
+                            title="View blast radius for this external entity"
                             className="hs-focus-ring text-xs font-medium text-amber-800 hover:underline dark:text-amber-300/90"
                           >
-                            View blast radius
+                            Blast radius
                           </Link>
                         ) : null}
                         {selectedScanId && row.principal_id ? (
@@ -361,7 +363,7 @@ export function ExternalEntitiesPage() {
                             className="hs-focus-ring text-xs font-medium text-violet-700 hover:underline dark:text-violet-300"
                             title="Open blast radius from principal identity"
                           >
-                            Open as principal blast
+                            Principal blast
                           </Link>
                         ) : null}
                       </div>

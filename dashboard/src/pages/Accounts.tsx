@@ -21,7 +21,8 @@ export function AccountsPage() {
     <section className="space-y-6">
       <PageHeader
         title="Accounts"
-        description="Per-account rollups from GET /api/scans/:id/accounts. Rows are ordered deterministically by the API."
+        description="Per-account rollups for the selected scan."
+        details="Rows are ordered deterministically by the API (GET /api/scans/:id/accounts)."
       />
       {!selectedScanId ? (
         <ScanRequired />
@@ -37,11 +38,12 @@ export function AccountsPage() {
         </StatePanel>
       ) : query.data ? (
         <div className="space-y-6">
-          <TopAccountsHorizontalBar
-            items={accountItems}
-            title="Top accounts (same data as Overview)"
-            description="Uses the same GET /api/scans/:id/accounts response as the cards below — React Query shares the cache with Overview when the scan is unchanged."
-          />
+          <details>
+            <summary className="hs-focus-ring w-fit cursor-pointer rounded text-xs font-medium text-cyan-800 dark:text-cyan-300">Ranking chart (same data as the cards below)</summary>
+            <div className="mt-2">
+              <TopAccountsHorizontalBar items={accountItems} title="Top accounts by findings" description="Same accounts response as the cards below." />
+            </div>
+          </details>
           <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {accountItems.map((account) => (
               <AccountCard key={account.account_id} account={account} scanId={selectedScanId} />

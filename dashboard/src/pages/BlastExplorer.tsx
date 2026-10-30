@@ -1,3 +1,5 @@
+import { PermissionDecisions } from "../components/blast/PermissionDecisions";
+import { AttackStatusChip } from "../components/ui/StatusChip";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -149,7 +151,8 @@ export function BlastExplorerPage() {
     <div className="space-y-6">
       <PageHeader
         title="Blast radius explorer"
-        description="Topology, unevaluated identity exposure, evidence-backed attack paths, and hypothetical permission impact for one finding, principal, or external entity."
+        description="Topology and hypothetical impact for one finding, principal or external entity."
+        details="Topology, unevaluated identity exposure, evidence-backed attack paths, and hypothetical permission impact for one finding, principal, or external entity."
       />
       {(currentScan?.synthetic || scan.startsWith("demo")) && (
         <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
@@ -350,32 +353,28 @@ export function BlastExplorerPage() {
               </div>
             ) : null}
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Legend</h3>
-            <dl className="space-y-1.5 text-[11px] text-slate-600 dark:text-slate-400">
-              {(
-                [
-                  ["ASSUME_ROLE", "Trust configuration. AssumeRole authorization is unevaluated."],
-                  ["CROSS_ACCOUNT_ASSUME_ROLE", "Cross-account trust configuration. Role assumption is unevaluated."],
-                  ["EXTERNAL_TRUST", "External principal named in policy. Access is unevaluated."],
-                  ["IAM_WRITE", "Permission-visibility hint. Not an evaluated control-plane transition."],
-                  ["RESOURCE_ACCESS", "Structural dependency such as DNS or fronting. Not compromise."],
-                  ["CERT_LINK", "Certificate association. Not attacker movement."],
-                  ["OWNED_BY", "Account ownership. Not access and not lateral movement."],
-                  ["POLICY_PERMISSION_CANDIDATE", "Unevaluated permission candidate. Allow is not effective access."],
-                  ["POLICY_ATTACHED_TO", "Collected policy attachment. Not authorization."],
-                  ["POLICY_CONTAINS_STATEMENT", "Statement in a collected identity policy. Not an attack path."],
-                  ["HAS_AUTHORIZATION_DECISION", "Evaluated authorization evidence. Not an attack path."],
-                  ["AUTHORIZATION_TARGETS", "Decision linked to a collected target. Not an attack path."],
-                  ["PERMISSION_EVALUATION", "Derived permission result for this response. Not stored and not an attack path."],
-                  ["ASSUME_ROLE hop", "Validated sts:AssumeRole opens a distinct target-role session. It is not a recorded incident."],
-                  ["READ_S3_OBJECT", "Validated s3:GetObject for that session and one collected object. It is hypothetical read capability."],
-                ] as [string, string][]
-              ).map(([label, desc]) => (
-                <div key={label}>
-                  <dt className="font-mono text-[10px] text-cyan-700 dark:text-cyan-300">{label}</dt>
-                  <dd className="ml-0 text-slate-600 dark:text-slate-400">{desc}</dd>
-                </div>
+            <div className="space-y-3 text-[11px] text-slate-600 dark:text-slate-400">
+              {EDGE_LEGEND.map((group) => (
+                <section key={group.title} aria-label={group.title} className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <svg width="28" height="8" aria-hidden="true">
+                      <line x1="0" y1="4" x2="28" y2="4" stroke={group.stroke} strokeWidth="2" strokeDasharray={group.dash} />
+                    </svg>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">{group.title}</span>
+                    <span className="text-slate-500">({group.line})</span>
+                  </div>
+                  <p className="text-slate-500">{group.note}</p>
+                  <dl className="space-y-1 border-l border-slate-300 pl-2 dark:border-slate-700">
+                    {group.items.map(([label, desc]) => (
+                      <div key={label}>
+                        <dt className="font-mono text-[10px] text-cyan-700 dark:text-cyan-300">{label}</dt>
+                        <dd className="ml-0">{desc}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </section>
               ))}
-            </dl>
+            </div>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Selection</h3>
             {selectedNodeObj ? <NodeDetail n={selectedNodeObj} /> : <p className="text-xs text-slate-500">No node selected.</p>}
             {selectedNodeObj ? (
@@ -441,6 +440,58 @@ function listProp(v: unknown): string {
   return "";
 }
 
+// Edge semantics. Line style, not color alone, separates what is attacker-traversable from what is not.
+const EDGE_LEGEND: { title: string; line: string; stroke: string; dash?: string; note: string; items: [string, string][] }[] = [
+  {
+    title: "Configuration",
+    line: "dashed, grey",
+    stroke: "#64748b",
+    dash: "3 3",
+    note: "Collected structure. Never an attacker transition.",
+    items: [
+      ["ASSUME_ROLE", "Trust configuration. AssumeRole authorization is unevaluated."],
+      ["CROSS_ACCOUNT_ASSUME_ROLE", "Cross-account trust configuration. Role assumption is unevaluated."],
+      ["EXTERNAL_TRUST", "External principal named in policy. Access is unevaluated."],
+      ["IAM_WRITE", "Permission-visibility hint. Not an evaluated control-plane transition."],
+      ["RESOURCE_ACCESS", "Structural dependency such as DNS or fronting. Not compromise."],
+      ["CERT_LINK", "Certificate association. Not attacker movement."],
+      ["OWNED_BY", "Account ownership. Not access and not lateral movement."],
+      ["POLICY_ATTACHED_TO", "Collected policy attachment. Not authorization."],
+      ["POLICY_CONTAINS_STATEMENT", "Statement in a collected identity policy. Not an attack path."]
+    ]
+  },
+  {
+    title: "Declared candidate",
+    line: "dashed, grey",
+    stroke: "#64748b",
+    dash: "3 3",
+    note: "A policy says Allow. This is not effective access.",
+    items: [["POLICY_PERMISSION_CANDIDATE", "Unevaluated permission candidate. Allow is not effective access."]]
+  },
+  {
+    title: "Evaluated evidence / conditional",
+    line: "dashed, amber when conditional",
+    stroke: "#f59e0b",
+    dash: "6 3",
+    note: "Output of the authorization evaluator. Not an attack path by itself.",
+    items: [
+      ["HAS_AUTHORIZATION_DECISION", "Evaluated authorization evidence. Not an attack path."],
+      ["AUTHORIZATION_TARGETS", "Decision linked to a collected target. Not an attack path."],
+      ["PERMISSION_EVALUATION", "Derived permission result for this response. Not stored and not an attack path."]
+    ]
+  },
+  {
+    title: "Validated hypothetical transition",
+    line: "solid, blue",
+    stroke: "#38bdf8",
+    note: "Modeled authorization under an assumed compromise. Not an observed incident.",
+    items: [
+      ["ASSUME_ROLE hop", "Validated sts:AssumeRole opens a distinct target-role session."],
+      ["READ_S3_OBJECT", "Validated s3:GetObject for that session and one collected object."]
+    ]
+  }
+];
+
 function EdgeEvidence({ edges }: { edges: BlastGraphEdge[] }) {
   if (edges.length === 0) {
     return null;
@@ -450,6 +501,7 @@ function EdgeEvidence({ edges }: { edges: BlastGraphEdge[] }) {
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Evidence</h3>
       {edges.slice(0, 4).map((e) => (
         <div key={e.id} className="rounded border border-slate-200 bg-white/70 p-2 text-[11px] dark:border-slate-700 dark:bg-slate-950/40">
+          <p className="mb-1"><AttackStatusChip kind={e.path_validity === "VALIDATED_POSSIBLE" ? "validated" : "configuration"} /></p>
           <p className="font-mono text-[10px] text-cyan-700 dark:text-cyan-300">
             {e.graph_relationship || e.type}
             {e.relationship_class ? ` · ${e.relationship_class}` : ""}
@@ -558,6 +610,7 @@ function PermissionImpact({ report }: { report: PermissionBlastReport }) {
           {category}: allowed {row.allowed}, denied {row.denied}, conditional {row.conditional}, unknown {row.unknown}
         </p>
       ))}
+      <PermissionDecisions decisions={report.decisions ?? []} />
       {(report.bucket_scopes ?? []).slice(0, 3).map((scope) => (
         <p key={scope.bucket_arn} className="break-all">
           {scope.bucket_arn}: {scope.note}

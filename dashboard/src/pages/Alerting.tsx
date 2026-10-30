@@ -507,7 +507,8 @@ export function AlertingPage() {
     <section className="space-y-6">
       <PageHeader
         title="Alerting"
-        description="Turn Cloudrift signals into action: rules evaluate scans and deliver concise Slack messages with deep links. Evaluation runs automatically when a scan completes; use preview and test to validate before the next run."
+        description="Rules that turn scan results into Slack messages with deep links."
+        details="Evaluation runs automatically when a scan completes; use preview and test to validate before the next run."
       />
 
       {loading ? (
@@ -556,10 +557,11 @@ export function AlertingPage() {
         </div>
       ) : null}
 
-      <div className="hs-card p-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <details className="hs-card p-4">
+        <summary className="hs-focus-ring cursor-pointer text-sm font-semibold text-slate-800 dark:text-slate-200">Routing catalog (account to team mapping)</summary>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Routing catalog</h3>
+            <h3 className="sr-only">Routing catalog</h3>
             <p className="cr-helper mt-0.5 max-w-2xl text-xs text-slate-600 dark:text-slate-400">
               Map AWS account IDs to <code className="cr-mono">team_id</code>, define each team&apos;s Slack incoming webhook, and optionally set{" "}
               <code className="cr-mono">default_team_id</code>. Rules without an explicit webhook use evaluation hints (top accounts in findings) first,
@@ -620,7 +622,7 @@ export function AlertingPage() {
           onChange={(e) => setRoutingJson(e.target.value)}
           aria-label="Routing catalog JSON"
         />
-      </div>
+      </details>
 
       <div className="hs-card-soft flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>

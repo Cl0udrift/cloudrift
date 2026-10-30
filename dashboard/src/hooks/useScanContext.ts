@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
@@ -22,8 +22,24 @@ export function useScanContext() {
     if (queryScanId) {
       return queryScanId;
     }
+    // Reopen on the last scan viewed when it still exists; otherwise the newest scan.
+    try {
+      const last = window.localStorage.getItem("cloudrift.lastScan");
+      if (last && scans.some((item) => item.scan_id === last)) return last;
+    } catch {
+      /* storage unavailable */
+    }
     return scans[0]?.scan_id ?? null;
   }, [queryScanId, scans]);
+
+  useEffect(() => {
+    if (!queryScanId) return;
+    try {
+      window.localStorage.setItem("cloudrift.lastScan", queryScanId);
+    } catch {
+      /* ignore */
+    }
+  }, [queryScanId]);
 
   const currentScan = useMemo((): ScanListItem | null => {
     if (!selectedScanId) {

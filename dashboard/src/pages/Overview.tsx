@@ -1,3 +1,4 @@
+import { ScanSnapshotStrip } from "../components/overview/ScanSnapshotStrip";
 import type { ReactNode } from "react";
 import { formatQueryError } from "../api/httpError";
 import type { ExternalEntityRow, ScanListItem, ScanSummaryResponse } from "../api/types";
@@ -70,7 +71,8 @@ export function OverviewPage() {
     <section className="space-y-8">
       <PageHeader
         title="Dashboard"
-        description="Switch modes to emphasize leadership summaries, urgent signals, or day-to-day operations. Drilldowns open the same Findings, Access, and External views as before."
+        description="Scan snapshot, items needing attention and drill-downs."
+        details="Switch modes to emphasize leadership summaries, urgent signals, or day-to-day operations. Drilldowns open the same Findings, Access, and External views."
       />
 
       {!selectedScanId ? (
@@ -78,6 +80,7 @@ export function OverviewPage() {
       ) : (
         <>
           {modeSwitch}
+          <ScanSnapshotStrip scanId={selectedScanId} summary={summary} hasPreviousScan={scans.length >= 2} />
           {query.isLoading ? (
             <StatePanel>Loading summary…</StatePanel>
           ) : query.isError ? (

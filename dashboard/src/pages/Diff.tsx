@@ -40,7 +40,8 @@ export function DiffPage() {
     <section className="space-y-6">
       <PageHeader
         title="Diff"
-        description="Compares the selected scan (new) to the chronologically previous scan in the newest-first list from GET /api/scans. Baseline = next row after the selected scan."
+        description="Compare the selected scan with the previous one."
+        details="Compares the selected scan (new) to the chronologically previous scan in the newest-first list from GET /api/scans. Baseline = next row after the selected scan."
       />
       {!selectedScanId ? (
         <ScanRequired />

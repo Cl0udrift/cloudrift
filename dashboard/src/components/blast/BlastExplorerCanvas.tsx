@@ -254,6 +254,10 @@ function EdgeLine({
       points={[a, b]}
       color={color}
       lineWidth={crit ? 2.2 : isExpanded ? 1.4 : 1}
+      // Only validated transitions are solid. Configuration, candidate and conditional edges are dashed.
+      dashed={!validated}
+      dashSize={conditional ? 0.25 : 0.12}
+      gapSize={conditional ? 0.12 : 0.12}
       transparent
       opacity={crit ? 0.95 : muted ? 0.18 : 0.32}
     />

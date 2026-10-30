@@ -1,3 +1,6 @@
+import { AttackStatusChip, AuthorizationChip, StateChip } from "../ui/StatusChip";
+import { CopyIdentifier } from "../ui/CopyIdentifier";
+import { SeverityBadge } from "../SeverityBadge";
 import type { ReactNode } from "react";
 import { formatQueryError } from "../../api/httpError";
 import type { FindingDetailItem } from "../../api/types";
@@ -125,6 +128,11 @@ function CIEMBlock({ ciem }: { ciem: NonNullable<FindingDetailItem["ciem"]> }) {
   );
 }
 
+function declaredExposure(evidence?: Record<string, unknown>) {
+  const kind = String(evidence?.assessment_type || "");
+  return kind === "DECLARED_UNCONDITIONAL_EXPOSURE" || kind === "DECLARED_CONDITIONAL_EXPOSURE" || kind === "DECLARED_ENTITLEMENT_EXPOSURE";
+}
+
 export function FindingDetailPanelContent({
   item,
   scanId,
@@ -135,13 +143,61 @@ export function FindingDetailPanelContent({
   scanId?: string;
   findingId?: string;
 }) {
+  const ev = item.evidence ?? {};
+  const declared = declaredExposure(item.evidence);
+  const verification = String(ev.version_verification || "");
+  const list = (v: unknown) => (Array.isArray(v) ? v.join(", ") : "");
   return (
     <div className="space-y-4">
-      <div>
-        <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{item.title}</p>
-        <p className="mt-1 font-mono text-xs text-slate-500 break-all">{item.id}</p>
+      <div className="space-y-2">
+        <div className="flex items-start gap-2">
+          <SeverityBadge severity={item.severity} />
+          <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{item.title}</p>
+        </div>
+        {declared ? (
+          <div className="flex flex-wrap gap-2" aria-label="Security conclusions">
+            <StateChip tone="warn" glyph="◆" label={String(ev.assessment_type) === "DECLARED_CONDITIONAL_EXPOSURE" ? "Declared, conditional" : "Declared exposure"} />
+            <AuthorizationChip status="not_assessed" />
+            <AttackStatusChip kind="configuration" />
+            <StateChip tone={verification === "verified" || verification === "not_applicable" ? "ok" : "unk"} glyph={verification === "verified" ? "✓" : "?"} label={`Policy version ${verification || "unverified"}`} />
+          </div>
+        ) : null}
       </div>
-      {scanId && findingId ? (
+      {item.account_id ? (
+        <Section title="Account context">
+          <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1 text-xs">
+            <dt className="cr-kpi-label">Account</dt>
+            <dd className="break-all">{item.account_name ? `${item.account_name} · ` : ""}{item.account_id}</dd>
+            {item.ou_path ? (<><dt className="cr-kpi-label">OU path</dt><dd className="break-all">{item.ou_path}</dd></>) : null}
+            {item.team ? (<><dt className="cr-kpi-label">Team tag</dt><dd>{item.team}</dd></>) : null}
+          </dl>
+          <p className="cr-helper">Read from collected account metadata. Cloudrift does not track ownership or assignment.</p>
+        </Section>
+      ) : null}
+      {declared ? (
+        <>
+          <Section title="Security interpretation">
+            <p>A collected Allow statement matches a sensitive pattern. Effective authorization was not evaluated, and this is not a validated attack path.</p>
+            <p className="text-slate-600 dark:text-slate-300">{String(ev.why || "")}</p>
+          </Section>
+          <Section title="Affected resource">
+            <CopyIdentifier value={String(ev.role_arn || item.affected_arn || "")} />
+          </Section>
+          <Section title="Declared permission">
+            <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1 text-xs">
+              <dt className="cr-kpi-label">Actions</dt><dd className="break-all">{list(ev.actions) || "—"}</dd>
+              <dt className="cr-kpi-label">Resources</dt><dd className="break-all">{list(ev.resources) || "—"}</dd>
+              <dt className="cr-kpi-label">Resource scope</dt><dd>{String(ev.resource_breadth || "not recorded (older assessment)")}</dd>
+              <dt className="cr-kpi-label">Sensitivity</dt><dd>{String(ev.action_sensitivity || "not recorded (older assessment)")}</dd>
+              <dt className="cr-kpi-label">Condition</dt>
+              <dd className="break-all">{String(ev.condition_status || "none")}{ev.conditions && Object.keys(ev.conditions as object).length > 0 ? ` · ${JSON.stringify(ev.conditions)}` : ""}</dd>
+            </dl>
+          </Section>
+          <Section title="Policy provenance">
+            <p className="break-all text-xs">{list(ev.policy_arns) || String(ev.policy_arn || "inline document")} · {String(ev.policy_type || "")} · version {String(ev.policy_version || "—")} · statements {list(ev.statement_ids) || "—"}</p>
+          </Section>
+        </>
+      ) : scanId && findingId ? (
         <BlastRadiusSection scanId={scanId} findingId={findingId} severity={item.severity} />
       ) : null}
       {item.impact ? (
@@ -171,11 +227,30 @@ export function FindingDetailPanelContent({
           <CIEMBlock ciem={item.ciem} />
         </Section>
       ) : null}
-      {item.evidence && Object.keys(item.evidence).length > 0 ? (
-        <Section title="Evidence">
-          <EvidenceBlock evidence={item.evidence} />
-        </Section>
-      ) : null}
+      <details className="rounded border border-slate-200 p-2 text-xs dark:border-slate-700">
+        <summary className="hs-focus-ring cursor-pointer font-semibold uppercase tracking-wide text-slate-500">Technical details</summary>
+        <dl className="mt-2 space-y-1">
+          <dt className="cr-kpi-label">Finding ID</dt>
+          <dd className="cr-ident">{item.id}</dd>
+          {ev.evidence_fingerprint ? (
+            <>
+              <dt className="cr-kpi-label">Evidence fingerprint</dt>
+              <dd className="cr-ident">{String(ev.evidence_fingerprint)}</dd>
+            </>
+          ) : null}
+          {ev.assessment_version ? (
+            <>
+              <dt className="cr-kpi-label">Assessment version</dt>
+              <dd className="cr-ident">{String(ev.assessment_version)}</dd>
+            </>
+          ) : null}
+        </dl>
+        {item.evidence && Object.keys(item.evidence).length > 0 ? (
+          <div className="mt-2">
+            <EvidenceBlock evidence={item.evidence} />
+          </div>
+        ) : null}
+      </details>
     </div>
   );
 }

@@ -6,6 +6,9 @@ const severityRing: Record<string, string> = {
   info: "bg-slate-200 text-slate-700 ring-slate-400/50 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-600/50"
 };
 
+// Shape cue so severity is not conveyed by color alone.
+const severityGlyph: Record<string, string> = { critical: "◆", high: "▲", medium: "■", low: "●", info: "○" };
+
 export function severityBadgeClass(severity: string): string {
   const key = severity.toLowerCase();
   return severityRing[key] ?? severityRing.info;
@@ -17,6 +20,7 @@ export function SeverityBadge({ severity }: { severity: string }) {
     <span
       className={`inline-flex rounded px-2 py-0.5 text-xs font-medium capitalize ring-1 ${severityBadgeClass(label)}`}
     >
+      <span aria-hidden="true" className="mr-1">{severityGlyph[label.toLowerCase()] ?? "○"}</span>
       {label}
     </span>
   );

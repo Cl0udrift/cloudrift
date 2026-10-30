@@ -294,7 +294,7 @@ export const apiClient = {
   },
   listIdentities(
     scanId: string,
-    params: { account_id?: string; region?: string; purpose?: string; trust?: string; broad?: string; evidence?: string; workload?: string; type?: string; q?: string; page?: number; page_size?: number }
+    params: { account_id?: string; region?: string; purpose?: string; trust?: string; broad?: string; evidence?: string; workload?: string; type?: string; q?: string; category?: string; unknown?: string; idle?: string; idle_days?: string; page?: number; page_size?: number }
   ): Promise<IdentityListResponse> {
     return fetchJSON<IdentityListResponse>(`/scans/${encodeURIComponent(scanId)}/identities${makeQueryString(params)}`);
   },

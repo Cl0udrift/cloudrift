@@ -1,3 +1,4 @@
+import { EntityDrawer } from "../components/ui/EntityDrawer";
 import {
   createColumnHelper,
   flexRender,
@@ -36,6 +37,16 @@ const SEARCH_DEBOUNCE_MS = 350;
 const TRIAGE_FETCH_PAGE_SIZE = 200;
 
 const SEVERITY_OPTIONS = ["", "critical", "high", "medium", "low"] as const;
+// Preset filters over existing API filters. Not stored per user; each is a plain URL state.
+const SAVED_VIEWS: { label: string; hint: string; filter: { module?: string; claimability?: string; adminLike?: boolean; trustStale?: boolean } }[] = [
+  { label: "All findings", hint: "No module or flag filter", filter: {} },
+  { label: "Declared IAM exposure", hint: "Declared permissions, not evaluated access", filter: { module: "iam_entitlement" } },
+  { label: "External access", hint: "Trust and resource policies naming external principals", filter: { module: "external_access" } },
+  { label: "Admin-like trust", hint: "Trusted roles with admin-like declared permissions", filter: { adminLike: true } },
+  { label: "Stale trust", hint: "Trust with no recent observed activity", filter: { trustStale: true } },
+  { label: "Reclaimable assets", hint: "Orphaned edge assets that can be reclaimed", filter: { module: "orphaned_edge", claimability: "reclaimable" } }
+];
+
 const MODULE_OPTIONS = ["", "orphaned_edge", "external_access", "iam_entitlement"] as const;
 const CLAIM_OPTIONS = ["", "reclaimable", "dangling", "broken", "edge_obscured"] as const;
 
@@ -278,6 +289,23 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
     setExpandedId(null);
   }, [selectedScanId, listParams, triageBackendParams, triage]);
 
+  // j / k move through the list and open the detail drawer; Esc closes it (handled by the drawer).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || (e.key !== "j" && e.key !== "k")) return;
+      if (pageItems.length === 0) return;
+      const idx = pageItems.findIndex((item) => item.id === expandedId);
+      const next = e.key === "j" ? Math.min(idx + 1, pageItems.length - 1) : Math.max(idx - 1, 0);
+      const target = pageItems[idx === -1 ? 0 : next];
+      setExpandedId(target.id);
+      document.querySelector(`[data-finding-id="${target.id}"]`)?.scrollIntoView({ block: "nearest" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pageItems, expandedId]);
+
   const detailQuery = useFindingDetailQuery(selectedScanId, expandedId, expandedId !== null);
 
   const hasActiveFilters = Boolean(
@@ -408,13 +436,15 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
           return <span className="font-mono text-xs text-slate-700 dark:text-slate-300">{id || "—"}</span>;
         }
       }),
-      columnHelper.accessor("module", {
-        header: "Module",
-        cell: (info) => <span className="text-slate-700 dark:text-slate-300">{info.getValue() || "—"}</span>
-      }),
-      columnHelper.accessor("claimability", {
-        header: "Claimability",
-        cell: (info) => <span className="capitalize text-slate-700 dark:text-slate-300">{info.getValue() || "—"}</span>
+      columnHelper.display({
+        id: "assessment",
+        header: "Assessment",
+        cell: ({ row }) => (
+          <div>
+            <div className="text-slate-800 dark:text-slate-200">{row.original.module || "—"}</div>
+            <div className="text-[11px] capitalize text-slate-500">Claimability: {row.original.claimability || "unknown"}</div>
+          </div>
+        )
       }),
       columnHelper.accessor("monthly_risk_cost_usd", {
         header: () => <span className="whitespace-nowrap">Risk cost / mo</span>,
@@ -479,8 +509,13 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
         title={triage ? "Triage" : "Findings"}
         description={
           triage
-            ? "Critical and high severity only, merged and sorted by estimated monthly risk on this device. Pagination applies after merge. See banner for fetch limits."
-            : "Server-paginated findings with filters from GET /api/scans/:id/findings. Detail loads from GET …/findings/:fid when expanded. Filters sync to the URL for sharing."
+            ? "Critical and high severity findings, sorted by estimated monthly risk."
+            : "Findings for the selected scan. Filters are saved in the URL."
+        }
+        details={
+          triage
+            ? "Merged and sorted by estimated monthly risk on this device. Pagination applies after merge. See the banner for fetch limits."
+            : "Server-paginated from GET /api/scans/:id/findings. Detail loads when a row is opened. Filters sync to the URL for sharing."
         }
       />
       {triage ? (
@@ -581,6 +616,66 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
         </div>
       ) : pageItems.length > 0 || (!isLoading && isSuccess) ? (
         <>
+          {expandedId ? (
+            <EntityDrawer title="Finding detail" onClose={() => setExpandedId(null)}>
+              {detailQuery.isLoading ? (
+                <FindingDetailPanelLoading />
+              ) : detailQuery.isError ? (
+                <FindingDetailPanelError error={detailQuery.error} />
+              ) : detailQuery.data?.item ? (
+                <FindingDetailPanelContent item={detailQuery.data.item} scanId={selectedScanId ?? undefined} findingId={expandedId} />
+              ) : (
+                <StatePanel intent="empty">No detail payload.</StatePanel>
+              )}
+            </EntityDrawer>
+          ) : null}
+          {!triage ? (
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Saved views">
+              <span className="cr-kpi-label mr-1">Views</span>
+              {SAVED_VIEWS.map((view) => {
+                const active = (["module", "claimability", "adminLike", "trustStale"] as const).every(
+                  (k) => (view.filter[k] ?? (k === "adminLike" || k === "trustStale" ? false : "")) === state[k]
+                );
+                return (
+                  <button
+                    key={view.label}
+                    type="button"
+                    aria-pressed={active}
+                    title={view.hint}
+                    onClick={() => patch({ severity: "", module: "", claimability: "", adminLike: false, trustStale: false, ...view.filter, page: 1 })}
+                    className={`hs-focus-ring rounded-md border px-2.5 py-1 text-xs font-medium ${
+                      active
+                        ? "border-cyan-500 bg-cyan-500/10 text-cyan-900 dark:text-cyan-200"
+                        : "border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    {view.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {!triage ? (
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Quick severity filter">
+              {[["", "All"], ["critical", "Critical"], ["high", "High"], ["medium", "Medium"], ["low", "Low"]].map(([value, label]) => (
+                <button
+                  key={label}
+                  type="button"
+                  aria-pressed={state.severity === value}
+                  onClick={() => patch({ severity: value, page: 1 })}
+                  className={`hs-focus-ring rounded-full border px-3 py-1 text-xs font-medium ${
+                    state.severity === value
+                      ? "border-cyan-500 bg-cyan-500/10 text-cyan-900 dark:text-cyan-200"
+                      : "border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <details open={Boolean(state.module || state.accountId || state.claimability || state.search || state.trustStale || state.adminLike || state.trustClassification || state.principalType || state.findingId)}>
+            <summary className="hs-focus-ring mb-2 w-fit cursor-pointer rounded text-xs font-medium text-cyan-800 dark:text-cyan-300">More filters</summary>
           <div className="hs-filter-bar">
             {!triage ? (
               <FilterField label="Severity">
@@ -772,6 +867,7 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
               </FilterField>
             ) : null}
           </div>
+          </details>
 
           <AppliedFiltersBar
             triage={triage}
@@ -865,7 +961,7 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
         <tr
           data-finding-id={rowItem.id}
           tabIndex={-1}
-          className="group hs-interactive-row bg-slate-50/80 dark:bg-slate-900/40"
+          className={`group hs-interactive-row ${expandedId === rowItem.id ? "bg-cyan-50 dark:bg-cyan-950/30" : "bg-slate-50/80 dark:bg-slate-900/40"}`}
           onPointerEnter={() => onRowPointerEnter(rowItem.id)}
           onPointerLeave={onRowPointerLeave}
         >
@@ -878,27 +974,6 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
             </td>
           ))}
         </tr>
-        {expandedId === rowItem.id ? (
-          <tr className="bg-slate-100/80 dark:bg-slate-950/80">
-            <td colSpan={columns.length} className="border-t border-slate-200 px-4 py-4 dark:border-t-slate-800">
-              <div className="animate-fade-in">
-                {detailQuery.isLoading ? (
-                  <FindingDetailPanelLoading />
-                ) : detailQuery.isError ? (
-                  <FindingDetailPanelError error={detailQuery.error} />
-                ) : detailQuery.data?.item ? (
-                  <FindingDetailPanelContent
-                    item={detailQuery.data.item}
-                    scanId={selectedScanId ?? undefined}
-                    findingId={rowItem.id}
-                  />
-                ) : (
-                  <StatePanel intent="empty">No detail payload.</StatePanel>
-                )}
-              </div>
-            </td>
-          </tr>
-        ) : null}
       </Fragment>
     );
   }

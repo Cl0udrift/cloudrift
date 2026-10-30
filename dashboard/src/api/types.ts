@@ -239,6 +239,13 @@ export interface IdentityListItem {
   classifications: string[];
   trusted_principal_count: number;
   broad_candidates?: string[];
+  unknown_evidence_count?: number;
+  controls_missing?: string[];
+  service_last_accessed_status?: string;
+  last_used?: string;
+  last_used_status?: string;
+  last_used_region?: string;
+  days_since_used?: number;
   workload_count: number;
   evidence_completeness: string;
   collection_status: string;
@@ -313,9 +320,48 @@ export interface InventorySummary {
   service_count: number;
   accounts_note: string;
   coverage_note: string;
+  collection?: InventoryCollectionStatus;
+  region_coverage?: InventoryRegionCoverage;
   services: InventoryServiceCard[];
   categories: InventoryCategory[];
   distribution: { service: string; name: string; count: number }[];
+}
+
+export interface InventoryCollectionStatus {
+  account_scope: string;
+  region_discovery: string;
+  regional_collectors: string;
+  service_collection: string;
+  supported_inventory: string;
+  note: string;
+}
+
+export interface InventoryRegionCoverage {
+  recorded: boolean;
+  note: string;
+  accounts: InventoryAccountRegions[];
+}
+
+export interface InventoryAccountRegions {
+  account_id: string;
+  partition?: string;
+  region_mode?: string;
+  discovery: string;
+  error_category?: string;
+  enabled: number;
+  selected: number;
+  succeeded: number;
+  partial: number;
+  failed: number;
+  excluded: number;
+  unknown: number;
+  regions: InventoryRegionRow[];
+}
+
+export interface InventoryRegionRow {
+  region: string;
+  state: string;
+  services?: { service: string; status: string }[];
 }
 
 export interface InventoryResource {
@@ -364,6 +410,38 @@ export interface ConfiguredTrust {
   principal_type?: string;
   kind: string;
   scope: string;
+  evidence?: string;
+  condition_status?: string;
+  note?: string;
+}
+
+export interface PermissionCandidate {
+  role_arn: string;
+  category: string;
+  policy_type?: string;
+  policy_arn?: string;
+  policy_version?: string;
+  statement_id?: string;
+  effect?: string;
+  actions?: string[];
+  service_activity?: string;
+  service_activity_scope?: string;
+  service_last_accessed?: string;
+  outcome: string;
+  condition_status?: string;
+  version_verification?: string;
+  retrieval_status?: string;
+  evidence_fingerprint: string;
+  scan_id?: string;
+  validated: boolean;
+  eligible: boolean;
+  evaluation_availability?: string;
+  action_sensitivity?: string;
+  resource_breadth?: string;
+  exposure_class?: string;
+  resources?: string[];
+  conditions?: Record<string, unknown>;
+  assessment_version?: string;
   note?: string;
 }
 
@@ -380,7 +458,26 @@ export interface RoleEntitlementProfile {
   attached_policies?: string[];
   inline_policy_count: number;
   broad_candidates?: string[];
+  permission_candidates?: PermissionCandidate[];
+  candidate_count: number;
+  conditional_count: number;
+  unknown_count: number;
+  deny_evidence_count: number;
+  eligible_exposure_count: number;
+  entitlement_assessment: string;
+  service_last_accessed_status?: string;
+  service_last_accessed_completed?: string;
+  service_access?: ServiceAccessEntry[];
+  last_used?: string;
+  last_used_status?: string;
+  last_used_region?: string;
+  days_since_used?: number;
+  assessment_version?: string;
+  assessment_source: string;
+  evaluated_count: number;
+  validated_transitions: number;
   candidate_note: string;
+  trust_evidence_note?: string;
   trusts: ConfiguredTrust[];
   workloads?: WorkloadAttachment[];
   workload_count: number;
@@ -508,6 +605,10 @@ export interface RuntimeStatusResponse {
   neo4j_configured: boolean;
   slack_configured: boolean;
   email_configured: boolean;
+  region_mode?: string;
+  explicit_regions?: string[];
+  ciem_configured?: boolean;
+  region_plan_note?: string;
 }
 
 export interface ValidateProfileRequest {
@@ -538,6 +639,7 @@ export interface ScanStartRequest {
   no_http: boolean;
   neo4j: boolean;
   provider?: string;
+  ciem?: boolean;
 }
 
 export interface ScanStartResponse {
@@ -802,6 +904,12 @@ export interface PermissionDecision {
   evidence?: string[];
   same_account: boolean;
   classification?: string;
+  explanation?: string;
+  missing_evidence?: string[];
+  missing_context?: string[];
+  unsatisfied_conditions?: string[];
+  explicit_deny?: string[];
+  applied_statements?: string[];
 }
 
 export interface PermissionBucketScope {
@@ -1046,4 +1154,11 @@ export interface InvestigationQueryResponse {
   recommended_actions?: string[];
   follow_up_suggestions?: string[];
   notes?: string[];
+}
+
+export interface ServiceAccessEntry {
+  service_namespace: string;
+  service_name: string;
+  last_authenticated?: string;
+  last_authenticated_region?: string;
 }

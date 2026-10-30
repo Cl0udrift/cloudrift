@@ -5,10 +5,39 @@
 /* Default (light): no .dark on <html>. Dark: ThemeProvider adds class "dark". */
 :root {
   color-scheme: light;
+  /* Layout tokens (px): 4 / 8 / 12 / 16 / 24 / 32 / 40 / 48 spacing scale lives in Tailwind. */
+  --cr-sidebar-w: 15rem;
+  --cr-sidebar-w-collapsed: 4rem;
+  --cr-topbar-h: 3.25rem;
+  --cr-accent: #0e7490;
+  /* Semantic security states. Always paired with a text label and a glyph, never color alone. */
+  --cr-ok-fg: #166534;       --cr-ok-bg: #dcfce7;       --cr-ok-bd: #86efac;
+  --cr-warn-fg: #854d0e;     --cr-warn-bg: #fef3c7;     --cr-warn-bd: #fcd34d;
+  --cr-bad-fg: #991b1b;      --cr-bad-bg: #fee2e2;      --cr-bad-bd: #fca5a5;
+  --cr-unk-fg: #334155;      --cr-unk-bg: #f1f5f9;      --cr-unk-bd: #cbd5e1;
+  --cr-info-fg: #155e75;     --cr-info-bg: #cffafe;     --cr-info-bd: #67e8f9;
+  --cr-hyp-fg: #5b21b6;      --cr-hyp-bg: #ede9fe;      --cr-hyp-bd: #c4b5fd;
 }
 
 html.dark {
   color-scheme: dark;
+  --cr-accent: #22d3ee;
+  --cr-ok-fg: #86efac;       --cr-ok-bg: #052e16;       --cr-ok-bd: #166534;
+  --cr-warn-fg: #fde68a;     --cr-warn-bg: #422006;     --cr-warn-bd: #92400e;
+  --cr-bad-fg: #fecaca;      --cr-bad-bg: #450a0a;      --cr-bad-bd: #991b1b;
+  --cr-unk-fg: #cbd5e1;      --cr-unk-bg: #1e293b;      --cr-unk-bd: #475569;
+  --cr-info-fg: #a5f3fc;     --cr-info-bg: #083344;     --cr-info-bd: #155e75;
+  --cr-hyp-fg: #ddd6fe;      --cr-hyp-bg: #2e1065;      --cr-hyp-bd: #6d28d9;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 body {
@@ -228,4 +257,36 @@ a {
   .cr-chart-focusable {
     @apply rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-cyan-400/70 dark:focus-visible:ring-offset-slate-950;
   }
+}
+
+@layer components {
+  .cr-skip-link {
+    @apply sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-slate-900 focus:shadow-lg;
+  }
+
+  /* State chip: text + glyph + tinted surface. Tone picks the semantic token set. */
+  .cr-chip-state {
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[11px] font-medium leading-4;
+  }
+  .cr-tone-ok { color: var(--cr-ok-fg); background: var(--cr-ok-bg); border-color: var(--cr-ok-bd); }
+  .cr-tone-warn { color: var(--cr-warn-fg); background: var(--cr-warn-bg); border-color: var(--cr-warn-bd); }
+  .cr-tone-bad { color: var(--cr-bad-fg); background: var(--cr-bad-bg); border-color: var(--cr-bad-bd); }
+  .cr-tone-unk { color: var(--cr-unk-fg); background: var(--cr-unk-bg); border-color: var(--cr-unk-bd); }
+  .cr-tone-info { color: var(--cr-info-fg); background: var(--cr-info-bg); border-color: var(--cr-info-bd); }
+  .cr-tone-hyp { color: var(--cr-hyp-fg); background: var(--cr-hyp-bg); border-color: var(--cr-hyp-bd); }
+
+  .cr-nav-group {
+    @apply px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400;
+  }
+
+  /* Long identifiers: wrap safely, never widen the layout. */
+  .cr-ident {
+    @apply min-w-0 break-all font-mono text-xs text-slate-700 dark:text-slate-300;
+  }
+}
+
+/* Compact density: tighter table rows everywhere. */
+html.cr-compact table td {
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
 }

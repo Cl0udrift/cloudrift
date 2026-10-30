@@ -27,6 +27,8 @@ export function ScanControlCenterPage() {
   const [progressMessage, setProgressMessage] = useState("");
   const [socketFailed, setSocketFailed] = useState(false);
   const [ssoPolling, setSsoPolling] = useState(false);
+  const [ciem, setCiem] = useState(false);
+  const [ciemReady, setCiemReady] = useState(false);
 
   const runtimeData = runtime.data;
   const profiles = runtimeData?.aws_profiles ?? [];
@@ -45,13 +47,17 @@ export function ScanControlCenterPage() {
     if (!runtimeData) {
       return;
     }
+    if (!ciemReady) {
+      setCiem(Boolean(runtimeData.ciem_configured));
+      setCiemReady(true);
+    }
     if (!state.profile) {
       const fallbackProfile = defaultProfile || profiles[0] || "";
       if (fallbackProfile) {
         patch({ profile: fallbackProfile });
       }
     }
-  }, [runtimeData, state.profile, patch, defaultProfile, profiles]);
+  }, [runtimeData, state.profile, patch, defaultProfile, profiles, ciemReady]);
 
   useEffect(() => {
     if (!runtimeReady) {
@@ -110,7 +116,8 @@ export function ScanControlCenterPage() {
     <section className="space-y-6">
       <PageHeader
         title="Scan Control Center"
-        description="Start scans from the dashboard using profile/provider selections only. Secrets are resolved server-side from env/shared config/role sources."
+        description="Start scans using profile and provider selections."
+        details="Secrets are resolved server-side from env, shared config or role sources and are never shown here."
       />
 
       {runtime.isLoading ? (
@@ -213,6 +220,10 @@ export function ScanControlCenterPage() {
                   no-http
                 </label>
                 <label className="hs-toggle-inline">
+                  <input className="hs-checkbox" type="checkbox" checked={ciem} onChange={(e) => setCiem(e.target.checked)} />
+                  CIEM inventory
+                </label>
+                <label className="hs-toggle-inline">
                   <input
                     className="hs-checkbox"
                     type="checkbox"
@@ -225,6 +236,14 @@ export function ScanControlCenterPage() {
                 </div>
               </Field>
             </div>
+
+            {runtimeData?.region_plan_note ? (
+              <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
+                {ciem && runtimeData.region_mode !== "explicit" && runtimeData.region_mode !== "auto"
+                  ? "Automatic: after this scan starts, Cloudrift will discover enabled Regions separately for every assumed account. Discovery has not run yet."
+                  : runtimeData.region_plan_note}
+              </p>
+            ) : null}
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
@@ -243,7 +262,8 @@ export function ScanControlCenterPage() {
                     module: state.moduleName,
                     provider: state.provider || undefined,
                     no_http: state.noHTTP,
-                    neo4j: state.neo4j
+                    neo4j: state.neo4j,
+                    ciem
                   })
                 }
                 disabled={isRunning || startScan.isPending}

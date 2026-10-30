@@ -130,7 +130,8 @@ export function TrustReportPage() {
     <section className="space-y-6">
       <PageHeader
         title="Access"
-        description="GET …/findings?module=external_access. Privileged = permission tier (trust_classification). Admin-like = separate admin_like capability flag (stronger signal); neither implies the other. Row * columns still use expand/detail or heuristics."
+        description="External-access findings with privilege signals."
+        details="Source: findings?module=external_access. Privileged = permission tier (trust_classification). Admin-like = separate admin_like capability flag (stronger signal); neither implies the other."
       />
       {!selectedScanId ? (
         <ScanRequired />
@@ -253,6 +254,9 @@ export function TrustReportPage() {
             </div>
           </div>
 
+          <details>
+            <summary className="hs-focus-ring w-fit cursor-pointer rounded text-xs font-medium text-cyan-800 dark:text-cyan-300">How to read this table</summary>
+            <div className="mt-2 space-y-2">
           <p className="hs-helper-block">
             Table columns marked * remain expand/detail-backed or title heuristics; list filtering uses structured evidence
             fields above.
@@ -266,12 +270,18 @@ export function TrustReportPage() {
             cache (e.g. after expand or activity chart sampling) — no extra list-only fetches.
           </p>
 
+            </div>
+          </details>
+
+          <details>
+            <summary className="hs-focus-ring mb-2 w-fit cursor-pointer rounded text-xs font-medium text-cyan-800 dark:text-cyan-300">Activity aging (sampled from this page)</summary>
           <TrustActivityAgingChart
             scanId={selectedScanId}
             pageFindingIds={pageFindingIds}
             pageSize={state.pageSize}
             pageTotalItems={totalItems}
           />
+          </details>
 
           <div className="hs-table-wrap">
             <table className="w-full min-w-[64rem] border-collapse text-left text-sm">
