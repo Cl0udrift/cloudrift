@@ -1164,3 +1164,69 @@ export interface ServiceAccessEntry {
   last_authenticated?: string;
   last_authenticated_region?: string;
 }
+
+export interface ConfigField {
+  key: string;
+  group: string;
+  label: string;
+  description: string;
+  kind: "string" | "int" | "float" | "bool" | "list" | "enum";
+  enum?: string[];
+  min?: number;
+  max?: number;
+  apply: "next_scan" | "restart";
+  value: string | number | boolean | string[];
+  default: string | number | boolean | string[];
+  source: "default" | "custom";
+}
+
+export interface ConfigSecret {
+  key: string;
+  label: string;
+  state: "set" | "unset";
+  note: string;
+}
+
+export interface ConfigResponse {
+  path: string;
+  exists: boolean;
+  fields: ConfigField[];
+  secrets: ConfigSecret[];
+  restart_required?: boolean;
+  backup?: string;
+  note: string;
+}
+
+export type ConfigValue = ConfigField["value"];
+
+export interface CoverageLive {
+  enabled?: boolean;
+  state: string;
+  detail?: string;
+}
+
+export interface CoverageModule {
+  id: string;
+  name: string;
+  area: string;
+  status: "ready" | "opt_in" | "partial" | "needs_graph_db" | "planned";
+  summary: string;
+  covers: string[];
+  limitations: string[];
+  config_keys?: string[];
+  permissions?: string[];
+  page?: string;
+  docs?: string;
+  evidence?: string[];
+  live?: CoverageLive;
+}
+
+export interface CoverageReport {
+  scan_id?: string;
+  readiness: { label: string; verdict: string; detail: string; source: string }[];
+  modules: CoverageModule[];
+  catalog: { evaluated: number; evaluated_actions: string[]; not_evaluated: string[] };
+  techniques: { name: string; kind: "movement" | "escalation" | "impact"; summary: string }[];
+  totals: Record<string, number>;
+  note: string;
+}

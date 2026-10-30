@@ -18,7 +18,9 @@ import {
   IconZap,
   IconAlertTriangle,
   IconBriefcase,
-  IconSliders
+  IconSliders,
+  IconSettings,
+  IconMap
 } from "../lib/icons";
 import { useScanContext } from "../hooks/useScanContext";
 
@@ -55,7 +57,9 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/scan-control", label: "Scan Control", preserveSearch: false, Icon: IconScan },
       { to: "/alerting", label: "Alerting", preserveSearch: true, Icon: IconBell },
-      { to: "/query", label: "Query", preserveSearch: true, Icon: IconSliders }
+      { to: "/query", label: "Query", preserveSearch: true, Icon: IconSliders },
+      { to: "/coverage", label: "Coverage", preserveSearch: true, Icon: IconMap },
+      { to: "/settings", label: "Settings", preserveSearch: false, Icon: IconSettings }
     ]
   }
 ];

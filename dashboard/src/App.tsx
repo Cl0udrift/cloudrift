@@ -8,6 +8,8 @@ import { DiffPage } from "./pages/Diff";
 import { FindingsPage } from "./pages/Findings";
 import { OverviewPage } from "./pages/Overview";
 import { ScanControlCenterPage } from "./pages/ScanControlCenter";
+import { ConfigPage } from "./pages/Config";
+import { CoveragePage } from "./pages/Coverage";
 import { ExternalEntitiesPage } from "./pages/ExternalEntities";
 import { TrustReportPage } from "./pages/TrustReport";
 import { AlertingPage } from "./pages/Alerting";
@@ -25,6 +27,8 @@ export default function App() {
         <Route path="/" element={<Navigate to="/overview" replace />} />
         <Route path="/overview" element={<OverviewPage />} />
         <Route path="/scan-control" element={<ScanControlCenterPage />} />
+        <Route path="/settings" element={<ConfigPage />} />
+        <Route path="/coverage" element={<CoveragePage />} />
         <Route path="/findings" element={<FindingsPage />} />
         <Route path="/triage" element={<FindingsPage triage />} />
         <Route path="/accounts" element={<AccountsPage />} />

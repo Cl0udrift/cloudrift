@@ -1,4 +1,7 @@
 import type {
+  ConfigResponse,
+  ConfigValue,
+  CoverageReport,
   AccountsBreakdownResponse,
   DiffResponse,
   ExternalEntitiesQueryParams,
@@ -86,6 +89,15 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const apiClient = {
+  getConfig(): Promise<ConfigResponse> {
+    return fetchJSON<ConfigResponse>("/config");
+  },
+  putConfig(values: Record<string, ConfigValue>): Promise<ConfigResponse> {
+    return fetchJSON<ConfigResponse>("/config", { method: "PUT", body: JSON.stringify({ values }) });
+  },
+  getCoverage(scanId: string | null): Promise<CoverageReport> {
+    return fetchJSON<CoverageReport>(`/coverage${makeQueryString({ scan_id: scanId ?? undefined })}`);
+  },
   getScans(): Promise<ScanListResponse> {
     return fetchJSON<ScanListResponse>("/scans");
   },
