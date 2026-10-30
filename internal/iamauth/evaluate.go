@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Zero0x00/cloudrift/internal/models"
 )
@@ -722,11 +723,10 @@ func loadPolicyGroup(req AuthorizationRequest, slot PolicySlot, kind string, tru
 	for _, doc := range slot.Documents {
 		statements := doc.Statements
 		if len(statements) == 0 && strings.TrimSpace(doc.Raw) != "" {
-			normalized, err := models.NormalizeIdentityPolicy(doc.ID, doc.PolicyType, "", doc.Raw)
-			if err != nil {
+			var err error
+			if statements, err = parsedStatements(doc); err != nil {
 				return groupResult{}, err
 			}
-			statements = viewsFromModel(doc, normalized)
 		}
 		if doc.ID != "" {
 			result.provenance = append(result.provenance, doc.ID)
@@ -950,4 +950,42 @@ func uniqueRefs(in []StatementRef) []StatementRef {
 		prev = ref
 	}
 	return out
+}
+
+type parseKey struct{ id, policyType, raw string }
+
+type parseEntry struct {
+	statements []StatementView
+	err        error
+}
+
+// parseCache keeps parsed documents between decisions. One search evaluates thousands of requests
+// against the same few documents, and parsing was most of the time. Entries are read-only.
+var parseCache = struct {
+	sync.Mutex
+	m map[parseKey]parseEntry
+}{m: map[parseKey]parseEntry{}}
+
+const parseCacheMax = 4096
+
+func parsedStatements(doc PolicyDocument) ([]StatementView, error) {
+	key := parseKey{doc.ID, doc.PolicyType, doc.Raw}
+	parseCache.Lock()
+	e, ok := parseCache.m[key]
+	parseCache.Unlock()
+	if ok {
+		return e.statements, e.err
+	}
+	normalized, err := models.NormalizeIdentityPolicy(doc.ID, doc.PolicyType, "", doc.Raw)
+	if err == nil {
+		e.statements = viewsFromModel(doc, normalized)
+	}
+	e.err = err
+	parseCache.Lock()
+	if len(parseCache.m) >= parseCacheMax {
+		parseCache.m = map[parseKey]parseEntry{}
+	}
+	parseCache.m[key] = e
+	parseCache.Unlock()
+	return e.statements, e.err
 }

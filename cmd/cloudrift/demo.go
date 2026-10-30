@@ -104,6 +104,7 @@ func newDemoCommand(cfgPath *string) *cobra.Command {
 	generateCmd.Flags().BoolVar(&includeSecurityFixtures, "include-security-fixtures", false, "Add the security scenario fixtures to the legacy demo scan.")
 	_ = generateCmd.Flags().MarkHidden("timestamp")
 	demoCmd.AddCommand(generateCmd)
+	demoCmd.AddCommand(newDemoImportCmd())
 	return demoCmd
 }
 

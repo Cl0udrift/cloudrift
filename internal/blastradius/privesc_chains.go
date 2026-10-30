@@ -135,3 +135,28 @@ func containsARN(assets []models.AssetNode, arn string) bool {
 	}
 	return false
 }
+
+// Technique names one hop type the attack search can model.
+type Technique struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind"` // movement, escalation, impact
+	Summary string `json:"summary"`
+}
+
+// AttackTechniques lists every technique the attack search models. The coverage page reads it,
+// so the page cannot drift from the code.
+func AttackTechniques() []Technique {
+	out := []Technique{
+		{techniqueAssumeRole, "movement", "sts:AssumeRole into another role (same or cross account)"},
+		{techniqueRewriteTrust, "escalation", "iam:UpdateAssumeRolePolicy so the session can trust itself, then assume the role"},
+		{techniqueGrantPolicy, "escalation", "iam:AttachRolePolicy or iam:PutRolePolicy on the session's own role or a reachable role"},
+		{techniquePolicyVer, "escalation", "iam:CreatePolicyVersion on a customer managed policy attached to the session's role or a reachable role"},
+		{"EDIT_LAMBDA_CODE", "escalation", "lambda:UpdateFunctionCode plus invoke on a function whose execution role is another role"},
+		{techniqueReadObject, "impact", "s3:GetObject on a collected object"},
+		{techniqueReadSecret, "impact", "secretsmanager:GetSecretValue including the KMS decrypt leg"},
+	}
+	for _, p := range passRolePlans {
+		out = append(out, Technique{p.kind, "escalation", "iam:PassRole to " + p.service + " plus " + strings.Join(p.actions, " and ")})
+	}
+	return out
+}

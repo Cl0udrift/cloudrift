@@ -24,6 +24,8 @@ const (
 	defaultAssumeDepth    = 2
 	maxAttackTransitions  = 80
 	maxAttackPaths        = 12
+	// attackMaxDecisions bounds one session's permission evaluation. The default of 120 silently dropped hops in accounts with many roles.
+	attackMaxDecisions = 5000
 )
 
 // IdentityAttackRequest is the assumed-compromise search for one role session.
@@ -139,6 +141,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 				AssumedCompromise: true,
 				IncludeSelf:       true,
 				PrivescChains:     true,
+				MaxDecisions:      attackMaxDecisions,
 				SessionSource:     report.SessionContextSource,
 				RequestContext:    state.context,
 				Assets:            req.Assets,
@@ -146,6 +149,10 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 				EvaluatedAt:       when,
 			})
 			evalCache[cacheKey] = blast
+			if blast.Truncated {
+				report.Truncated = true
+				report.CoverageNotes = append(report.CoverageNotes, "permission evaluation hit the decision limit for "+state.principal+"; some hops were not evaluated")
+			}
 		}
 		roleNode := findRole(req.Assets, state.principal)
 		sessionState := observedSessionState(roleNode)

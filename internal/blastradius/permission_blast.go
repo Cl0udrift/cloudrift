@@ -559,7 +559,7 @@ func targetsFor(cap iamauth.Capability, t targetSet) []models.AssetNode {
 	case iamauth.EvalIdentityOnly:
 		// A role that can grant itself a policy escalates without assuming anything.
 		if cap.AttackTechnique == "GRANT_ROLE_POLICY" {
-			return append(append([]models.AssetNode{}, roles...), t.self...)
+			return append(append([]models.AssetNode{}, t.self...), roles...)
 		}
 		return roles
 	default:
