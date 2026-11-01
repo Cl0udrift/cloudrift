@@ -10,6 +10,8 @@ const (
 	AssetAPIGatewayDomain         AssetType = "apigateway_domain"
 	AssetACMCert                  AssetType = "acm_cert"
 	AssetIAMRole                  AssetType = "iam_role"
+	AssetIAMUser                  AssetType = "iam_user"
+	AssetIAMGroup                 AssetType = "iam_group"
 	AssetIAMPolicy                AssetType = "iam_policy"
 	AssetIAMPolicyStatement       AssetType = "iam_policy_statement"
 	AssetIAMAuthorizationDecision AssetType = "iam_authorization_decision"
@@ -28,6 +30,7 @@ const (
 	AssetSecret                   AssetType = "secret"
 	AssetRDSInstance              AssetType = "rds_instance"
 	AssetKMSKey                   AssetType = "kms_key"
+	AssetVPCEndpoint              AssetType = "vpc_endpoint"
 	AssetIRSATrust                AssetType = "irsa_trust"
 )
 

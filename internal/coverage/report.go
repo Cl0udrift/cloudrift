@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Zero0x00/cloudrift/internal/blastradius"
 	"github.com/Zero0x00/cloudrift/internal/config"
@@ -28,13 +29,15 @@ type CatalogStats struct {
 
 // Report is the coverage page payload.
 type Report struct {
-	ScanID     string                  `json:"scan_id,omitempty"`
-	Readiness  []Readiness             `json:"readiness"`
-	Modules    []Module                `json:"modules"`
-	Catalog    CatalogStats            `json:"catalog"`
-	Techniques []blastradius.Technique `json:"techniques"`
-	Totals     map[string]int          `json:"totals"`
-	Note       string                  `json:"note"`
+	ScanID string `json:"scan_id,omitempty"`
+	// GeneratedAt is when this payload was built, so the page can show how current it is.
+	GeneratedAt string                  `json:"generated_at"`
+	Readiness   []Readiness             `json:"readiness"`
+	Modules     []Module                `json:"modules"`
+	Catalog     CatalogStats            `json:"catalog"`
+	Techniques  []blastradius.Technique `json:"techniques"`
+	Totals      map[string]int          `json:"totals"`
+	Note        string                  `json:"note"`
 }
 
 // readiness is quoted from docs/audits/phase-4f-final-entitlement-hardening.md and
@@ -53,7 +56,7 @@ func Build(cfg *config.Config, scanID string, assets []models.AssetNode) Report 
 		cfg = config.Default()
 	}
 	rep := Report{
-		ScanID: scanID, Readiness: readiness(), Techniques: blastradius.AttackTechniques(), Totals: map[string]int{},
+		ScanID: scanID, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Readiness: readiness(), Techniques: blastradius.AttackTechniques(), Totals: map[string]int{},
 		Note: "Static text comes from the registry in internal/coverage. Action and technique lists are read from the code. Live state comes from the config and the selected scan.",
 	}
 	toggles := map[string]string{"iam-inventory": "scan.iam_policy_inventory", "resource-policies": "scan.resource_policies", "service-access": "scan.service_last_accessed"}
@@ -67,8 +70,14 @@ func Build(cfg *config.Config, scanID string, assets []models.AssetNode) Report 
 		switch {
 		case scanID == "" && len(assets) == 0:
 			live.State, live.Detail = "not_recorded", "no scan selected"
+		case m.ID == "iam-inventory":
+			live.State, live.Detail = policyInventoryState(assets)
 		case len(m.Collectors) > 0:
 			live.State, live.Detail = rollup(m.Collectors, statuses)
+			// Without a stored status, data in the scan is still evidence the collector ran.
+			if n := countOf(m.AssetTypes, counts); live.State == "not_recorded" && n > 0 {
+				live.State, live.Detail = "data_present", fmt.Sprintf("%d assets in this scan; collection status was not stored", n)
+			}
 		case len(m.AssetTypes) > 0:
 			n := 0
 			for _, t := range m.AssetTypes {
@@ -105,6 +114,14 @@ func Build(cfg *config.Config, scanID string, assets []models.AssetNode) Report 
 	sort.Strings(rep.Catalog.NotEvaluated)
 	rep.Catalog.Evaluated = len(rep.Catalog.EvaluatedActions)
 	return rep
+}
+
+func countOf(types []string, counts map[string]int) int {
+	n := 0
+	for _, t := range types {
+		n += counts[t]
+	}
+	return n
 }
 
 func collectorStatuses(assets []models.AssetNode) map[string][]string {
@@ -169,4 +186,29 @@ func dedupe(in []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// policyInventoryState says whether the scan holds policy documents for its roles. A scan that
+// listed roles but has no documents was run with policy inventory off, and permission analysis
+// on it is thin.
+func policyInventoryState(assets []models.AssetNode) (string, string) {
+	roles, withDocs := 0, 0
+	for _, a := range assets {
+		if a.AssetType != models.AssetIAMRole {
+			continue
+		}
+		roles++
+		if status, _ := a.Properties["policy_retrieval_status"].(string); status == models.PolicyRetrievalOK {
+			withDocs++
+		}
+	}
+	switch {
+	case roles == 0:
+		return "no_data", "this scan holds no IAM roles"
+	case withDocs == 0:
+		return "no_data", fmt.Sprintf("%d roles, none with policy documents: this scan was run without IAM policy inventory", roles)
+	case withDocs < roles:
+		return "partial", fmt.Sprintf("%d of %d roles have policy documents", withDocs, roles)
+	}
+	return "completed", fmt.Sprintf("all %d roles have policy documents", roles)
 }

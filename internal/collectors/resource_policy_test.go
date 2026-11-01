@@ -7,6 +7,8 @@ import (
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
@@ -240,5 +242,28 @@ func TestReadLambdaPolicy(t *testing.T) {
 	}
 	if s, _, d := readLambdaPolicy(context.Background(), api, "ok"); s != "present" || d == "" {
 		t.Fatal(s)
+	}
+}
+
+type fakeEndpoints struct{ err error }
+
+func (f fakeEndpoints) DescribeVpcEndpoints(_ context.Context, _ *ec2.DescribeVpcEndpointsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &ec2.DescribeVpcEndpointsOutput{VpcEndpoints: []ec2types.VpcEndpoint{
+		{VpcEndpointId: awsv2.String("vpce-1"), ServiceName: awsv2.String("com.amazonaws.us-east-1.s3"), PolicyDocument: awsv2.String(`{"Statement":[]}`)},
+		{VpcEndpointId: awsv2.String("vpce-2")},
+	}}, nil
+}
+
+func TestCollectVPCEndpoints(t *testing.T) {
+	nodes := collectVPCEndpoints(context.Background(), "1", "us-east-1", fakeEndpoints{}, "now")
+	if len(nodes) != 2 || nodes[0].AssetType != models.AssetVPCEndpoint || nodes[0].Properties["endpoint_policy_status"] != "collected" || nodes[1].Properties["endpoint_policy_status"] != "not_returned" {
+		t.Fatalf("%v", nodes)
+	}
+	failed := collectVPCEndpoints(context.Background(), "1", "us-east-1", fakeEndpoints{err: apiErr{"UnauthorizedOperation"}}, "now")
+	if len(failed) != 1 || failed[0].AssetType == models.AssetVPCEndpoint {
+		t.Fatalf("a failed call must be a status, not an endpoint: %v", failed)
 	}
 }

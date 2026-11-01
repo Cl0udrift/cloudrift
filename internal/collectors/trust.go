@@ -315,6 +315,32 @@ func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI
 	wg.Wait()
 
 	nodes := append(roleNodes, principalNodes...)
+	if inventory {
+		if details, ok := client.(IAMAuthDetailsAPI); ok {
+			status := CollectionStatus(accountID, "", "iam_users_groups", "global", "succeeded", "")
+			userNodes, userRels, err := collectUsersGroups(ctx, accountID, details, client, managedCache)
+			if err != nil {
+				// Usually AccessDenied on iam:GetAccountAuthorizationDetails. Roles still scan.
+				status = CollectionStatus(accountID, "", "iam_users_groups", "global", "failed", err.Error())
+			}
+			nodes = append(nodes, status)
+			if err == nil {
+				if cr, ok := client.(IAMCredentialReportAPI); ok {
+					credStatus := CollectionStatus(accountID, "", "iam_credential_report", "global", "succeeded", "")
+					content, cerr := fetchCredentialReport(ctx, cr)
+					if cerr == nil {
+						cerr = annotateCredentials(userNodes, content)
+					}
+					if cerr != nil {
+						credStatus = CollectionStatus(accountID, "", "iam_credential_report", "global", "failed", cerr.Error())
+					}
+					nodes = append(nodes, credStatus)
+				}
+			}
+			nodes = append(nodes, userNodes...)
+			rels = append(rels, userRels...)
+		}
+	}
 	return nodes, rels, nil
 }
 

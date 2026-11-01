@@ -9,6 +9,7 @@ import (
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
@@ -44,15 +45,21 @@ type LambdaPolicyAPI interface {
 	GetPolicy(ctx context.Context, params *lambda.GetPolicyInput, optFns ...func(*lambda.Options)) (*lambda.GetPolicyOutput, error)
 }
 
+// EndpointAPI reads VPC endpoints and the policy attached to each.
+type EndpointAPI interface {
+	DescribeVpcEndpoints(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error)
+}
+
 // ResourcePolicyClients are the regional clients used by CollectRegionalResourcePolicies.
 type ResourcePolicyClients struct {
 	Secrets SecretsAPI
 	KMS     KMSAPI
 	RDS     RDSAPI
+	EC2     EndpointAPI
 }
 
 var regionalResourcePolicyClients = func(cfg awsv2.Config) ResourcePolicyClients {
-	return ResourcePolicyClients{Secrets: secretsmanager.NewFromConfig(cfg), KMS: kms.NewFromConfig(cfg), RDS: rds.NewFromConfig(cfg)}
+	return ResourcePolicyClients{Secrets: secretsmanager.NewFromConfig(cfg), KMS: kms.NewFromConfig(cfg), RDS: rds.NewFromConfig(cfg), EC2: ec2.NewFromConfig(cfg)}
 }
 
 // Secret key modes. aws_managed is aws/secretsmanager; customer_managed needs the key policy;
@@ -172,7 +179,52 @@ func CollectRegionalResourcePolicies(ctx context.Context, accountID, region stri
 	if c.RDS != nil {
 		out = append(out, collectRDSInstances(ctx, accountID, region, c.RDS, retrieved)...)
 	}
+	if c.EC2 != nil {
+		out = append(out, collectVPCEndpoints(ctx, accountID, region, c.EC2, retrieved)...)
+	}
 	return out
+}
+
+// collectVPCEndpoints records each endpoint with its policy document. An endpoint policy only
+// applies to requests that travel through that endpoint, which a scan cannot see, so the
+// evaluator does not use these documents; they are evidence for review.
+func collectVPCEndpoints(ctx context.Context, accountID, region string, api EndpointAPI, retrieved string) []models.AssetNode {
+	var out []models.AssetNode
+	var token *string
+	for {
+		page, err := api.DescribeVpcEndpoints(ctx, &ec2.DescribeVpcEndpointsInput{NextToken: token})
+		if err != nil {
+			return append(out, CollectionStatus(accountID, region, "vpc_endpoints", "regional", "failed", apiErrorCode(err)))
+		}
+		for _, e := range page.VpcEndpoints {
+			id := awsv2.ToString(e.VpcEndpointId)
+			if id == "" {
+				continue
+			}
+			doc := awsv2.ToString(e.PolicyDocument)
+			status := "collected"
+			if doc == "" {
+				status = "not_returned" // the API gave no document; do not read this as full access
+			}
+			out = append(out, models.AssetNode{
+				ARN: "arn:aws:ec2:" + region + ":" + accountID + ":vpc-endpoint/" + id, AssetType: models.AssetVPCEndpoint,
+				Name: id, AccountID: accountID, Region: region,
+				Properties: map[string]any{
+					"service_name":           awsv2.ToString(e.ServiceName),
+					"endpoint_type":          string(e.VpcEndpointType),
+					"vpc_id":                 awsv2.ToString(e.VpcId),
+					"endpoint_state":         string(e.State),
+					"endpoint_policy":        doc,
+					"endpoint_policy_status": status,
+					"retrieved_at":           retrieved,
+					"source_api":             "ec2:DescribeVpcEndpoints",
+				}})
+		}
+		if page.NextToken == nil || *page.NextToken == "" {
+			return out
+		}
+		token = page.NextToken
+	}
 }
 
 func collectRDSInstances(ctx context.Context, accountID, region string, api RDSAPI, retrieved string) []models.AssetNode {
@@ -371,6 +423,21 @@ func readKeyPolicy(ctx context.Context, api KMSAPI, keyID string) (status, evide
 	return "present", "kms:GetKeyPolicy returned the default key policy", policy
 }
 
+// grantConstraint keeps the encryption-context condition a grant carries, so it can be shown.
+func grantConstraint(c *kmstypes.GrantConstraints) map[string]any {
+	if c == nil {
+		return nil
+	}
+	out := map[string]any{}
+	if len(c.EncryptionContextEquals) > 0 {
+		out["encryption_context_equals"] = c.EncryptionContextEquals
+	}
+	if len(c.EncryptionContextSubset) > 0 {
+		out["encryption_context_subset"] = c.EncryptionContextSubset
+	}
+	return out
+}
+
 // readKeyGrants returns the key's grants. A failed call leaves status "missing": grants only add
 // access, so missing grants can withhold an Allow but never create one.
 func readKeyGrants(ctx context.Context, api KMSAPI, keyID string) ([]map[string]any, string) {
@@ -390,6 +457,7 @@ func readKeyGrants(ctx context.Context, api KMSAPI, keyID string) ([]map[string]
 				"grantee_principal": awsv2.ToString(g.GranteePrincipal),
 				"operations":        ops,
 				"constrained":       g.Constraints != nil,
+				"constraint":        grantConstraint(g.Constraints),
 			})
 		}
 		if !page.Truncated {

@@ -55,7 +55,13 @@ function LiveChips({ m }: { m: CoverageModule }) {
 /** Big picture of what Cloudrift covers and what it does not, for development and review. */
 export function CoveragePage() {
   const { selectedScanId } = useScanContext();
-  const query = useQuery({ queryKey: queryKeys.coverage(selectedScanId), queryFn: () => apiClient.getCoverage(selectedScanId) });
+  const query = useQuery({ queryKey: queryKeys.coverage(selectedScanId), queryFn: () => apiClient.getCoverage(selectedScanId),
+    // Config and scans change outside the page, so always ask the server again.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchInterval: 15_000
+  });
   const [view, setView] = useState<"modules" | "limits">("modules");
   const [statusFilter, setStatusFilter] = useState<CoverageModule["status"] | "">("");
   const [q, setQ] = useState("");
@@ -68,9 +74,19 @@ export function CoveragePage() {
         description="What Cloudrift covers, what it does not, and how far each part is verified."
         details="Module descriptions come from a registry in the code. Evaluated actions and attack techniques are read from the code itself. Live state comes from your settings and the selected scan."
       />
+      {query.data ? (
+        <p className="cr-helper" role="status">
+          Live · {query.data.scan_id ? `scan ${query.data.scan_id}` : "no scan selected"} · updated {new Date(query.dataUpdatedAt).toLocaleTimeString()}
+          {query.isError ? " · refresh failed, showing the last result" : ""}
+          {" · "}
+          <button type="button" className="underline" onClick={() => void query.refetch()} disabled={query.isFetching}>
+            {query.isFetching ? "Refreshing…" : "Refresh now"}
+          </button>
+        </p>
+      ) : null}
       {query.isLoading ? (
         <StatePanel>Loading coverage…</StatePanel>
-      ) : query.isError ? (
+      ) : query.isError && !query.data ? (
         <StatePanel intent="error" title="Failed to load coverage">
           <pre className="whitespace-pre-wrap font-sans text-xs">{formatQueryError(query.error)}</pre>
         </StatePanel>

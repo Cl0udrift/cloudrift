@@ -64,7 +64,7 @@ func policyEvidenceGraph(role models.AssetNode, policies []collectedPolicy) ([]m
 	for _, p := range policies {
 		policyARN := strings.TrimSpace(p.ARN)
 		if policyARN == "" {
-			policyARN = inlinePolicyARN(role.AccountID, role.Name, p.Name)
+			policyARN = inlinePolicyARNFor(role, p.Name)
 		}
 		if _, ok := seenPolicy[policyARN]; ok {
 			continue
@@ -219,6 +219,18 @@ func documentFingerprint(document string) string {
 
 func inlinePolicyARN(accountID, roleName, policyName string) string {
 	return "arn:cloudrift:iam-inline-policy:::" + accountID + "/role/" + roleName + "/" + policyName
+}
+
+// inlinePolicyARNFor keeps same-named inline policies on a user, group and role apart.
+func inlinePolicyARNFor(owner models.AssetNode, policyName string) string {
+	kind := "role"
+	switch owner.AssetType {
+	case models.AssetIAMUser:
+		kind = "user"
+	case models.AssetIAMGroup:
+		kind = "group"
+	}
+	return "arn:cloudrift:iam-inline-policy:::" + owner.AccountID + "/" + kind + "/" + owner.Name + "/" + policyName
 }
 
 func statementARN(policyARN, statementID string) string {

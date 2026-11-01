@@ -9,6 +9,7 @@ import { FindingsPage } from "./pages/Findings";
 import { OverviewPage } from "./pages/Overview";
 import { ScanControlCenterPage } from "./pages/ScanControlCenter";
 import { ConfigPage } from "./pages/Config";
+import { PrincipalsPage } from "./pages/Principals";
 import { CoveragePage } from "./pages/Coverage";
 import { ExternalEntitiesPage } from "./pages/ExternalEntities";
 import { TrustReportPage } from "./pages/TrustReport";
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/triage" element={<FindingsPage triage />} />
         <Route path="/accounts" element={<AccountsPage />} />
         <Route path="/identities" element={<IdentitiesPage />} />
+        <Route path="/principals" element={<PrincipalsPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/diff" element={<DiffPage />} />
         <Route path="/trust-report" element={<TrustReportPage />} />

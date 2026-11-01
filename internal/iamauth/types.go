@@ -97,7 +97,7 @@ type AuthorizationRequest struct {
 }
 
 // KMSGrant is one collected key grant. Constrained is true when the grant carries any
-// encryption-context constraint, which the evaluator does not resolve.
+// encryption-context constraint; the request context is unknown, so such a grant gives CONDITIONAL.
 type KMSGrant struct {
 	GranteePrincipal string
 	Operations       []string

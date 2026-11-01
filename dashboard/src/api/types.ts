@@ -1223,10 +1223,101 @@ export interface CoverageModule {
 
 export interface CoverageReport {
   scan_id?: string;
+  generated_at: string;
   readiness: { label: string; verdict: string; detail: string; source: string }[];
   modules: CoverageModule[];
   catalog: { evaluated: number; evaluated_actions: string[]; not_evaluated: string[] };
   techniques: { name: string; kind: "movement" | "escalation" | "impact"; summary: string }[];
   totals: Record<string, number>;
   note: string;
+}
+
+export interface PrincipalListItem {
+  arn: string;
+  name: string;
+  kind: "user" | "group";
+  account_id: string;
+  groups: string[];
+  policy_count: number;
+  has_deny: boolean;
+  boundary_status?: string;
+  retrieval_status: string;
+  broad_candidates: string[];
+  credentials_collected: boolean;
+  console_enabled: boolean;
+  mfa_active: boolean;
+  active_keys: number;
+  credential_findings: number;
+}
+export interface PrincipalListResponse {
+  scan_id: string;
+  items: PrincipalListItem[];
+  note: string;
+}
+export interface PolicyStatementSummary {
+  effect: string;
+  actions: string[];
+  not_action?: boolean;
+  resources: string[];
+  has_condition: boolean;
+}
+export interface PolicySource {
+  via: "direct" | "group";
+  group_arn?: string;
+  group_name?: string;
+  policy_name: string;
+  policy_arn: string;
+  policy_type: string;
+  retrieval_status: string;
+  allows: number;
+  denies: number;
+  statements: PolicyStatementSummary[];
+}
+export interface PrincipalPoliciesResponse {
+  scan_id: string;
+  arn: string;
+  name: string;
+  kind: string;
+  groups: string[];
+  sources: PolicySource[];
+  has_deny: boolean;
+  boundary_status?: string;
+  complete: boolean;
+  notes: string[];
+  credentials?: CredentialSummary;
+  broad_candidates: string[];
+}
+export interface KeySummary {
+  slot: string;
+  active: boolean;
+  last_rotated?: string;
+  last_used?: string;
+  last_service?: string;
+  age_days?: number;
+}
+export interface CredentialSummary {
+  console_enabled: boolean;
+  mfa_active: boolean;
+  password_last_used?: string;
+  keys: KeySummary[];
+  findings: string[];
+}
+export interface RoleAssumer {
+  arn: string;
+  name: string;
+  kind: "user" | "role";
+  account_id: string;
+  status: string;
+  reason: string;
+}
+export interface RoleUsageResponse {
+  scan_id: string;
+  role_arn: string;
+  assumers: RoleAssumer[];
+  workloads: WorkloadAttachment[];
+  evaluated: number;
+  allowed: number;
+  possible: number;
+  unknown: number;
+  notes: string[];
 }

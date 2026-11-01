@@ -20,6 +20,10 @@ const (
 	techniqueRewriteTrust = "REWRITE_TRUST"
 	techniqueGrantPolicy  = "GRANT_ROLE_POLICY"
 	techniquePolicyVer    = "CREATE_POLICY_VERSION"
+	techniqueGrantUser    = "GRANT_USER_POLICY"
+	techniqueGrantGroup   = "GRANT_GROUP_POLICY"
+	techniqueJoinGroup    = "ADD_USER_TO_GROUP"
+	techniqueTakeover     = "TAKEOVER_USER"
 	defaultAttackStates   = 24
 	defaultAssumeDepth    = 2
 	maxAttackTransitions  = 80
@@ -69,7 +73,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 			"iam:PassRole combined with ec2:RunInstances (needs instance profile evidence)",
 			"iam:PassRole combined with ECS, SageMaker, CodeStar or Lambda event source mappings",
 			"iam:SetDefaultPolicyVersion (needs policy version documents)",
-			"escalation through IAM users and groups (users and groups are not collected)",
+			"iam:AttachUserPolicy, iam:PutUserPolicy, iam:AddUserToGroup, iam:CreateAccessKey and similar user-targeted escalation",
 			"glue:UpdateDevEndpoint on existing endpoints (endpoints are not collected)",
 			"network_reachability",
 			"workload_credential_access",
@@ -80,7 +84,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 		return report
 	}
 	role, ok := findAsset(req.Assets, report.InitialPrincipal)
-	if !ok || role.AssetType != models.AssetIAMRole {
+	if !ok || (role.AssetType != models.AssetIAMRole && role.AssetType != models.AssetIAMUser) {
 		report.CoverageNotes = []string{"role_not_in_scan"}
 		return report
 	}
@@ -186,7 +190,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 				hop.MissingPrerequisites = []string{decision.Reason}
 				missing = append(missing, decision.Reason)
 			}
-			opensSession := technique == techniqueAssumeRole || technique == techniqueRewriteTrust || isChainSession(technique)
+			opensSession := technique == techniqueAssumeRole || technique == techniqueRewriteTrust || technique == techniqueTakeover || isChainSession(technique)
 			cycle := opensSession && containsRole(state.roles, decision.ResourceARN)
 			hop.Cycle = cycle
 			_, seen := seenTransition[key]
@@ -228,7 +232,22 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 			if isChainSession(technique) {
 				addEscalation(&report, technique, hop, "This session can obtain the credentials of "+decision.ResourceARN+" through "+technique+": "+strings.Join(decision.Evidence, ", ")+".")
 			}
-			if technique == techniqueGrantPolicy || technique == techniquePolicyVer {
+			if technique == techniqueTakeover {
+				addEscalation(&report, "USER_TAKEOVER", hop, "This session may create credentials for "+decision.ResourceARN+", so it can act as that user.")
+			}
+			if technique == techniqueGrantGroup {
+				if inGroup(roleNode, decision.ResourceARN, req.Assets, req.Relationships) {
+					addEscalation(&report, "SELF_POLICY_GRANT", hop, "This session's user belongs to "+decision.ResourceARN+" and may change that group's policies, so it can grant itself any permission.")
+				} else {
+					grants = append(grants, hop)
+				}
+			}
+			if technique == techniqueJoinGroup && roleNode.AssetType == models.AssetIAMUser && !inGroup(roleNode, decision.ResourceARN, req.Assets, req.Relationships) {
+				if group, ok := findAsset(req.Assets, decision.ResourceARN); ok && groupLooksAdministrative(group, req.Assets, req.Relationships) {
+					addEscalation(&report, "SELF_GROUP_JOIN", hop, "This session's user may add itself to "+decision.ResourceARN+", a group with administrative policies.")
+				}
+			}
+			if technique == techniqueGrantPolicy || technique == techniquePolicyVer || technique == techniqueGrantUser {
 				if decision.ResourceARN == state.principal {
 					addEscalation(&report, "SELF_POLICY_GRANT", hop, "This session may change a policy that applies to its own role, so it can grant itself any permission.")
 				} else {
@@ -531,6 +550,8 @@ func originFor(technique string) string {
 	switch technique {
 	case techniqueRewriteTrust:
 		return "modeled_trust_rewrite"
+	case techniqueTakeover:
+		return "modeled_user_takeover"
 	}
 	if isChainSession(technique) {
 		return "modeled_" + strings.ToLower(technique)
@@ -656,4 +677,32 @@ func IdentityAttackExplorerPayload(sum schema.BlastRadiusSummary) schema.BlastEx
 		})
 	}
 	return resp
+}
+
+// inGroup reports whether the user is a member of the group.
+func inGroup(user models.AssetNode, groupARN string, assets []models.AssetNode, rels []models.Relationship) bool {
+	if user.AssetType != models.AssetIAMUser {
+		return false
+	}
+	for _, g := range groupsOf(user, assets, rels) {
+		if g.ARN == groupARN {
+			return true
+		}
+	}
+	return false
+}
+
+func groupLooksAdministrative(group models.AssetNode, assets []models.AssetNode, rels []models.Relationship) bool {
+	for _, name := range permStringListProp(group.Properties, "attached_policy_names") {
+		if adminPolicyName(name) {
+			return true
+		}
+	}
+	slot, _ := identitySlot(group, assets, rels)
+	for _, doc := range slot.Documents {
+		if looksAdministrative(doc.Raw) {
+			return true
+		}
+	}
+	return false
 }

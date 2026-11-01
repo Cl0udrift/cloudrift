@@ -13,9 +13,9 @@ import (
 	"github.com/Zero0x00/cloudrift/internal/models"
 )
 
-func TestIAMInventoryFlagDefaultsOff(t *testing.T) {
-	if config.Default().Scan.IAMPolicyInventory {
-		t.Fatal("iam_policy_inventory must default off so existing collection stays external-trust only")
+func TestIAMInventoryFlagDefaultsOn(t *testing.T) {
+	if !config.Default().Scan.IAMPolicyInventory {
+		t.Fatal("iam_policy_inventory must default on: permission analysis needs every role's policies")
 	}
 }
 

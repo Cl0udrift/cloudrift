@@ -191,6 +191,54 @@ func Catalog() []Capability {
 			Consequence:    "Rewrite a role trust policy if the evaluated request is allowed. The caller can then name itself as a trusted principal.",
 		},
 		{
+			Action: "iam:AttachUserPolicy", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
+			ResourceShape:  "user ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Attach a managed policy to a user if the evaluated request is allowed.",
+		},
+		{
+			Action: "iam:PutUserPolicy", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
+			ResourceShape:  "user ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Write an inline policy on a user if the evaluated request is allowed.",
+		},
+		{
+			Action: "iam:AttachGroupPolicy", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
+			ResourceShape:  "group ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Attach a managed policy to a group, and so to every member, if the evaluated request is allowed.",
+		},
+		{
+			Action: "iam:PutGroupPolicy", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
+			ResourceShape:  "group ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Write an inline policy on a group, and so for every member, if the evaluated request is allowed.",
+		},
+		{
+			Action: "iam:AddUserToGroup", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
+			ResourceShape:  "group ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Add a user to a group, giving the user the group policies, if the evaluated request is allowed.",
+		},
+		{
+			Action: "iam:CreateAccessKey", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
+			ResourceShape:  "user ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Create an access key for a user if the evaluated request is allowed. The holder can then act as that user.",
+		},
+		{
+			Action: "iam:CreateLoginProfile", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
+			ResourceShape:  "user ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Set a console password for a user that has none if the evaluated request is allowed.",
+		},
+		{
+			Action: "iam:UpdateLoginProfile", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
+			ResourceShape:  "user ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Change a user's console password if the evaluated request is allowed.",
+		},
+		{
 			Action: "iam:PassRole", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
 			ResourceShape:   "role ARN being passed",
 			RequiredPolicy:  []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
@@ -292,6 +340,46 @@ var registryDetail = map[string]registryFacts{
 		unsupported: []string{"conditions the rewritten trust policy would carry", "service-side propagation delay"},
 		inventory:   true,
 		technique:   "REWRITE_TRUST",
+	},
+	"iam:AttachUserPolicy": {
+		unsupported: []string{"the policy to attach or write is not chosen; the attack search assumes an administrative policy"},
+		inventory:   true,
+		technique:   "GRANT_USER_POLICY",
+	},
+	"iam:PutUserPolicy": {
+		unsupported: []string{"the policy to attach or write is not chosen; the attack search assumes an administrative policy"},
+		inventory:   true,
+		technique:   "GRANT_USER_POLICY",
+	},
+	"iam:AttachGroupPolicy": {
+		unsupported: []string{"the policy to attach or write is not chosen; the attack search assumes an administrative policy"},
+		inventory:   true,
+		technique:   "GRANT_GROUP_POLICY",
+	},
+	"iam:PutGroupPolicy": {
+		unsupported: []string{"the policy to attach or write is not chosen; the attack search assumes an administrative policy"},
+		inventory:   true,
+		technique:   "GRANT_GROUP_POLICY",
+	},
+	"iam:AddUserToGroup": {
+		unsupported: []string{"only joining a group with administrative policies is reported as an escalation"},
+		inventory:   true,
+		technique:   "ADD_USER_TO_GROUP",
+	},
+	"iam:CreateAccessKey": {
+		unsupported: []string{"a user can hold at most two access keys, so the call can fail even when allowed", "the new credentials are not usable until the caller reads them"},
+		inventory:   true,
+		technique:   "TAKEOVER_USER",
+	},
+	"iam:CreateLoginProfile": {
+		unsupported: []string{"fails if the user already has a console password"},
+		inventory:   true,
+		technique:   "TAKEOVER_USER",
+	},
+	"iam:UpdateLoginProfile": {
+		unsupported: []string{"fails if the user has no console password"},
+		inventory:   true,
+		technique:   "TAKEOVER_USER",
 	},
 	"iam:PassRole": {
 		unsupported: []string{"permission to pass a role is not permission to assume or use that role", "service-side acceptance of the passed role"},

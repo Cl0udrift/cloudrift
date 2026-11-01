@@ -87,7 +87,7 @@ func newRootCommand() *cobra.Command {
 	scanCmd.Flags().Bool("no-http", false, "Skip HTTP probing")
 	scanCmd.Flags().Int("concurrency", 50, "HTTP probe concurrency")
 	scanCmd.Flags().BoolVar(&neo4jEnabled, "neo4j", false, "Write scan projection to Neo4j (Phase 3, optional)")
-	scanCmd.Flags().BoolVar(&ciemProfile, "ciem", false, "CIEM profile: collect IAM policy inventory. Does not change the legacy default.")
+	scanCmd.Flags().BoolVar(&ciemProfile, "ciem", false, "CIEM profile: collect IAM policy inventory even when the config turns it off.")
 
 	var reportScanID, format, reportOut string
 	reportCmd := &cobra.Command{

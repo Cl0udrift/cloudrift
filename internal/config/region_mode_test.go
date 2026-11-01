@@ -11,6 +11,7 @@ func TestResolveRegionMode(t *testing.T) {
 	}
 
 	legacy := Default()
+	legacy.Scan.IAMPolicyInventory = false // the older external-trust-only scan
 	mode, regions, err = ResolveRegionMode(legacy)
 	if err != nil || mode != RegionModeLegacy || len(regions) != 1 || regions[0] != "us-east-1" {
 		t.Fatalf("legacy: %s %v %v", mode, regions, err)

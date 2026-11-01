@@ -68,8 +68,8 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 		return report
 	}
 	role, ok := findAsset(req.Assets, report.RoleARN)
-	if !ok || role.AssetType != models.AssetIAMRole {
-		report.ImpactSummary = "The IAM role was not in the selected scan inventory."
+	if !ok || (role.AssetType != models.AssetIAMRole && role.AssetType != models.AssetIAMUser) {
+		report.ImpactSummary = "The IAM role or user was not in the selected scan inventory."
 		report.CoverageNotes = []string{"role_not_in_scan"}
 		return report
 	}
@@ -183,7 +183,7 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 		if cap.Support != iamauth.SupportEvaluated || !cap.PermissionImpact || !categoryAllowed(req.Categories, cap.Category) {
 			continue
 		}
-		targets := targetsFor(cap, targetSet{objects: objects, roles: roles, secrets: secrets, keys: keys, instances: instances, functions: functions, databases: databases, self: selfTargets(req.IncludeSelf, role)})
+		targets := targetsFor(cap, targetSet{objects: objects, roles: roles, secrets: secrets, keys: keys, instances: instances, functions: functions, databases: databases, self: selfTargets(req.IncludeSelf, role), users: usersExcept(req.Assets, role.ARN), groups: assetsOfType(req.Assets, models.AssetIAMGroup)})
 		for _, target := range targets {
 			if len(decisions) >= limit {
 				report.Truncated = true
@@ -537,7 +537,9 @@ func sortAssets(assets []models.AssetNode) {
 	sort.Slice(assets, func(i, j int) bool { return assets[i].ARN < assets[j].ARN })
 }
 
-type targetSet struct{ objects, roles, secrets, keys, instances, functions, databases, self []models.AssetNode }
+type targetSet struct {
+	objects, roles, secrets, keys, instances, functions, databases, self, users, groups []models.AssetNode
+}
 
 func targetsFor(cap iamauth.Capability, t targetSet) []models.AssetNode {
 	objects, roles := t.objects, t.roles
@@ -557,9 +559,16 @@ func targetsFor(cap iamauth.Capability, t targetSet) []models.AssetNode {
 	case iamauth.EvalAssumeRole:
 		return roles
 	case iamauth.EvalIdentityOnly:
-		// A role that can grant itself a policy escalates without assuming anything.
-		if cap.AttackTechnique == "GRANT_ROLE_POLICY" {
-			return append(append([]models.AssetNode{}, t.self...), roles...)
+		switch cap.AttackTechnique {
+		case "GRANT_ROLE_POLICY":
+			// A role that can grant itself a policy escalates without assuming anything.
+			return append(selfOfType(t.self, models.AssetIAMRole), roles...)
+		case "GRANT_USER_POLICY":
+			return append(selfOfType(t.self, models.AssetIAMUser), t.users...)
+		case "TAKEOVER_USER":
+			return t.users
+		case "GRANT_GROUP_POLICY", "ADD_USER_TO_GROUP":
+			return t.groups
 		}
 		return roles
 	default:
@@ -729,18 +738,72 @@ func identitySlot(role models.AssetNode, assets []models.AssetNode, rels []model
 	var docs []iamauth.PolicyDocument
 	var notes []string
 	incomplete := false
-	status, _ := permStringProp(role.Properties, "policy_retrieval_status")
+	collect := func(owner models.AssetNode) {
+		d, n, inc := ownPolicyDocs(owner, assets, rels)
+		docs, notes, incomplete = append(docs, d...), append(notes, n...), incomplete || inc
+	}
+	collect(role)
+	if role.AssetType == models.AssetIAMUser {
+		// A user's identity policies are its own plus those of every group it belongs to.
+		// An explicit Deny in any of them wins over an Allow in another.
+		if complete, ok := role.Properties["group_membership_complete"].(bool); ok && !complete {
+			incomplete = true
+			notes = append(notes, "a group of this user was not collected")
+		}
+		for _, group := range groupsOf(role, assets, rels) {
+			collect(group)
+		}
+	}
+	if incomplete {
+		return iamauth.PolicySlot{State: iamauth.EvidenceMissing}, notes
+	}
+	if len(docs) == 0 {
+		status, _ := permStringProp(role.Properties, "policy_retrieval_status")
+		evidence, _ := permStringProp(role.Properties, "policy_inventory_evidence")
+		if status == models.PolicyRetrievalOK && evidence != "" {
+			return iamauth.SlotFromStatus("confirmed_absent", evidence, nil), []string{evidence}
+		}
+		return iamauth.PolicySlot{State: iamauth.EvidenceMissing}, []string{"iam policy documents were not collected for this principal"}
+	}
+	return iamauth.PolicySlot{State: iamauth.EvidencePresent, Documents: docs}, notes
+}
+
+// groupsOf returns the collected groups a user belongs to.
+func groupsOf(user models.AssetNode, assets []models.AssetNode, rels []models.Relationship) []models.AssetNode {
+	var out []models.AssetNode
+	seen := map[string]struct{}{}
+	for _, rel := range rels {
+		if rel.RelType != models.RelMemberOf || rel.SourceARN != user.ARN {
+			continue
+		}
+		if _, dup := seen[rel.TargetARN]; dup {
+			continue
+		}
+		seen[rel.TargetARN] = struct{}{}
+		if group, ok := findAsset(assets, rel.TargetARN); ok && group.AssetType == models.AssetIAMGroup {
+			out = append(out, group)
+		}
+	}
+	return out
+}
+
+// ownPolicyDocs returns the inline and attached managed documents of one role, user or group.
+func ownPolicyDocs(owner models.AssetNode, assets []models.AssetNode, rels []models.Relationship) ([]iamauth.PolicyDocument, []string, bool) {
+	var docs []iamauth.PolicyDocument
+	var notes []string
+	incomplete := false
+	status, _ := permStringProp(owner.Properties, "policy_retrieval_status")
 	if status == models.PolicyRetrievalMissing || status == models.PolicyRetrievalMalformed || status == models.PolicyRetrievalPartial {
 		incomplete = true
 		notes = append(notes, "identity policy retrieval is "+status)
 	}
-	for i, raw := range permStringListProp(role.Properties, "inline_policy_documents") {
+	for i, raw := range permStringListProp(owner.Properties, "inline_policy_documents") {
 		docs = append(docs, iamauth.PolicyDocument{
-			ID: fmt.Sprintf("%s#inline-%d", role.ARN, i+1), PolicyType: models.PolicyTypeInline, Raw: raw,
+			ID: fmt.Sprintf("%s#inline-%d", owner.ARN, i+1), PolicyType: models.PolicyTypeInline, Raw: raw,
 		})
 	}
 	for _, rel := range rels {
-		if rel.RelType != models.RelPolicyAttachedTo || rel.SourceARN != role.ARN {
+		if rel.RelType != models.RelPolicyAttachedTo || rel.SourceARN != owner.ARN {
 			continue
 		}
 		policy, ok := findAsset(assets, rel.TargetARN)
@@ -758,17 +821,7 @@ func identitySlot(role models.AssetNode, assets []models.AssetNode, rels []model
 		raw, _ := permStringProp(policy.Properties, "policy_document")
 		docs = append(docs, iamauth.PolicyDocument{ID: policy.ARN, PolicyType: models.PolicyTypeManaged, Raw: raw})
 	}
-	if incomplete {
-		return iamauth.PolicySlot{State: iamauth.EvidenceMissing}, notes
-	}
-	if len(docs) == 0 {
-		evidence, _ := permStringProp(role.Properties, "policy_inventory_evidence")
-		if status == models.PolicyRetrievalOK && evidence != "" {
-			return iamauth.SlotFromStatus("confirmed_absent", evidence, nil), []string{evidence}
-		}
-		return iamauth.PolicySlot{State: iamauth.EvidenceMissing}, []string{"iam policy documents were not collected for this role"}
-	}
-	return iamauth.PolicySlot{State: iamauth.EvidencePresent, Documents: docs}, notes
+	return docs, notes, incomplete
 }
 
 func broadCandidates(role models.AssetNode, assets []models.AssetNode, rels []models.Relationship) []string {
@@ -1080,6 +1133,17 @@ func statementLabels(refs []iamauth.StatementRef) []string {
 	return out
 }
 
+// selfOfType keeps the caller as a target only for techniques that act on its own kind.
+func selfOfType(self []models.AssetNode, t models.AssetType) []models.AssetNode {
+	var out []models.AssetNode
+	for _, n := range self {
+		if n.AssetType == t {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 func selfTargets(include bool, role models.AssetNode) []models.AssetNode {
 	if !include {
 		return nil
@@ -1146,4 +1210,14 @@ func containsString(v any, want string) bool {
 		}
 	}
 	return false
+}
+
+func usersExcept(assets []models.AssetNode, arn string) []models.AssetNode {
+	var out []models.AssetNode
+	for _, a := range assetsOfType(assets, models.AssetIAMUser) {
+		if a.ARN != arn {
+			out = append(out, a)
+		}
+	}
+	return out
 }

@@ -8,6 +8,7 @@ import type { ConfigField, ConfigValue } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
 import { StateChip } from "../components/ui/StatusChip";
+import { Switch } from "../components/ui/Switch";
 
 type Draft = Record<string, ConfigValue>;
 
@@ -153,12 +154,7 @@ function FieldRow({ field: f, value, dirty, error, onChange }: { field: ConfigFi
   const control = (() => {
     switch (f.kind) {
       case "bool":
-        return (
-          <label className="flex items-center gap-2 text-sm">
-            <input id={id} type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
-            {value ? "On" : "Off"}
-          </label>
-        );
+        return <Switch id={id} label={f.label} checked={Boolean(value)} onChange={onChange} />;
       case "int":
       case "float":
         return <input id={id} className="hs-input w-40" type="number" step={f.kind === "int" ? 1 : "any"} min={f.min} max={f.max} value={String(value)} onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))} />;

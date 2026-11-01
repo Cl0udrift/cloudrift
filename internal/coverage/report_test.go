@@ -61,6 +61,19 @@ func TestBuildLiveState(t *testing.T) {
 	if rep.Catalog.Evaluated == 0 || len(rep.Techniques) < 10 || rep.Totals[StatusReady] == 0 {
 		t.Fatalf("derived data missing: %+v", rep.Catalog)
 	}
+	pol := []models.AssetNode{
+		{AssetType: models.AssetIAMRole, Properties: map[string]any{"policy_retrieval_status": models.PolicyRetrievalOK}},
+		{AssetType: models.AssetIAMRole, Properties: map[string]any{}},
+	}
+	if st, _ := policyInventoryState(pol); st != "partial" {
+		t.Fatalf("partial roles: %s", st)
+	}
+	if st, d := policyInventoryState(pol[1:]); st != "no_data" || d == "" {
+		t.Fatalf("no documents: %s %s", st, d)
+	}
+	if st, _ := policyInventoryState(pol[:1]); st != "completed" {
+		t.Fatalf("all documents: %s", st)
+	}
 	if rep.Catalog.NotEvaluated == nil || rep.Catalog.EvaluatedActions == nil {
 		t.Fatal("empty lists must encode as [] not null")
 	}

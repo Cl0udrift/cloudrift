@@ -7,11 +7,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Zero0x00/cloudrift/internal/api/schema"
+	"github.com/Zero0x00/cloudrift/internal/blastradius"
 	"github.com/Zero0x00/cloudrift/internal/ciem"
+	"github.com/Zero0x00/cloudrift/internal/iamauth"
 	"github.com/Zero0x00/cloudrift/internal/models"
 	"github.com/Zero0x00/cloudrift/internal/scans"
 )
@@ -64,6 +67,72 @@ func ListIdentities(outputDir string) http.HandlerFunc {
 			TotalItems: total, TotalPages: totalPages,
 			CoverageNote: "This list is the IAM roles stored in the scan. Accounts that were not scanned are absent. Opening the list does not evaluate authorization.",
 		})
+	}
+}
+
+// ListPrincipals returns the IAM users and groups stored in the scan.
+func ListPrincipals(outputDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		if !ok {
+			return
+		}
+		writeJSON(w, http.StatusOK, schema.PrincipalListResponse{
+			ScanID: scanID, Items: ciem.ListPrincipals(scanID, assets, rels, time.Now()),
+			Note: "Users and groups come from iam:GetAccountAuthorizationDetails. An empty list can also mean that call was denied; check the iam_users_groups collection status.",
+		})
+	}
+}
+
+// GetPrincipalPolicies returns every policy applying to one user or group and where it came from.
+func GetPrincipalPolicies(outputDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		if !ok {
+			return
+		}
+		principal, found := ciem.FindPrincipal(assets, strings.TrimSpace(r.URL.Query().Get("arn")))
+		if !found {
+			writeError(w, http.StatusNotFound, "principal_not_found", "iam user or group was not collected in this scan", nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, ciem.PrincipalPolicies(scanID, principal, ciem.ScanIndex(assets), rels, time.Now()))
+	}
+}
+
+// GetRoleUsage returns who (users and roles) can assume a role and which workloads run as it.
+func GetRoleUsage(outputDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		if !ok {
+			return
+		}
+		role, found := findIAMRole(assets, r.URL.Query().Get("arn"))
+		if !found {
+			writeError(w, http.StatusNotFound, "role_not_found", "iam role was not collected in this scan", nil)
+			return
+		}
+		assumers, evaluated, unknown := blastradius.RoleAssumers(scanID, role, assets, rels, time.Time{})
+		out := schema.RoleUsageResponse{
+			ScanID: scanID, RoleARN: role.ARN, Assumers: assumers, Evaluated: evaluated, Unknown: unknown,
+			Workloads: ciem.WorkloadsForRole(role.ARN, assets, rels),
+			Notes: []string{
+				"Callers are users and roles in this scan, checked against the trust policy and their own policies. Principals in accounts that were not scanned, and federated or service principals, are not listed here.",
+				"This shows what stored policies allow. It does not show who assumed the role. That needs CloudTrail.",
+			},
+		}
+		if out.Workloads == nil {
+			out.Workloads = []schema.WorkloadAttachment{}
+		}
+		for _, a := range assumers {
+			switch a.Status {
+			case iamauth.StatusAllowed:
+				out.Allowed++
+			default:
+				out.Possible++
+			}
+		}
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 

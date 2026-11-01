@@ -29,6 +29,7 @@ func GetCoverage(outputDir, configPath string) http.HandlerFunc {
 				scanID, assets = id, loaded
 			}
 		}
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, coverage.Build(cfg, scanID, assets))
 	}
 }

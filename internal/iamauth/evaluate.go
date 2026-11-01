@@ -90,7 +90,7 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 		decision.MissingEvidence = append(decision.MissingEvidence, ReasonCrossAccountResource)
 		return finish(decision, StatusUnknown, ReasonCrossAccountResource)
 	}
-	if cap.Evaluation == EvalIdentityOnly && !isIAMRoleARN(decision.ResourceARN) {
+	if cap.Evaluation == EvalIdentityOnly && !isIAMIdentityARN(cap.Action, decision.ResourceARN) {
 		return finish(decision, StatusUnknown, ReasonRoleResource)
 	}
 	if cap.Evaluation == EvalAssumeRole && !isIAMRoleARN(decision.ResourceARN) {
@@ -189,7 +189,7 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 	case EvalIdentityOnly, EvalEC2Instance, EvalRDSInstance, EvalIdentityResource:
 		return finishIdentityOnly(decision, identity)
 	case EvalKMSKey:
-		return finishKMS(decision, identity, resource, delegated, grantAllows(req))
+		return finishKMS(decision, identity, resource, delegated, grantAllows(req, false), grantAllows(req, true))
 	default:
 		return finishGetObject(decision, identity, resource, req)
 	}
@@ -199,7 +199,7 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 // is enough in the same account. A key policy that only allows an account root delegates to
 // IAM, so the identity policy must also allow. Across accounts both must allow.
 // https://docs.aws.amazon.com/kms/latest/developerguide/key-policy-default.html
-func finishKMS(decision AuthorizationDecision, identity, direct, delegated groupResult, grant bool) AuthorizationDecision {
+func finishKMS(decision AuthorizationDecision, identity, direct, delegated groupResult, grant, constrainedGrant bool) AuthorizationDecision {
 	if blockedWithoutAllow(identity) || blockedWithoutAllow(direct) || blockedWithoutAllow(delegated) {
 		return finish(decision, StatusUnknown, ReasonUnsupportedCondition)
 	}
@@ -214,7 +214,7 @@ func finishKMS(decision AuthorizationDecision, identity, direct, delegated group
 		decision.SimulatorNote = "local evaluation only; iam:SimulatePrincipalPolicy was not called"
 		return finish(decision, StatusAllowed, ReasonAllowed)
 	}
-	if identity.conditional || direct.conditional || delegated.conditional {
+	if identity.conditional || direct.conditional || delegated.conditional || constrainedGrant {
 		return finish(decision, StatusConditional, ReasonMissingContext)
 	}
 	return finish(decision, StatusUnknown, ReasonNoAllow)
@@ -401,11 +401,12 @@ func isEC2InstanceARN(arn string) bool {
 }
 
 // grantAllows reports whether an unconstrained grant gives the caller kms:Decrypt on the key.
-// Constrained grants (encryption context) and grants naming other principals are ignored,
-// which can only withhold an Allow, never create one.
-func grantAllows(req AuthorizationRequest) bool {
+// With constrained false, grants carrying an encryption-context constraint are skipped; with true
+// only those count, and the caller gets CONDITIONAL because the request's context is unknown.
+// Grants naming other principals are ignored, which can only withhold an Allow.
+func grantAllows(req AuthorizationRequest, constrained bool) bool {
 	for _, g := range req.KMSGrants {
-		if g.GranteePrincipal != req.PrincipalARN || g.Constrained {
+		if g.GranteePrincipal != req.PrincipalARN || g.Constrained != constrained {
 			continue
 		}
 		for _, op := range g.Operations {
@@ -878,6 +879,22 @@ func sameAccount(req AuthorizationRequest) bool {
 		resourceAccount = accountFromARN(req.ResourceARN)
 	}
 	return principalAccount != "" && resourceAccount != "" && principalAccount == resourceAccount
+}
+
+// isIAMIdentityARN checks the resource is the kind of IAM identity the action works on:
+// a group for group actions and AddUserToGroup, a user for user actions, otherwise a role.
+func isIAMIdentityARN(action, arn string) bool {
+	arn = strings.TrimSpace(arn)
+	if !strings.HasPrefix(arn, "arn:") || strings.Contains(arn, "*") {
+		return false
+	}
+	switch strings.ToLower(action) {
+	case "iam:attachgrouppolicy", "iam:putgrouppolicy", "iam:addusertogroup":
+		return strings.Contains(arn, ":group/")
+	case "iam:attachuserpolicy", "iam:putuserpolicy", "iam:createaccesskey", "iam:createloginprofile", "iam:updateloginprofile":
+		return strings.Contains(arn, ":user/")
+	}
+	return isIAMRoleARN(arn)
 }
 
 func isIAMRoleARN(arn string) bool {

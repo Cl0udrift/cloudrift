@@ -30,7 +30,7 @@ management_profile = "defaults"         # AWS profile/credentials used to start 
 # service_last_accessed_granularity = "service"  # or "action"; also service_last_accessed_concurrency, _skip_service_linked, _timeout_seconds (all optional)
 # resource_policies = false          # opt-in: Secrets Manager resource policies and KMS key policies (never secret values); needs secretsmanager:ListSecrets/GetResourcePolicy and kms:ListKeys/DescribeKey/GetKeyPolicy/ListAliases (see docs/audits/resource-policy-collection.md)
 # service_last_accessed = false     # opt-in: IAM access advisor service last-accessed per role; needs iam:GenerateServiceLastAccessedDetails and iam:GetServiceLastAccessedDetails (see docs/audits/service-last-accessed.md)
-# iam_policy_inventory = false       # true collects every IAM role and policy document; external-access findings stay limited to external trust
+# iam_policy_inventory = true        # default true: collects every IAM role and policy document (the base of permission analysis). false keeps the older external-trust-only scan
 
 # [trust]
 # approved_external_accounts = []    # AWS account IDs treated as approved cross-account principals

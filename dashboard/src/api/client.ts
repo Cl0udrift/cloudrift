@@ -2,6 +2,9 @@ import type {
   ConfigResponse,
   ConfigValue,
   CoverageReport,
+  PrincipalListResponse,
+  RoleUsageResponse,
+  PrincipalPoliciesResponse,
   AccountsBreakdownResponse,
   DiffResponse,
   ExternalEntitiesQueryParams,
@@ -94,6 +97,15 @@ export const apiClient = {
   },
   putConfig(values: Record<string, ConfigValue>): Promise<ConfigResponse> {
     return fetchJSON<ConfigResponse>("/config", { method: "PUT", body: JSON.stringify({ values }) });
+  },
+  getRoleUsage(scanId: string, arn: string): Promise<RoleUsageResponse> {
+    return fetchJSON<RoleUsageResponse>(`/scans/${encodeURIComponent(scanId)}/identities/usage${makeQueryString({ arn })}`);
+  },
+  getPrincipals(scanId: string): Promise<PrincipalListResponse> {
+    return fetchJSON<PrincipalListResponse>(`/scans/${encodeURIComponent(scanId)}/principals`);
+  },
+  getPrincipalPolicies(scanId: string, arn: string): Promise<PrincipalPoliciesResponse> {
+    return fetchJSON<PrincipalPoliciesResponse>(`/scans/${encodeURIComponent(scanId)}/principals/policies${makeQueryString({ arn })}`);
   },
   getCoverage(scanId: string | null): Promise<CoverageReport> {
     return fetchJSON<CoverageReport>(`/coverage${makeQueryString({ scan_id: scanId ?? undefined })}`);

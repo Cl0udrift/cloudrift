@@ -27,9 +27,9 @@ type Config struct {
 		HTTPTimeoutSeconds        int    `toml:"http_timeout_seconds"`
 		UserAgent                 string `toml:"user_agent"`
 		// IAMPolicyInventory collects every IAM role and its inline and managed
-		// policy documents. External-access findings still come only from roles
-		// that trust an external principal. Default false preserves the
-		// external-trust collection path.
+		// policy documents. It is the base of permission analysis, so it defaults to
+		// true. External-access findings still come only from roles that trust an
+		// external principal. Set false to keep the older external-trust-only scan.
 		IAMPolicyInventory bool `toml:"iam_policy_inventory"`
 		// ResourcePolicies collects Secrets Manager secret metadata and resource policies and
 		// KMS customer-managed key policies, so secretsmanager:GetSecretValue and kms:Decrypt can
@@ -113,6 +113,7 @@ func Default() *Config {
 	c.Scan.RoleAssumptionConcurrency = 10
 	c.Scan.HTTPTimeoutSeconds = 10
 	c.Scan.UserAgent = "github.com/Zero0x00/cloudrift/0.1"
+	c.Scan.IAMPolicyInventory = true
 	c.Cost.Currency = "USD"
 	c.Cost.RiskMultiplierReclaimable = 5.0
 	c.Cost.RiskMultiplierDangling = 3.0

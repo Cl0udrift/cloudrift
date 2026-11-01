@@ -37,6 +37,9 @@ Resources:
                   - organizations:ListTagsForResource
                   - organizations:DescribeOrganizationalUnit
                   - iam:ListRoles
+                  - iam:GetAccountAuthorizationDetails
+                  - iam:GenerateCredentialReport
+                  - iam:GetCredentialReport
                   - iam:ListAttachedRolePolicies
                   - iam:ListRolePolicies
                   - iam:GetRolePolicy

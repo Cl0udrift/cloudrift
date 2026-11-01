@@ -1,3 +1,5 @@
+import { UserMatrix } from "../components/identities/UserMatrix";
+import { RoleUsage } from "../components/identities/RoleUsage";
 import { AccountPermissionMatrix, type MatrixSelection } from "../components/identities/AccountPermissionMatrix";
 import { AttackStatusChip, AuthorizationChip, EvidenceChip, StateChip, SectionHeader } from "../components/ui/StatusChip";
 import { lastUsedLabel } from "../lib/lastUsed";
@@ -11,6 +13,7 @@ import { formatQueryError } from "../api/httpError";
 import type { RoleEntitlementProfile, WorkloadListResponse } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
 import { ScanRequired } from "../components/ScanRequired";
+import { PolicyInventoryNotice } from "../components/identities/PolicyInventoryNotice";
 import { StatePanel } from "../components/StatePanel";
 import { useScanContext } from "../hooks/useScanContext";
 
@@ -89,11 +92,13 @@ export function IdentitiesPage() {
         description="IAM roles stored in this scan."
         details="A trust relationship is configuration, not proof a caller can assume the role. Hypothetical impact runs only after you select a role."
       />
+      <PolicyInventoryNotice scanId={selectedScanId} />
       {!selectedScanId ? (
         <ScanRequired />
       ) : (
         <div className="space-y-6">
         <AccountPermissionMatrix scanId={selectedScanId} onSelect={selectFromMatrix} idleDays={idleDays} onIdleDays={(d) => { const n = new URLSearchParams(params); if (d === IDLE_DAYS) n.delete("idle_days"); else n.set("idle_days", String(d)); n.delete("page"); setParams(n); }} />
+        <UserMatrix scanId={selectedScanId} />
         {category || unknownOnly || idleOnly ? (
           <p className="cr-helper flex flex-wrap items-center gap-2" role="status">
             Showing roles with {idleOnly ? `no recent use reported by IAM (${idleDays} days or more, or none in the tracking window)` : unknownOnly ? "unknown policy evidence" : `declared ${category}`}{accountID ? ` in account ${accountID}` : ""}.
@@ -265,6 +270,7 @@ function RoleDetail({
         <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{profile.assumption}</p>
         <p className="mt-1 text-xs text-slate-500">{(profile.classifications ?? []).join(", ")} · collection {profile.collection_status}</p>
       </header>
+      <RoleUsage scanId={scanId} roleArn={profile.role_arn} />
       <section aria-label="Role activity">
         <SectionHeader title="Role activity" hint="Reported by IAM for the whole role, not per permission. It does not show which individual permissions are used." />
         <p className="mt-1 text-sm">

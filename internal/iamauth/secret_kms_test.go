@@ -198,8 +198,8 @@ func TestKMSGrants(t *testing.T) {
 		t.Fatalf("no grant yet: %+v", d)
 	}
 	req.KMSGrants = []KMSGrant{{GranteePrincipal: roleARN, Operations: []string{"Decrypt"}, Constrained: true}}
-	if d := Evaluate(req); d.Status == StatusAllowed {
-		t.Fatalf("a constrained grant must not validate access: %+v", d)
+	if d := Evaluate(req); d.Status != StatusConditional {
+		t.Fatalf("a constrained grant depends on the encryption context: %+v", d)
 	}
 	req.KMSGrants = []KMSGrant{{GranteePrincipal: "arn:aws:iam::111111111111:role/Other", Operations: []string{"Decrypt"}}}
 	if d := Evaluate(req); d.Status == StatusAllowed {

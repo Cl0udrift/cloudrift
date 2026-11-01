@@ -79,7 +79,7 @@ func Schema() []Field {
 				return nil
 			}},
 
-		{Key: "scan.iam_policy_inventory", Group: "Collection", Label: "IAM policy inventory", Description: "Collect every IAM role and its policy documents. Needed for permission analysis.", Kind: "bool", Apply: "next_scan"},
+		{Key: "scan.iam_policy_inventory", Group: "Collection", Label: "IAM role policies (core CIEM data)", Description: "Collect every IAM role and its policy documents. The permission matrix, the evaluator and the attack search depend on it. Turn off only to keep the older scan that reads just roles trusting an external account. A scan started with the CIEM option collects it regardless.", Kind: "bool", Apply: "next_scan"},
 		{Key: "scan.resource_policies", Group: "Collection", Label: "Resource policies (opt-in)", Description: "Collect Secrets Manager and KMS resource policies, Lambda policies and RDS instances. Never reads secret values. Needs extra read permissions.", Kind: "bool", Apply: "next_scan"},
 		{Key: "scan.service_last_accessed", Group: "Collection", Label: "Service last-accessed (opt-in)", Description: "Collect IAM access advisor data per role. Needs two extra IAM read actions.", Kind: "bool", Apply: "next_scan"},
 		{Key: "scan.service_last_accessed_granularity", Group: "Collection", Label: "Last-accessed granularity", Description: "service, or action for the few services AWS tracks at action level.", Kind: "enum", Enum: []string{"", "service", "action"}, Apply: "next_scan"},

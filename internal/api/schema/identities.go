@@ -195,3 +195,118 @@ type TrackedActionEntry struct {
 	ActionName       string `json:"action_name"`
 	LastAccessedTime string `json:"last_accessed_time,omitempty"`
 }
+
+// PrincipalListItem is one IAM user or group stored in a scan.
+type PrincipalListItem struct {
+	ARN             string   `json:"arn"`
+	Name            string   `json:"name"`
+	Kind            string   `json:"kind"`
+	AccountID       string   `json:"account_id"`
+	Groups          []string `json:"groups"`
+	PolicyCount     int      `json:"policy_count"`
+	HasDeny         bool     `json:"has_deny"`
+	BoundaryStatus  string   `json:"boundary_status,omitempty"`
+	RetrievalStatus string   `json:"retrieval_status"`
+	// BroadCandidates are the broad permission categories declared by the principal's own
+	// and its groups' policies. Declared, not evaluated.
+	BroadCandidates      []string `json:"broad_candidates"`
+	CredentialsCollected bool     `json:"credentials_collected"`
+	Console              bool     `json:"console_enabled"`
+	MFA                  bool     `json:"mfa_active"`
+	ActiveKeys           int      `json:"active_keys"`
+	CredentialFindings   int      `json:"credential_findings"`
+}
+
+// PrincipalListResponse lists the users and groups of a scan.
+type PrincipalListResponse struct {
+	ScanID string              `json:"scan_id"`
+	Items  []PrincipalListItem `json:"items"`
+	Note   string              `json:"note"`
+}
+
+// PolicyStatementSummary is one statement of a policy, shortened for display.
+type PolicyStatementSummary struct {
+	Effect       string   `json:"effect"`
+	Actions      []string `json:"actions"`
+	NotAction    bool     `json:"not_action,omitempty"`
+	Resources    []string `json:"resources"`
+	HasCondition bool     `json:"has_condition"`
+}
+
+// PolicySource is one policy that applies to a principal and where it came from.
+// Via is "direct" for the principal's own policy or "group" for one inherited from a group.
+type PolicySource struct {
+	Via             string                   `json:"via"`
+	GroupARN        string                   `json:"group_arn,omitempty"`
+	GroupName       string                   `json:"group_name,omitempty"`
+	PolicyName      string                   `json:"policy_name"`
+	PolicyARN       string                   `json:"policy_arn"`
+	PolicyType      string                   `json:"policy_type"`
+	RetrievalStatus string                   `json:"retrieval_status"`
+	Allows          int                      `json:"allows"`
+	Denies          int                      `json:"denies"`
+	Statements      []PolicyStatementSummary `json:"statements"`
+}
+
+// PrincipalPoliciesResponse answers "which policies apply to this user or group".
+// An explicit Deny in any source overrides an Allow in any other.
+type PrincipalPoliciesResponse struct {
+	ScanID   string         `json:"scan_id"`
+	ARN      string         `json:"arn"`
+	Name     string         `json:"name"`
+	Kind     string         `json:"kind"`
+	Groups   []string       `json:"groups"`
+	Sources  []PolicySource `json:"sources"`
+	HasDeny  bool           `json:"has_deny"`
+	Boundary string         `json:"boundary_status,omitempty"`
+	Complete bool           `json:"complete"`
+	Notes    []string       `json:"notes"`
+	// Credentials is set for users and only when the credential report was collected.
+	Credentials *CredentialSummary `json:"credentials,omitempty"`
+	Broad       []string           `json:"broad_candidates"`
+}
+
+// KeySummary is one access key slot from the credential report.
+type KeySummary struct {
+	Slot        string `json:"slot"`
+	Active      bool   `json:"active"`
+	LastRotated string `json:"last_rotated,omitempty"`
+	LastUsed    string `json:"last_used,omitempty"`
+	LastService string `json:"last_service,omitempty"`
+	AgeDays     *int   `json:"age_days,omitempty"`
+}
+
+// CredentialSummary is console access, MFA and access keys for one user.
+type CredentialSummary struct {
+	Console          bool         `json:"console_enabled"`
+	MFA              bool         `json:"mfa_active"`
+	PasswordLastUsed string       `json:"password_last_used,omitempty"`
+	Keys             []KeySummary `json:"keys"`
+	Findings         []string     `json:"findings"`
+}
+
+// RoleAssumer is a collected user or role evaluated against one role's trust policy and
+// its own identity policies for sts:AssumeRole. It is a hypothesis about access, not an
+// observed AssumeRole call.
+type RoleAssumer struct {
+	ARN       string `json:"arn"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	AccountID string `json:"account_id"`
+	Status    string `json:"status"`
+	Reason    string `json:"reason"`
+}
+
+// RoleUsageResponse answers "who and what can use this role".
+type RoleUsageResponse struct {
+	ScanID    string               `json:"scan_id"`
+	RoleARN   string               `json:"role_arn"`
+	Assumers  []RoleAssumer        `json:"assumers"`
+	Workloads []WorkloadAttachment `json:"workloads"`
+	Evaluated int                  `json:"evaluated"`
+	Allowed   int                  `json:"allowed"`
+	Possible  int                  `json:"possible"`
+	// Unknown counts callers that could not be evaluated because policy documents were missing.
+	Unknown int      `json:"unknown"`
+	Notes   []string `json:"notes"`
+}

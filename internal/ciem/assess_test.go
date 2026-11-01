@@ -29,13 +29,14 @@ func TestAssess_OrphanedFindingIsNotCIEM(t *testing.T) {
 	}
 }
 
-func TestEnableCIEMDoesNotChangeDefault(t *testing.T) {
-	if config.Default().Scan.IAMPolicyInventory {
-		t.Fatal("legacy default enabled policy inventory")
+func TestPolicyInventoryDefaultsOnAndCIEMForcesIt(t *testing.T) {
+	if !config.Default().Scan.IAMPolicyInventory {
+		t.Fatal("policy inventory is the base of permission analysis and must default on")
 	}
 	cfg := config.Default()
+	cfg.Scan.IAMPolicyInventory = false
 	config.EnableCIEM(cfg)
-	if !cfg.Scan.IAMPolicyInventory || config.Default().Scan.IAMPolicyInventory {
-		t.Fatal("CIEM profile did not stay opt-in")
+	if !cfg.Scan.IAMPolicyInventory {
+		t.Fatal("the CIEM profile did not turn policy inventory back on")
 	}
 }
