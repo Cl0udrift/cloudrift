@@ -152,6 +152,10 @@ func AttackTechniques() []Technique {
 		{techniqueGrantPolicy, "escalation", "iam:AttachRolePolicy or iam:PutRolePolicy on the session's own role or a reachable role"},
 		{techniquePolicyVer, "escalation", "iam:CreatePolicyVersion on a customer managed policy attached to the session's role or a reachable role"},
 		{"EDIT_LAMBDA_CODE", "escalation", "lambda:UpdateFunctionCode plus invoke on a function whose execution role is another role"},
+		{techniqueGrantUser, "escalation", "iam:AttachUserPolicy or iam:PutUserPolicy on the session's own user or a reachable user"},
+		{techniqueGrantGroup, "escalation", "iam:AttachGroupPolicy or iam:PutGroupPolicy on a group the user belongs to"},
+		{techniqueJoinGroup, "escalation", "iam:AddUserToGroup into a group that holds administrative policies"},
+		{techniqueTakeover, "escalation", "iam:CreateAccessKey, iam:CreateLoginProfile or iam:UpdateLoginProfile on another user"},
 		{techniqueReadObject, "impact", "s3:GetObject on a collected object"},
 		{techniqueReadSecret, "impact", "secretsmanager:GetSecretValue including the KMS decrypt leg"},
 	}
