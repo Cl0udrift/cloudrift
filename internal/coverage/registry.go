@@ -131,8 +131,8 @@ func Modules() []Module {
 		{
 			ID: "entitlements", Name: "Declared permissions and exposure findings", Area: AreaEvaluate, Status: StatusReady,
 			Summary:     "Reads policy documents for broad or sensitive grants and raises findings.",
-			Covers:      []string{"Administrative wildcards", "IAM policy modification", "Condition and resource breadth"},
-			Limitations: []string{"A declared grant is not proof of effective access", "Unsupported statements are listed, not guessed"},
+			Covers:      []string{"Administrative wildcards", "IAM policy modification", "Condition and resource breadth", "User console access without MFA and stale access keys", "Administrative access held by a user, directly or through a group", "A weak user credential that can assume an administrative role", "Workloads that run as an administrative role", "VPC endpoints with an open policy"},
+			Limitations: []string{"A declared grant is not proof of effective access", "Unsupported statements are listed, not guessed", "A user whose credential report was not collected raises no credential finding", "The weak-credential finding rests on stored policies, and is High instead of Critical when SCPs and RCPs were not collected"},
 			Page:        "/findings", Docs: "docs/audits/phase-4f-final-entitlement-hardening.md",
 		},
 		{

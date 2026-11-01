@@ -23,7 +23,12 @@ A validated result is modeled capability, never evidence that anyone did it.
 | PassExistingRoleToNewCodeStarProject, CodeStar* | CodeStar is closed to new customers | Not modeled |
 | UpdateExistingGlueDevEndpoint | Glue endpoints are not collected | Not modeled |
 | SetExistingDefaultPolicyVersion | policy version documents are not collected | Not modeled |
-| AddUserToGroup, Attach/PutGroupPolicy, Attach/PutUserPolicy, CreateAccessKey, CreateLoginProfile, UpdateLoginProfile | users and groups are not collected; the search starts from role sessions | Not modeled |
+| AttachUserPolicy, PutUserPolicy | `GRANT_USER_POLICY`; escalation on the caller itself, or on another user the caller can reach | Modeled |
+| AttachGroupPolicy, PutGroupPolicy | `GRANT_GROUP_POLICY`; escalation only when the caller is a member of that group | Modeled |
+| AddUserToGroup | `ADD_USER_TO_GROUP`; escalation only when the group has administrative policies | Modeled |
+| CreateAccessKey, CreateLoginProfile, UpdateLoginProfile | `TAKEOVER_USER` on another user, which then becomes a reachable identity; a key a user creates for itself is not an escalation | Modeled |
+
+The search can now start from a user as well as a role session. Users and groups come from the IAM user and group collector; a group that was not collected makes the decision UNKNOWN, never allowed.
 
 ## How a chain is decided
 

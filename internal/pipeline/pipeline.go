@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Zero0x00/cloudrift/internal/ciem"
 	"github.com/Zero0x00/cloudrift/internal/collectors"
 	"github.com/Zero0x00/cloudrift/internal/config"
 	"github.com/Zero0x00/cloudrift/internal/models"
@@ -150,9 +151,11 @@ func Run(ctx context.Context, cfg *config.Config, outputDir, toolVersion string,
 		activityIdx := collectors.IndexActivityByRoleARN(res.Activity)
 		findings = append(findings, scorers.ScoreTrust(res.Assets, res.Rels, activityIdx, cfg)...)
 		findings = append(findings, scorers.ScoreResourceExposure(res.Assets, res.Rels, cfg)...)
+		findings = append(findings, scorers.ScoreVPCEndpoints(res.Assets)...)
 		if cfg.Scan.IAMPolicyInventory {
 			progress("scoring", "recording broad IAM entitlement candidates")
 			findings = append(findings, scorers.ScoreEntitlements(res.Assets, res.Rels)...)
+			findings = append(findings, ciem.ScoreIdentityHygiene(res.Assets, res.Rels, time.Now().UTC())...)
 		}
 	}
 

@@ -40,7 +40,7 @@ const SEVERITY_OPTIONS = ["", "critical", "high", "medium", "low"] as const;
 // Preset filters over existing API filters. Not stored per user; each is a plain URL state.
 const SAVED_VIEWS: { label: string; hint: string; filter: { module?: string; claimability?: string; adminLike?: boolean; trustStale?: boolean } }[] = [
   { label: "All findings", hint: "No module or flag filter", filter: {} },
-  { label: "Declared IAM exposure", hint: "Declared permissions, not evaluated access", filter: { module: "iam_entitlement" } },
+  { label: "IAM identity risk", hint: "Declared permissions, user credentials and workload roles", filter: { module: "iam_entitlement" } },
   { label: "External access", hint: "Trust and resource policies naming external principals", filter: { module: "external_access" } },
   { label: "Admin-like trust", hint: "Trusted roles with admin-like declared permissions", filter: { adminLike: true } },
   { label: "Stale trust", hint: "Trust with no recent observed activity", filter: { trustStale: true } },

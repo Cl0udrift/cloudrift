@@ -2,6 +2,7 @@ import { AttackStatusChip, AuthorizationChip, StateChip } from "../ui/StatusChip
 import { CopyIdentifier } from "../ui/CopyIdentifier";
 import { SeverityBadge } from "../SeverityBadge";
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { formatQueryError } from "../../api/httpError";
 import type { FindingDetailItem } from "../../api/types";
 import { BlastRadiusSection } from "../blast/BlastRadiusSection";
@@ -133,6 +134,21 @@ function declaredExposure(evidence?: Record<string, unknown>) {
   return kind === "DECLARED_UNCONDITIONAL_EXPOSURE" || kind === "DECLARED_CONDITIONAL_EXPOSURE" || kind === "DECLARED_ENTITLEMENT_EXPOSURE";
 }
 
+const IDENTITY_LABELS: Record<string, string> = {
+  user_console_without_mfa: "Console access without MFA",
+  user_access_key_hygiene: "Access key hygiene",
+  user_administrative_access: "Administrative access held by a user",
+  weak_credential_reaches_administrative_role: "Weak credential reaches an administrative role",
+  workload_runs_as_administrative_role: "Workload runs as an administrative role"
+};
+
+function identityEvidenceRows(ev: Record<string, unknown>): [string, string][] {
+  const skip = new Set(["issue_category", "assessment_version", "principal_arn", "keys"]);
+  return Object.entries(ev)
+    .filter(([k]) => !skip.has(k))
+    .map(([k, v]) => [k.replace(/_/g, " "), Array.isArray(v) ? v.map(String).join(", ") : typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)]);
+}
+
 export function FindingDetailPanelContent({
   item,
   scanId,
@@ -145,6 +161,7 @@ export function FindingDetailPanelContent({
 }) {
   const ev = item.evidence ?? {};
   const declared = declaredExposure(item.evidence);
+  const identity = ev.assessment_version === "ciem-identity.1";
   const verification = String(ev.version_verification || "");
   const list = (v: unknown) => (Array.isArray(v) ? v.join(", ") : "");
   return (
@@ -174,7 +191,28 @@ export function FindingDetailPanelContent({
           <p className="cr-helper">Read from collected account metadata. Cloudrift does not track ownership or assignment.</p>
         </Section>
       ) : null}
-      {declared ? (
+      {identity ? (
+        <>
+          <Section title="Identity finding">
+            <p>{IDENTITY_LABELS[String(ev.issue_category)] ?? String(ev.issue_category)}</p>
+            <CopyIdentifier value={String(ev.principal_arn || item.affected_arn || "")} />
+            <p className="cr-helper">
+              {String(ev.principal_arn || "").includes(":user/") ? (
+                <Link className="underline" to={`/principals${scanId ? `?scan_id=${encodeURIComponent(scanId)}` : ""}`}>Open Users &amp; Groups</Link>
+              ) : (
+                <Link className="underline" to={`/identities${scanId ? `?scan_id=${encodeURIComponent(scanId)}` : ""}`}>Open Identities</Link>
+              )}
+            </p>
+          </Section>
+          <Section title="What this rests on">
+            <dl className="grid grid-cols-[10rem_1fr] gap-x-3 gap-y-1 text-xs">
+              {identityEvidenceRows(ev).map(([k, v]) => (
+                <div key={k} className="contents"><dt className="cr-kpi-label">{k}</dt><dd className="break-all">{v}</dd></div>
+              ))}
+            </dl>
+          </Section>
+        </>
+      ) : declared ? (
         <>
           <Section title="Security interpretation">
             <p>A collected Allow statement matches a sensitive pattern. Effective authorization was not evaluated, and this is not a validated attack path.</p>

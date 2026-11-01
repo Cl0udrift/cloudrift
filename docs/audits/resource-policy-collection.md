@@ -17,6 +17,7 @@ Per scanned account, on the audit role. The IAM policy file (`iam/stackset-templ
 | `kms:ListAliases` | resolve `alias/name` on a secret to a key | `*` |
 | `lambda:GetPolicy` | Lambda function resource policy (`ResourceNotFoundException` = confirmed absence) | `arn:aws:lambda:*:*:function:*` |
 | `rds:DescribeDBInstances` | RDS DB instance inventory (no resource policy exists) | `*` |
+| `ec2:DescribeVpcEndpoints` | VPC endpoint policy documents (a failed call is a collection status, not an endpoint) | `*` |
 | `kms:ListGrants` | key grants (a denied call is recorded as `missing`; grants only ever add access) | `arn:aws:kms:*:*:key/*` |
 
 If any call is denied, that item is recorded as `missing`, never as "no policy", and decisions that depend on it stay UNKNOWN.
@@ -25,7 +26,8 @@ Also needed: the existing `ec2:DescribeRegions` for Region discovery (already us
 ## What is collected
 
 - `secret` assets: `secret_policy_status|evidence|document`, `secret_kms_mode` (`aws_managed`, `customer_managed`, `unknown`), `secret_kms_key_arn`.
-- `kms_key` assets (customer-managed only; AWS-managed keys are skipped): `key_state`, `key_policy_status|evidence|document`.
+- `kms_key` assets (customer-managed only; AWS-managed keys are skipped): `key_state`, `key_policy_status|evidence|document`, `key_grants` (grantee, operations, and the encryption-context constraint when present).
+- `vpc_endpoint` assets: `service_name`, `endpoint_type`, `vpc_id`, `endpoint_policy`, `endpoint_policy_status` (`collected`, or `not_returned` when the API gave no document, which is not read as full access).
 - A secret whose alias or key cannot be resolved gets mode `unknown`. It is never treated as `aws_managed`.
 
 ## Evaluator changes (`iam-authz-4.5.0`)
@@ -35,7 +37,7 @@ Also needed: the existing `ec2:DescribeRegions` for Region discovery (already us
   - `customer_managed`: a full `kms:Decrypt` evaluation by the same caller on the key, so the boundary, SCPs and RCPs must also allow `kms:Decrypt`. `kms:ViaService` and `kms:CallerAccount` are supplied from the call.
   - key not collected or request without key evidence: UNKNOWN `missing_kms_key_policy`.
 - `kms:Decrypt` is evaluated on its own. Key-policy semantics: a statement that names the principal (or `*`) grants directly. A statement that names only an account root delegates to IAM, so the identity policy must also allow. Cross-account needs both. A key policy can never be "absent".
-- An unconstrained grant that names the caller allows `kms:Decrypt` without the key or identity policy (a Deny still wins; boundaries and SCPs are still required). Grants with constraints are ignored, which can only withhold an Allow.
+- An unconstrained grant that names the caller allows `kms:Decrypt` without the key or identity policy (a Deny still wins; boundaries and SCPs are still required). A grant with an encryption-context constraint cannot be resolved because the request context is unknown, so when nothing else allows the call the decision is CONDITIONAL, never ALLOWED.
 - `ec2:StopInstances` and `ec2:TerminateInstances` are evaluated on collected, non-terminated instances: identity policy, boundary, session policy and SCP. Instances have no resource policy, so a cross-account caller stays UNKNOWN. `ec2:ResourceTag/*` conditions are Conditional unless tags are supplied.
 - `lambda:UpdateFunctionCode` is evaluated: identity Allow or function-policy Allow in the same account, both across accounts, a function-policy Deny wins, and an uncollected function policy keeps the decision UNKNOWN.
 - `rds:DeleteDBInstance` is evaluated on collected DB instances like EC2: identity policy, boundary, session policy, SCP; cross-account stays UNKNOWN.
@@ -44,7 +46,7 @@ Also needed: the existing `ec2:DescribeRegions` for Region discovery (already us
 
 ## Not evaluated
 
-Constrained KMS grants, `kms:EncryptionContext` conditions unless supplied as request context, VPC endpoint policies, secret replicas in other Regions, key state other than Enabled (treated as missing evidence), EC2 instance state and termination protection. Lambda code signing and function state, RDS deletion protection and instance status.
+`kms:EncryptionContext` conditions unless supplied as request context (a constrained grant gives CONDITIONAL), VPC endpoint policies (collected and shown, but not applied: whether a request travels through an endpoint cannot be seen), secret replicas in other Regions, key state other than Enabled (treated as missing evidence), EC2 instance state and termination protection. Lambda code signing and function state, RDS deletion protection and instance status.
 
 ## Verification
 

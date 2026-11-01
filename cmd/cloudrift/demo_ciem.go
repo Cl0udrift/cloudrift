@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/Zero0x00/cloudrift/internal/ciem"
 	"github.com/Zero0x00/cloudrift/internal/collectors"
 	"github.com/Zero0x00/cloudrift/internal/config"
 	"github.com/Zero0x00/cloudrift/internal/models"
@@ -346,6 +348,7 @@ func attachCIEMFindings(scanPath, scenario string) error {
 	findings = append(findings, scorers.ScoreResourceExposure(assets, rels, config.Default())...)
 	if strings.HasPrefix(scenario, "id-") || strings.HasPrefix(scenario, "wl-") || strings.HasPrefix(scenario, "ecs-") || strings.HasPrefix(scenario, "eks-") || strings.HasPrefix(scenario, "irsa-") || strings.HasPrefix(scenario, "ct-") || scenario == "share-ecs-lambda" {
 		findings = append(findings, scorers.ScoreEntitlements(assets, rels)...)
+		findings = append(findings, ciem.ScoreIdentityHygiene(assets, rels, time.Now().UTC())...)
 	}
 	for i := range findings {
 		findings[i].ScanID = scanID

@@ -1,11 +1,12 @@
 # Cloudrift
 
-Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge assets (DNS, S3 websites, CloudFront) and risky cross-account IAM trust relationships. It scans your AWS accounts - org-wide via a shared audit role, or a single account directly with your own credentials - writes findings as local JSON (no database required), and provides evidence-backed severity scoring.
+Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge assets (DNS, S3 websites, CloudFront), risky cross-account IAM trust relationships, and over-privileged identities. It combines edge discovery with read-only cloud infrastructure entitlement management (CIEM): who and what can do what, how they could escalate, and how much of that Cloudrift could actually see. It scans your AWS accounts - org-wide via a shared audit role, or a single account directly with your own credentials - writes findings as local JSON (no database required), and provides evidence-backed severity scoring.
 
 **Key points:**
 - Calls AWS APIs to inventory edge, IAM-trust, and S3 resource-policy exposure across your org
 - Writes findings to local JSON per scan - read via dashboard, CLI reports, or your own tooling
-- Dashboard provides interactive exploration and a scan control center
+- Dashboard provides interactive exploration and a scan control center, plus Users & Groups, per-role usage, an attack and escalation explorer, and a live Coverage page
+- Read-only: no policy is changed and no secret value is read
 - `cloudrift demo generate` populates the UI with sample data (no AWS needed)
 - Neo4j is optional for advanced graph features (blast-radius, vector search, `cloudrift query`)
 
@@ -88,6 +89,11 @@ cloudrift version
 - **Orphaned edge:** DNS hostnames that resolve but point to deleted/misconfigured S3 buckets, CloudFront origins, or ELBs - with a verdict (reclaimable, dangling, etc.)
 - **External trust:** IAM roles trusting external AWS accounts or principals, scored by last-used date, admin privileges, and risk profile
 - **Resource-policy exposure:** S3 bucket policies granting cross-account or public access - exposure that IAM role-trust scanning misses
+- **Over-privileged identities (CIEM):** IAM roles **and users** with broad or sensitive permissions, with the policies behind each one - direct, through a group, or limited by a boundary - and an explicit Deny beating an Allow. Missing evidence shows as UNKNOWN, never as allowed
+- **Escalation paths:** from a role session or a user, finds role hops, policy grants, trust rewrites, PassRole chains, group joins and user takeovers, and the S3 objects and secrets reachable at the end
+- **Who and what uses a role:** each role lists the workloads that run as it and the users and roles that can assume it
+- **Credential hygiene:** console access without MFA, and access keys that are old or unused, from the IAM credential report
+- **Honest coverage:** the Coverage page shows, live, what each part collected for the selected scan and what is not covered
 - **Visibility:** Self-hosted dashboard and CLI reports over the same HTTP server - no cloud dependency
 
 ---
@@ -264,6 +270,10 @@ GET  /api/scans/{id}/summary
 GET  /api/scans/{id}/findings
 GET  /api/scans/{id}/external-entities
 GET  /api/scans/{id}/accounts
+GET  /api/scans/{id}/principals
+GET  /api/scans/{id}/principals/policies
+GET  /api/scans/{id}/identities/usage
+GET  /api/coverage
 GET  /api/diff?old=<scan>&new=<scan>
 
 POST /api/runtime/validate-profile

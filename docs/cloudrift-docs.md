@@ -1,6 +1,6 @@
 # Cloudrift — Documentation
 
-Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge assets (DNS, S3 websites, CloudFront) and risky cross-account IAM trust relationships. It scans your AWS organization, writes findings as local JSON (no database required), and provides evidence-backed severity scoring. This document consolidates the project's overview, setup, architecture, command reference, configuration, security coverage, IAM deployment, technical/API reference, and contribution guidelines into a single source.
+Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge assets (DNS, S3 websites, CloudFront), risky cross-account IAM trust relationships, and over-privileged identities. It combines edge discovery with read-only cloud infrastructure entitlement management (CIEM): who and what can do what, how they could escalate, and how much of that Cloudrift could actually see. It scans your AWS organization, writes findings as local JSON (no database required), and provides evidence-backed severity scoring. This document consolidates the project's overview, setup, architecture, command reference, configuration, security coverage, IAM deployment, technical/API reference, and contribution guidelines into a single source.
 
 <!-- audience-map
 start-here: operator, security, developer
@@ -32,12 +32,14 @@ contributing: developer
 
 New to Cloudrift? Read this first, then jump to the section for your role. Use the **audience switcher** at the top of this page (Operator / Security reviewer / Developer) to filter the docs to what's relevant to you.
 
-**What it is.** Cloudrift calls AWS APIs to inventory your organization's edge assets (DNS, S3 websites, CloudFront), IAM trust relationships, and S3 bucket policies — then writes the findings to JSON folders on disk and serves them through an embedded web dashboard. `cloudrift demo generate` populates the UI with sample data so you can explore without AWS credentials (it's training data, not a substitute for a real scan).
+**What it is.** Cloudrift calls AWS APIs to inventory your organization's edge assets (DNS, S3 websites, CloudFront), IAM trust relationships, and S3 bucket policies — and, with policy inventory on, IAM users, groups, policies and credentials, then writes the findings to JSON folders on disk and serves them through an embedded web dashboard. `cloudrift demo generate` populates the UI with sample data so you can explore without AWS credentials (it's training data, not a substitute for a real scan).
 
-### The two problems it solves
+### The three problems it solves
 
 - **Orphaned edge assets (subdomain takeover & friends).** A DNS name like `docs.example.com` still points at AWS — an S3 website, a CloudFront distribution — but the resource behind it is gone or mis-linked. An attacker who recreates the same globally-named bucket, or abuses a dangling distribution, can serve content under *your* trusted hostname: phishing, malware distribution, brand damage.
 - **Stale external IAM trust.** An IAM role in your account can be assumed by an external AWS account, SAML IdP, or OIDC app — or a bucket policy can grant cross-account/public access. If nobody reviewed it lately it's easy to forget, but the trust stays valid until you remove it: durable lateral access into your estate.
+
+- **Over-privileged identities and escalation paths (CIEM).** A role or user with `iam:*`, a group nobody remembers, or an access key that never rotates. Cloudrift shows what each identity can do and why, finds the chains from a low-privilege session to admin, and lists who and what can use each role.
 
 Even security issues have a **cost angle** — you pay for the DNS, certificates, and edge behind an orphaned asset while also carrying takeover risk.
 
@@ -72,7 +74,8 @@ Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge asse
 **Key points:**
 - Calls AWS APIs to inventory edge, IAM-trust, and S3 resource-policy exposure across your org
 - Writes findings to local JSON per scan — read via dashboard, CLI reports, or your own tooling
-- Dashboard provides interactive exploration and a scan control center
+- Dashboard provides interactive exploration and a scan control center, plus Users & Groups, per-role usage, an attack and escalation explorer, and a live Coverage page
+- Read-only: no policy is changed and no secret value is read
 - `cloudrift demo generate` populates the UI with sample data (no AWS needed)
 - Neo4j is optional for advanced graph features (blast-radius, vector search, `cloudrift query`)
 
@@ -81,6 +84,11 @@ Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge asse
 - **Orphaned edge:** DNS hostnames that resolve but point to deleted/misconfigured S3 buckets, CloudFront origins, or ELBs — with a verdict (reclaimable, dangling, etc.)
 - **External trust:** IAM roles trusting external AWS accounts or principals, scored by last-used date, admin privileges, and risk profile
 - **Resource-policy exposure:** S3 bucket policies granting cross-account or public access — exposure that IAM role-trust scanning misses
+- **Over-privileged identities (CIEM):** IAM roles **and users** with broad or sensitive permissions, with the policies behind each one - direct, through a group, or limited by a boundary - and an explicit Deny beating an Allow. Missing evidence shows as UNKNOWN, never as allowed
+- **Escalation paths:** from a role session or a user, finds role hops, policy grants, trust rewrites, PassRole chains, group joins and user takeovers, and the S3 objects and secrets reachable at the end
+- **Who and what uses a role:** each role lists the workloads that run as it and the users and roles that can assume it
+- **Credential hygiene:** console access without MFA, and access keys that are old or unused, from the IAM credential report
+- **Honest coverage:** the Coverage page shows, live, what each part collected for the selected scan and what is not covered
 - **Visibility:** Self-hosted dashboard and CLI reports over the same HTTP server — no cloud dependency
 
 ### Current implementation status
@@ -93,6 +101,9 @@ Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge asse
 | `cloudrift report` | Complete | Export findings as table, JSON, CSV, markdown, Excel, or SARIF |
 | `cloudrift query` | Complete | Vector search over Neo4j; optional LLM answer synthesis when a synthesis provider is configured |
 | Neo4j integration | Optional | Adds blast-radius explorer, graph relationships, vector index |
+| IAM users, groups and credentials | Complete (fakes only) | Collects users, groups, memberships, inline and managed policies, boundaries, and console, MFA and access-key state from the credential report. Not yet run against a real AWS account |
+| Role usage | Complete | Role detail shows which workloads run as the role and which users and roles can assume it. Computed from stored policies, not CloudTrail |
+| Coverage page | Complete | Live status of every module, the evaluated actions and attack techniques, refreshed every 15 seconds |
 | Local embeddings | Stub | `provider=local` will error until implemented |
 
 **Try immediately (no AWS):** `cloudrift demo generate && cloudrift dashboard --open`. A live scan (`cloudrift scan`) runs against a real AWS organization with credentials configured.
@@ -195,6 +206,9 @@ For the full `dashboard` flag reference, see [CLI Commands](#cli-commands). For 
 | Accounts | Per-account risk breakdown |
 | Diff | Compare two scans side-by-side |
 | Trust Report | IAM trust findings, external principals |
+| Users & Groups | Every IAM user and group, which policies apply directly or through a group, explicit Deny markers, and console, MFA and access-key findings |
+| Identities | Per-role and per-account permission matrix, an IAM users table beside it, and a "who and what uses this role" section on each role |
+| Coverage | What is covered, what is not, and live collection state for the selected scan |
 | External Entities | Entity-centric view with blast actions |
 | Blast Explorer | 3D graph visualization of risk paths (Neo4j required) |
 | Alerting | Slack webhooks, alert rules, event history |
@@ -540,6 +554,8 @@ Storage is intentionally flat-file JSON under `cloudrift-output/<scan-id>/`. Sca
 
 **Orchestration (`internal/pipeline`):** the detection engine is wired end to end. `pipeline.Run` drives the full flow: collect (org accounts → per-account collectors for DNS, storage/S3, edge/CloudFront, trust/IAM, activity, and bucket policies) → assemble the org-wide bucket-name set → validate (DNS/HTTP probe, skippable) → score (`internal/scorers`: `ScoreRisk`, `ScoreTrust`, `ScoreResourceExposure`, `ScoreCost`, plus optional Cost Explorer enrichment) → persist `findings.json`, `scan-metadata.json`, `assets/assets.json`, and `relationships.json`. AWS collection sits behind a `Source` interface (`pipeline.NewAWSSource`) so the scoring/persistence stages stay testable without real AWS access. Both `cloudrift scan` (`cmd/cloudrift/main.go`) and the dashboard Scan Control start path (`internal/api/handlers/scan_control.go`) route through `pipeline.Run`; the older `internal/scanrun` stub has been removed.
 
+**Identity layer (CIEM):** with policy inventory on, `internal/collectors` also gathers IAM users, groups and the credential report, `internal/iamauth` evaluates actions against all policy sources, `internal/blastradius` searches escalation paths and computes who can assume a role, and `internal/ciem` turns this into identity findings (`ScoreIdentityHygiene`) and the dashboard views. Scoring runs the identity scorer alongside `ScoreEntitlements`; `scorers.ScoreVPCEndpoints` covers endpoint policies.
+
 **S3 resource-policy exposure:** cross-account / public S3 exposure is detected from resource-based bucket policies, as part of the **external_access** module. The collector `CollectBucketPolicies` (`internal/collectors/bucketpolicy.go`) reuses the already-listed buckets to read policies, and `ScoreResourceExposure` (`internal/scorers/resource_exposure.go`) grades the resulting cross-account/public grants.
 
 **Scan coverage tracking:** collectors are resilient — a per-account failure (assume-role, bucket enumeration, or denied policy read) is recorded and skipped rather than failing the whole scan. `scan-metadata.json` now records `DiscoveredAccountCount`, `ScannedAccountCount`, `FailedAccountIDs`, and `CoverageComplete`. When coverage is incomplete, the pipeline downgrades absence-based critical orphaned-edge verdicts (a bucket could be owned by an unscanned account), annotating the finding with a coverage note.
@@ -783,13 +799,13 @@ This section describes the detection and scoring model used by collectors/scorer
 - **Insider threat or runtime exfiltration** — no host-based or network IDS story here.
 - **Misconfigurations inside VPC-only private APIs** unless collectors and IAM permissions reach them.
 - **Historical CloudTrail proof of abuse** — trust scoring uses IAM last-used metadata, not full log analytics (see "Not yet collected" below).
-- **Effective IAM permissions** — admin/privilege analysis reads attached managed-policy **names** plus inline policy documents only; it does **not** fetch and evaluate managed-policy documents, condition keys, SCPs, or permission boundaries. See the permission-tier caveats below.
+- **Effective IAM permissions in every case** — with policy inventory on, Cloudrift reads inline and managed policy documents and evaluates a catalog of actions (see the Coverage page), but a result is only as complete as the evidence collected: SCPs and RCPs need management-account access, session policies are not collected from STS, VPC endpoint policies are not applied, and anything missing is reported as UNKNOWN rather than allowed. With policy inventory off, only policy names and inline documents are read. See the permission-tier caveats below.
 - **Confirmed third-party CNAME pairing** — third-party takeover signatures (GitHub Pages, Heroku, Shopify) match on **response-body fingerprints** and can false-positive. A planned refinement pairs each match with the record's CNAME-target suffix (`github.io`, `herokuapp.com`, `myshopify.com`) before confirming.
 - **Guaranteed completeness** — DNS/HTTP probes can miss transient failures; false positives and false negatives are possible; human review of `evidence` fields is expected. Per-account scan failures further limit coverage (see **Scan coverage** below).
 
 ### What Attacks Are We Protecting Against?
 
-Cloudrift detects two categories of real-world attack surfaces in AWS environments:
+Cloudrift detects three categories of real-world attack surfaces in AWS environments:
 
 #### 1. Subdomain Takeover / Orphaned Edge Assets
 
@@ -841,6 +857,21 @@ A bucket policy can grant access to anyone or to outside accounts without any IA
 | **External read** | Bucket policy grants read to an external AWS account not on the approved list. Cross-account data exposure. | `Allow s3:GetObject` to an unapproved external account |
 | **Approved-vendor grant** | Bucket policy grants access to an account that **is** in `approved_external_accounts`. Recorded for visibility at low severity. | Read grant to a vetted partner account |
 
+#### 3. Identity and Entitlement Risk (CIEM)
+
+With IAM policy inventory on, Cloudrift also reports risk that sits in identities rather than in DNS or buckets. These findings use the `iam_entitlement` module; `issue_category` in the evidence names the kind. Each states what it rests on, and a user whose credential report was not collected raises no credential finding, because missing evidence is not a clean user.
+
+| Category | Severity | What Happens | Rests on |
+|---|---|---|---|
+| `user_console_without_mfa` | High | A user can sign in to the console with a password and no MFA device. | Credential report |
+| `user_access_key_hygiene` | Medium (Low if only never used) | An active access key is older than 90 days, unused for 90 days, or never used. | Credential report |
+| `user_administrative_access` | High | A user holds an unconditional administrative wildcard Allow, directly or through a group. | Policy documents of the user and its groups |
+| `weak_credential_reaches_administrative_role` | Critical (High when SCPs and RCPs were not collected) | A user with console access and no MFA, or with a stale key, is allowed by the stored policies to assume a role that holds administrative access. | Credential report, trust policy, the user's policies and groups |
+| `workload_runs_as_administrative_role` | Medium | A workload (EC2, Lambda, ECS, EKS) runs as a role that holds an unconditional administrative wildcard Allow. | Workload mapping, policy documents |
+| `vpc_endpoint_open_policy` | Low | A VPC endpoint policy allows every principal everything on every resource, so the endpoint adds no data perimeter (`external_access` module). | VPC endpoint policy, collected with resource policies |
+
+The two compound findings are the reason these were added: a weak credential matters most when it is one step from admin, and an administrative role matters most when running compute holds it. Beyond findings, the dashboard answers the follow-up questions: **Users & Groups** shows what applies to a user and why, the role page lists who and what can use the role, and Blast Explorer searches escalation paths from a role session or a user.
+
 ### AWS Services Fetched Per Account
 
 Cloudrift assumes a read-only audit role (`CloudriftAuditRole`) into each account in the AWS Organization and collects the following:
@@ -853,6 +884,9 @@ Cloudrift assumes a read-only audit role (`CloudriftAuditRole`) into each accoun
 | **S3 bucket policy** | `s3:GetBucketPolicy` per bucket; parses Allow statements for external-account / public (`Principal: "*"`) grants | Detects resource-based exposure (read/write to outside accounts or the internet) that IAM role-trust scanning misses |
 | **CloudFront** | Distribution domains, alternate CNAMEs, origins (S3 / custom), ACM certificate ARNs, enabled status | Cross-checks DNS targets against active distributions and their hostname lists |
 | **IAM** | All roles, trust policies, attached managed policies, inline policy documents | Detects external trust relationships and scores permission exposure |
+| **IAM users and groups** | `iam:GetAccountAuthorizationDetails` (users, groups, memberships, inline and attached policies, boundaries) | Shows what each user can do, directly and through groups, and feeds the user-targeted escalation search |
+| **IAM credential report** | `iam:GenerateCredentialReport`, `iam:GetCredentialReport` | Console access without MFA, old or unused access keys |
+| **VPC endpoints** *(with resource policies)* | `ec2:DescribeVpcEndpoints`, endpoint policy documents | Shown as evidence; not applied to decisions because a scan cannot see which requests use an endpoint |
 | **IAM Activity** | `RoleLastUsed.LastUsedDate` per role via `iam:GetRole` | Determines how stale a trust relationship is |
 | **STS** | `GetCallerIdentity` | Confirms assumed-role identity during cross-account scanning |
 | **Cost Explorer** *(optional)* | `GetCostAndUsage` (last 30 days, grouped by account + service) | Enriches findings with actual monthly spend for FinOps prioritization |
@@ -980,7 +1014,7 @@ Adjust parameters to match your org's naming and security standards.
 ### Minimum intent and scope
 
 - The role is **read-oriented** inventory and analysis — not `AdministratorAccess` for Cloudrift.
-- The action list covers the read-only APIs the collectors actually call: `organizations:ListAccounts/ListParents/ListTagsForResource/DescribeOrganizationalUnit`, `route53:ListHostedZones/ListResourceRecordSets`, `cloudfront:ListDistributions`, `iam` get/list role + policy reads, `sts:AssumeRole`, and S3 reads — `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:GetBucketWebsite`, plus **`s3:GetBucketPolicy`** (required for the S3 bucket-policy resource-exposure detection). `ce:GetCostAndUsage` is optional, for FinOps cost enrichment.
+- The action list covers the read-only APIs the collectors actually call: `organizations:ListAccounts/ListParents/ListTagsForResource/DescribeOrganizationalUnit`, `route53:ListHostedZones/ListResourceRecordSets`, `cloudfront:ListDistributions`, `iam` get/list role + policy reads, `iam:GetAccountAuthorizationDetails`, `iam:GenerateCredentialReport` and `iam:GetCredentialReport` (users, groups and credential state; redeploy the StackSet to pick them up), `sts:AssumeRole`, and S3 reads — `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:GetBucketWebsite`, plus **`s3:GetBucketPolicy`** (required for the S3 bucket-policy resource-exposure detection). `ce:GetCostAndUsage` is optional, for FinOps cost enrichment.
 - If StackSet is **not** deployed org-wide, findings are only as complete as the accounts your role can reach. Collectors are **resilient** — a per-account failure (role not assumable, an action denied) is skipped rather than fatal — and the scan records which accounts it reached. **Incomplete coverage automatically downgrades absence-based "reclaimable/critical" subdomain-takeover verdicts to High** (the "missing" resource could live in an account you couldn't scan). See [Security Coverage](#security-coverage).
 - **Least privilege:** grant the actions in the template, not full `*`.
 
@@ -1051,7 +1085,8 @@ cloudrift/
 │   ├── graph/              # Phase 3: Neo4j schema, writer, embedder, RAG retrieval
 │   ├── scans/              # Scan directory layout, latest resolution, safe scan-id rules
 │   ├── remediator/         # Remediation command generation (library)
-│   ├── scorers/            # risk, trust, cost
+│   ├── scorers/            # risk, trust, cost, entitlements, VPC endpoints
+│   ├── ciem/               # users, groups, credentials, role usage, identity findings
 │   └── validators/         # HTTP/DNS validation
 ├── docs/                   # Architecture notes, IAM setup, this file
 ├── iam/                    # StackSet / IAM artifacts for org-wide role
@@ -1189,6 +1224,10 @@ These routes power focused blast-radius and attack-path explainability. They are
 
 | Method | Path | Notes |
 |--------|------|-------|
+| `GET` | `/api/scans/{id}/principals` | IAM users and groups with broad-permission and credential summaries |
+| `GET` | `/api/scans/{id}/principals/policies` | Policies that apply to one user or group, by source (direct or group), with Deny markers and credential findings |
+| `GET` | `/api/scans/{id}/identities/usage` | Who and what uses a role (`role_arn`): workloads, principals that can assume it, and counts that could not be evaluated |
+| `GET` | `/api/coverage` | Live coverage report (`scan_id` optional); `Cache-Control: no-store`, includes `generated_at` |
 | `GET` | `/api/scans/{id}/blast-radius/summary` | Finding-root summary (`finding_id`, optional `mode`) |
 | `GET` | `/api/scans/{id}/blast-radius/explorer` | Finding-root curated explorer payload |
 | `GET` | `/api/scans/{id}/external-entities/blast-radius/summary` | Entity-root summary (`entity_id`, optional `mode`) |
