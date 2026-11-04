@@ -180,6 +180,8 @@ func mapScanListItem(scanID string, meta *models.ScanSnapshot, findings []models
 		Synthetic:    meta.Synthetic,
 		DataOrigin:   meta.DataOrigin,
 		ScenarioID:   meta.ScenarioID,
+		ScanMode:     meta.ScanMode,
+		ScanModeNote: meta.ScanModeNote,
 	}
 	if item.Timestamp.IsZero() {
 		item.Timestamp = time.Unix(0, 0).UTC()

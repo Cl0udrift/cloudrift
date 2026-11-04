@@ -46,3 +46,27 @@ func TestResolveRegionMode(t *testing.T) {
 		t.Fatalf("explicit legacy: %s %v %v", mode, regions, err)
 	}
 }
+
+func TestResolveScanMode(t *testing.T) {
+	cases := []struct {
+		mode, role, want string
+		wantErr          bool
+	}{
+		{"", "CloudriftAuditRole", ScanModeAuto, false},
+		{"auto", "CloudriftAuditRole", ScanModeAuto, false},
+		{"", "", ScanModeAccount, false}, // an empty audit role has always meant account mode
+		{"auto", "", ScanModeAccount, false},
+		{"organization", "CloudriftAuditRole", ScanModeOrganization, false},
+		{"organization", "", "", true},
+		{"account", "CloudriftAuditRole", ScanModeAccount, false},
+		{"both", "CloudriftAuditRole", "", true},
+	}
+	for _, c := range cases {
+		cfg := Default()
+		cfg.AWS.ScanMode, cfg.AWS.OrgRoleName = c.mode, c.role
+		got, err := ResolveScanMode(cfg)
+		if got != c.want || (err != nil) != c.wantErr {
+			t.Errorf("mode=%q role=%q: got %q err=%v", c.mode, c.role, got, err)
+		}
+	}
+}

@@ -43,6 +43,13 @@ export function ScanContextBar() {
       ) : (
         <StateChip tone="info" glyph="●" label="Live" title="Collected from AWS" />
       )}
+      {currentScan?.scan_mode ? (
+        currentScan.scan_mode_note ? (
+          <StateChip tone="warn" glyph="◐" label="Single account" title={currentScan.scan_mode_note} />
+        ) : (
+          <StateChip tone="info" glyph="●" label={currentScan.scan_mode === "organization" ? "Organization" : "Single account"} title="Scan mode that ran" />
+        )
+      ) : null}
       <span className="hidden sm:inline">{formatTimestamp(currentScan?.timestamp)}</span>
       {accounts.length > 0 ? (
         <span className="hidden md:inline">{accounts.length === 1 ? `Account ${accounts[0]}` : `${accounts.length} accounts`}</span>

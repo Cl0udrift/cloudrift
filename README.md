@@ -122,6 +122,14 @@ Cloudrift can scan in one of two modes, chosen by `[aws].org_role_name` in `clou
 - **Org-wide (default):** `org_role_name = "CloudriftAuditRole"` (or your role name). Cloudrift lists the organization's accounts and assumes that role in each member account. This is the classic pattern for scanning a whole org from a management/security account, and requires the audit role deployed to each account (see [IAM Setup](docs/cloudrift-docs.md#iam-setup)).
 - **No-assume (single account):** `org_role_name = ""`. Cloudrift scans only the caller's own account using the selected credentials directly - no cross-account role to deploy and no `Organizations:ListAccounts` call. Use this when your identity already has read access to the account you care about.
 
+You can also set `scan_mode` (Dashboard → Settings → AWS access → Scan mode, or `[aws].scan_mode`):
+
+- **`auto` (default):** use the organization when `org_role_name` is set and the account is in one. If the account is not in an organization, scan only that account and say so: a warning in the scan log, and a "Single account" notice on the scan.
+- **`organization`:** fail with a clear message if the account is not in an organization. Use this when a scan must never shrink to one account.
+- **`account`:** scan only the caller's account and skip Organizations.
+
+The scan record (`scan-metadata.json`) stores `scan_mode` and, for a fallback, `scan_mode_note`.
+
 ### Credential selection
 
 **Dashboard:** Exposes a profile picker on the Scan Control page; the selected profile drives credential loading for that scan.
@@ -154,7 +162,7 @@ Optional TOML file (defaults work without it). Search order: `CLOUDRIFT_CONFIG` 
 
 Key sections:
 
-- `[aws]` - `org_role_name` (empty string = no-assume single-account mode), `management_profile`, regions to scan
+- `[aws]` - `org_role_name` (empty string = no-assume single-account mode), `scan_mode` (auto, organization or account), `management_profile`, regions to scan
 - `[scan]` - HTTP concurrency, role-assumption concurrency, timeouts
 - `[cost]` - `use_cur` flag for Cost Explorer enrichment
 - `[trust]` - approved external accounts, thresholds for stale/ghost roles

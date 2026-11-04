@@ -86,6 +86,20 @@ func regionPlanNote(mode string, regions []string) string {
 	}
 }
 
+func scanModePlan(cfg *config.Config) (string, string) {
+	mode, err := config.ResolveScanMode(cfg)
+	if err != nil {
+		return "", err.Error()
+	}
+	switch mode {
+	case config.ScanModeOrganization:
+		return mode, "Organization: lists the organization's accounts and assumes the audit role in each. The scan fails if this account is not in an organization."
+	case config.ScanModeAccount:
+		return mode, "Single account: scans only the account the credentials belong to. Organizations is not called."
+	}
+	return mode, "Auto: uses the organization when this account is in one. If it is not, only this account is scanned and the scan says so."
+}
+
 func (s *scanControlCenter) RuntimeStatus() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg, err := config.Load(s.configPath)
@@ -103,6 +117,7 @@ func (s *scanControlCenter) RuntimeStatus() http.HandlerFunc {
 		if regions == nil {
 			regions = []string{}
 		}
+		scanMode, scanModeNote := scanModePlan(cfg)
 		resp := schema.RuntimeStatusResponse{
 			AWSProfiles:      profiles,
 			DefaultProfile:   defaultProfile(cfg),
@@ -114,6 +129,8 @@ func (s *scanControlCenter) RuntimeStatus() http.HandlerFunc {
 			ExplicitRegions:  regions,
 			CIEMConfigured:   cfg.Scan.IAMPolicyInventory,
 			RegionPlanNote:   note,
+			ScanMode:         scanMode,
+			ScanModePlanNote: scanModeNote,
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
@@ -413,7 +430,7 @@ func (s *scanControlCenter) appendHistoryLocked(item schema.ScanRunHistoryItem) 
 
 func validateCredentialSource(ctx context.Context, profile string) (schema.ValidateProfileResponse, int) {
 	profile = strings.TrimSpace(profile)
-	loadOpts := []func(*awsconfig.LoadOptions) error{}
+	loadOpts := []func(*awsconfig.LoadOptions) error{awsconfig.WithDefaultRegion("us-east-1")}
 	if profile != "" {
 		loadOpts = append(loadOpts, awsconfig.WithSharedConfigProfile(profile))
 	}

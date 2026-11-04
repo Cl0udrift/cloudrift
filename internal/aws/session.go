@@ -20,7 +20,7 @@ type SessionManager struct {
 }
 
 func NewSessionManager(ctx context.Context, profile, roleName string) (*SessionManager, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithSharedConfigProfile(profile))
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithSharedConfigProfile(profile), awsconfig.WithDefaultRegion("us-east-1"))
 	if err != nil {
 		return nil, err
 	}

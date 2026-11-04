@@ -20,6 +20,9 @@ type ScanListItem struct {
 	Synthetic           bool      `json:"synthetic,omitempty"`
 	DataOrigin          string    `json:"data_origin,omitempty"`
 	ScenarioID          string    `json:"scenario_id,omitempty"`
+	// ScanMode is organization or account, whichever ran; ScanModeNote explains a fallback.
+	ScanMode     string `json:"scan_mode,omitempty"`
+	ScanModeNote string `json:"scan_mode_note,omitempty"`
 }
 
 // ScanSummaryResponse is the payload for GET /api/scans/:id/summary.

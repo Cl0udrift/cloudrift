@@ -34,6 +34,10 @@ type Coverage struct {
 	// RegionMode is auto, explicit, or legacy_default. legacy_default is the
 	// historical us-east-1 workload scope, not full enabled-Region coverage.
 	RegionMode string `json:"region_mode,omitempty"`
+	// ScanMode is the mode that actually ran: organization or account. ScanModeNote says why when
+	// it differs from what was asked, for example an auto scan on an account outside any organization.
+	ScanMode     string `json:"scan_mode,omitempty"`
+	ScanModeNote string `json:"scan_mode_note,omitempty"`
 }
 
 // Complete reports whether every discovered account was successfully assumed.

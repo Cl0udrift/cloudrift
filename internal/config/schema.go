@@ -69,6 +69,7 @@ func Schema() []Field {
 				}
 				return nil
 			}},
+		{Key: "aws.scan_mode", Group: "AWS access", Label: "Scan mode", Description: "auto uses the organization when the audit role is set and the account is in one, and otherwise scans only this account and says so. organization fails if the account is not in an organization. account scans only the caller's account and skips Organizations. Default is auto.", Kind: "enum", Enum: []string{"", "auto", "organization", "account"}, Apply: "next_scan"},
 		{Key: "aws.management_profile", Group: "AWS access", Label: "AWS profile", Description: "AWS profile or credentials used to start the scan.", Kind: "string", Apply: "next_scan", check: noControl},
 		{Key: "aws.region_discovery", Group: "AWS access", Label: "Region discovery", Description: "auto discovers enabled Regions, explicit uses the list below, legacy_default stays on us-east-1 and is not full coverage. Default follows the scan type.", Kind: "enum", Enum: []string{"", "auto", "explicit", "legacy_default"}, Apply: "next_scan"},
 		{Key: "aws.regions", Group: "AWS access", Label: "Region allowlist", Description: "When set, only these Regions are collected. Cannot be combined with region discovery = auto.", Kind: "list", Apply: "next_scan",
@@ -312,6 +313,9 @@ func toFloat(raw any) (float64, bool) {
 // ValidateCross checks rules that span settings.
 func ValidateCross(cfg *Config) error {
 	if _, _, err := ResolveRegionMode(cfg); err != nil {
+		return err
+	}
+	if _, err := ResolveScanMode(cfg); err != nil {
 		return err
 	}
 	return nil

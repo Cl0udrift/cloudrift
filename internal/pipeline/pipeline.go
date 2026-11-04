@@ -360,6 +360,8 @@ func buildMetadata(scanID, toolVersion string, accounts []collectors.Account, fi
 		CIEMCollection:         cov.CIEMCollection,
 		OrgPolicyDiscovery:     cov.OrgPolicyDiscovery,
 		RegionMode:             cov.RegionMode,
+		ScanMode:               cov.ScanMode,
+		ScanModeNote:           cov.ScanModeNote,
 	}
 }
 

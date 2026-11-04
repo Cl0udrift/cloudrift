@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/organizations"
+	orgtypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	cloudaws "github.com/Zero0x00/cloudrift/internal/aws"
@@ -46,7 +48,9 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 	}
 	// Credential selection: explicit management_profile wins; otherwise fall back to the
 	// AWS default chain (env/AWS_PROFILE/SSO/instance role).
-	var loadOpts []func(*awsconfig.LoadOptions) error
+	// WithDefaultRegion applies only when no region comes from the environment or profile; IAM, STS and
+	// Organizations are global but the SDK still needs one to build an endpoint.
+	loadOpts := []func(*awsconfig.LoadOptions) error{awsconfig.WithDefaultRegion("us-east-1")}
 	if p := strings.TrimSpace(cfg.AWS.ManagementProfile); p != "" {
 		loadOpts = append(loadOpts, awsconfig.WithSharedConfigProfile(p))
 	}
@@ -64,15 +68,30 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 	var accounts []collectors.Account
 	var coverage collectors.Coverage
 	progress("collecting", "enumerating accounts")
-	if strings.TrimSpace(cfg.AWS.OrgRoleName) == "" {
-		// No-assume mode: scan only the caller's own account using the base credentials.
-		// No cross-account role assumption, and no Organizations:ListAccounts call (so it
-		// works for identities that only have read access to a single account).
+	scanMode, err := config.ResolveScanMode(cfg)
+	if err != nil {
+		return Result{}, err
+	}
+	note := ""
+	if scanMode == config.ScanModeAccount {
+		// Scan only the caller's own account using the base credentials: no role assumption
+		// and no Organizations call, so it works for identities with read access to one account.
 		accounts, coverage, err = currentAccountOnly(ctx, baseCfg)
 	} else {
 		orgClient := organizations.NewFromConfig(baseCfg)
 		sm := cloudaws.NewSessionManagerFromConfig(baseCfg, cfg.AWS.OrgRoleName)
 		accounts, coverage, err = collectors.CollectAccounts(ctx, cfg, orgClient, sm)
+		var notInUse *orgtypes.AWSOrganizationsNotInUseException
+		if errors.As(err, &notInUse) {
+			if scanMode == config.ScanModeOrganization {
+				return Result{}, fmt.Errorf("aws.scan_mode is organization, but this account is not in an AWS Organization: %w", err)
+			}
+			// Auto: a standalone account has no organization to list, so scan it directly.
+			note = "this account is not in an AWS Organization, so only the caller's account was scanned"
+			progress("warning", note)
+			scanMode = config.ScanModeAccount
+			accounts, coverage, err = currentAccountOnly(ctx, baseCfg)
+		}
 	}
 	if err != nil {
 		return Result{}, fmt.Errorf("collect accounts: %w", err)
@@ -208,6 +227,7 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 	}
 
 	coverage.RegionMode = regionMode
+	coverage.ScanMode, coverage.ScanModeNote = scanMode, note
 	return Result{Accounts: accounts, Assets: assets, Rels: rels, Activity: activity, Coverage: coverage,
 		ServiceAccessRequested: cfg.Scan.ServiceLastAccessed, ServiceAccess: serviceAccess}, nil
 }

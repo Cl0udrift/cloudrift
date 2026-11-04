@@ -12,9 +12,13 @@ import (
 
 type Config struct {
 	AWS struct {
-		OrgRoleName       string   `toml:"org_role_name"`
-		ManagementProfile string   `toml:"management_profile"`
-		Regions           []string `toml:"regions"`
+		OrgRoleName       string `toml:"org_role_name"`
+		ManagementProfile string `toml:"management_profile"`
+		// ScanMode is auto, organization, or account. Empty means auto: use the
+		// organization when org_role_name is set and the account is in one, otherwise
+		// scan only the caller's account and say so.
+		ScanMode string   `toml:"scan_mode"`
+		Regions  []string `toml:"regions"`
 		// RegionDiscovery is auto, explicit, or legacy_default.
 		// Empty follows the scan: CIEM with no aws.regions list discovers enabled
 		// Regions; a nonempty list is an allowlist; a legacy scan with no list stays
@@ -193,6 +197,37 @@ func ResolveRegionMode(cfg *Config) (mode string, explicit []string, err error) 
 		return RegionModeAuto, nil, nil
 	}
 	return RegionModeLegacy, []string{"us-east-1"}, nil
+}
+
+// Scan modes for aws.scan_mode.
+const (
+	ScanModeAuto         = "auto"
+	ScanModeOrganization = "organization"
+	ScanModeAccount      = "account"
+)
+
+// ResolveScanMode returns auto, organization or account. An empty org_role_name has always
+// meant account mode, so it still does under auto.
+func ResolveScanMode(cfg *Config) (string, error) {
+	if cfg == nil {
+		cfg = Default()
+	}
+	roleSet := strings.TrimSpace(cfg.AWS.OrgRoleName) != ""
+	switch strings.ToLower(strings.TrimSpace(cfg.AWS.ScanMode)) {
+	case "", ScanModeAuto:
+		if !roleSet {
+			return ScanModeAccount, nil
+		}
+		return ScanModeAuto, nil
+	case ScanModeOrganization:
+		if !roleSet {
+			return "", fmt.Errorf("aws.scan_mode = \"organization\" requires aws.org_role_name")
+		}
+		return ScanModeOrganization, nil
+	case ScanModeAccount:
+		return ScanModeAccount, nil
+	}
+	return "", fmt.Errorf("aws.scan_mode must be auto, organization, or account")
 }
 
 func EnableCIEM(cfg *Config) {

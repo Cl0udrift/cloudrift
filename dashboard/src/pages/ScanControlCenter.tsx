@@ -245,6 +245,10 @@ export function ScanControlCenterPage() {
               </p>
             ) : null}
 
+            {runtimeData?.scan_mode_plan_note ? (
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{runtimeData.scan_mode_plan_note} Change it under Settings → AWS access → Scan mode.</p>
+            ) : null}
+
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
                 type="button"

@@ -59,7 +59,7 @@ func Modules() []Module {
 			Summary:     "Discovers accounts and the resources in them.",
 			Covers:      []string{"AWS Organizations accounts, or the caller's own account in no-assume mode", "EC2, Lambda, ECS, EKS, S3, Route 53, CloudFront", "Region discovery per account"},
 			Limitations: []string{"Services outside that list are not inventoried", "A partial regional collector keeps supported inventory marked partial", "Org-wide scans need the audit role in every member account"},
-			ConfigKeys:  []string{"aws.org_role_name", "aws.management_profile", "aws.region_discovery", "aws.regions", "scan.role_assumption_concurrency"},
+			ConfigKeys:  []string{"aws.scan_mode", "aws.org_role_name", "aws.management_profile", "aws.region_discovery", "aws.regions", "scan.role_assumption_concurrency"},
 			Page:        "/inventory", Docs: "docs/audits/phase-4f-b2-live-validation.md",
 			Collectors: []string{"region_discovery", "ec2", "lambda", "ecs", "eks", "iam", "s3", "route53", "cloudfront"},
 			Evidence:   []string{"Live collection checked on one account on 2026-10-12 (conditional go)"},

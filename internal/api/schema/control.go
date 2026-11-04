@@ -14,6 +14,9 @@ type RuntimeStatusResponse struct {
 	ExplicitRegions []string `json:"explicit_regions"`
 	CIEMConfigured  bool     `json:"ciem_configured"`
 	RegionPlanNote  string   `json:"region_plan_note"`
+	// ScanMode is the configured mode (auto, organization or account) and ScanModePlanNote says what it will do.
+	ScanMode         string `json:"scan_mode"`
+	ScanModePlanNote string `json:"scan_mode_plan_note"`
 }
 
 type ValidateProfileRequest struct {

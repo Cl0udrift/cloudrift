@@ -34,6 +34,9 @@ type ScanSnapshot struct {
 	OrgPolicyDiscovery string `json:"org_policy_discovery,omitempty"`
 	// RegionMode is auto, explicit, or legacy_default. Omitted on older scans.
 	RegionMode string `json:"region_mode,omitempty"`
+	// ScanMode is organization or account, whichever ran. ScanModeNote explains a fallback.
+	ScanMode     string `json:"scan_mode,omitempty"`
+	ScanModeNote string `json:"scan_mode_note,omitempty"`
 	// SupportedInventoryComplete is true only when supported collectors, including
 	// every regional service, finished successfully. It is omitted when the scan
 	// has no collection-status evidence. coverage_complete records reached accounts.

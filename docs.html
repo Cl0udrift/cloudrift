@@ -1160,6 +1160,16 @@ Latest scan resolves by timestamp in `scan-metadata.json` (newest first); direct
 
 For multi-account scanning, set up an audit role via CloudFormation StackSet. See [IAM Setup](#iam-setup) and `iam/stackset-template.yaml`.
 
+### Scan mode
+
+`[aws].scan_mode` (Dashboard → Settings → AWS access → Scan mode) decides how accounts are found:
+
+- **`auto` (default):** use the organization when `org_role_name` is set and the account is in one. If it is not, scan only that account and say so: a warning in the scan log and a "Single account" notice on the scan.
+- **`organization`:** fail with a clear message if the account is not in an organization. Use this when a scan must never shrink to one account.
+- **`account`:** scan only the caller's account and skip Organizations. An empty `org_role_name` means the same under `auto`.
+
+The scan record (`scan-metadata.json`) stores `scan_mode` and, for a fallback, `scan_mode_note`.
+
 ### Version and license
 
 Current version: injected from git tag (`git describe`). See `tech-spec-v2.md` for historical context and design notes.
@@ -1594,7 +1604,7 @@ Optional TOML file (defaults work without it). Search order: `CLOUDRIFT_CONFIG` 
 
 Key sections:
 
-- `[aws]` — org role name, management profile, regions to scan
+- `[aws]` — org role name, scan mode (auto, organization, account), management profile, regions to scan
 - `[scan]` — HTTP concurrency, role-assumption concurrency, timeouts
 - `[cost]` — `use_cur` flag for Cost Explorer enrichment
 - `[trust]` — approved external accounts, thresholds for stale/ghost roles

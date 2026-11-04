@@ -15,6 +15,8 @@ export interface ScanListItem {
   synthetic?: boolean;
   data_origin?: string;
   scenario_id?: string;
+  scan_mode?: "organization" | "account";
+  scan_mode_note?: string;
 }
 
 export interface ScanListResponse {
@@ -610,6 +612,8 @@ export interface RuntimeStatusResponse {
   explicit_regions?: string[];
   ciem_configured?: boolean;
   region_plan_note?: string;
+  scan_mode?: string;
+  scan_mode_plan_note?: string;
 }
 
 export interface ValidateProfileRequest {

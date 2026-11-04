@@ -49,7 +49,7 @@ func SSOLoginCommand(profile string) string {
 // CheckCredentials loads AWS config for the given profile and verifies it with
 // a quick STS GetCallerIdentity call. Returns nil when credentials are valid.
 func CheckCredentials(ctx context.Context, profile string) error {
-	loadOpts := []func(*awsconfig.LoadOptions) error{}
+	loadOpts := []func(*awsconfig.LoadOptions) error{awsconfig.WithDefaultRegion("us-east-1")}
 	if profile != "" {
 		loadOpts = append(loadOpts, awsconfig.WithSharedConfigProfile(profile))
 	}
