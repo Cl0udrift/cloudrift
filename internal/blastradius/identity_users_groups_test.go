@@ -215,3 +215,20 @@ func TestRoleAssumersPendingOrgControls(t *testing.T) {
 		t.Fatalf("a caller allowed by policies but with SCPs not collected must be pending, got %#v", got)
 	}
 }
+
+func TestWhoCanIdentityOnlyAction(t *testing.T) {
+	const bobARN = "arn:aws:iam::111111111111:user/bob"
+	bob := controlled(models.AssetNode{ARN: bobARN, AssetType: models.AssetIAMUser, Name: "bob"})
+	assets := []models.AssetNode{
+		ugUserNode(allowDoc("iam:AttachUserPolicy", bobARN)), // alice may attach policies to bob
+		bob,
+		controlled(models.AssetNode{ARN: "arn:aws:iam::111111111111:user/carol", AssetType: models.AssetIAMUser, Name: "carol"}, allowDoc("s3:ListAllMyBuckets", "*")),
+	}
+	got, evaluated, _ := WhoCan(permScan, "iam:AttachUserPolicy", bob, assets, nil, time.Time{})
+	if len(got) != 1 || got[0].ARN != ugUser || got[0].Status != "VALIDATED_ALLOWED" {
+		t.Fatalf("only alice can attach policies to bob: %#v", got)
+	}
+	if evaluated != 2 { // alice and carol; bob is the target
+		t.Fatalf("evaluated %d", evaluated)
+	}
+}

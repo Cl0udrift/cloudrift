@@ -281,6 +281,7 @@ GET  /api/scans/{id}/accounts
 GET  /api/scans/{id}/principals
 GET  /api/scans/{id}/principals/policies
 GET  /api/scans/{id}/identities/usage
+GET  /api/scans/{id}/identities/who-can
 GET  /api/coverage
 GET  /api/diff?old=<scan>&new=<scan>
 

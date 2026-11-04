@@ -211,8 +211,10 @@ func matchesSearch(finding models.Finding, search string) bool {
 		finding.Hostname,
 		finding.Team,
 	}
-	if category, ok := finding.Evidence["issue_category"].(string); ok {
-		fields = append(fields, category) // lets an issue kind be searched and linked to
+	for _, key := range []string{"issue_category", "track"} {
+		if v, ok := finding.Evidence[key].(string); ok {
+			fields = append(fields, v) // lets an issue kind or track (toxic_combination) be searched and linked to
+		}
 	}
 	for _, field := range fields {
 		if strings.Contains(strings.ToLower(field), search) {

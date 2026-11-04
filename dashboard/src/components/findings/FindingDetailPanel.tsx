@@ -3,6 +3,7 @@ import { CopyIdentifier } from "../ui/CopyIdentifier";
 import { SeverityBadge } from "../SeverityBadge";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { IdentityPath, RemediationOptions } from "./IdentityPath";
 import { formatQueryError } from "../../api/httpError";
 import type { FindingDetailItem } from "../../api/types";
 import { BlastRadiusSection } from "../blast/BlastRadiusSection";
@@ -143,7 +144,7 @@ const IDENTITY_LABELS: Record<string, string> = {
 };
 
 function identityEvidenceRows(ev: Record<string, unknown>): [string, string][] {
-  const skip = new Set(["issue_category", "assessment_version", "principal_arn", "keys"]);
+  const skip = new Set(["issue_category", "assessment_version", "principal_arn", "keys", "track", "path", "severity_factors", "remediation_options"]);
   return Object.entries(ev)
     .filter(([k]) => !skip.has(k))
     .map(([k, v]) => [k.replace(/_/g, " "), Array.isArray(v) ? v.map(String).join(", ") : typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)]);
@@ -204,6 +205,26 @@ export function FindingDetailPanelContent({
               )}
             </p>
           </Section>
+          {ev.track ? (
+            <Section title={ev.track === "toxic_combination" ? "Toxic combination" : "Posture issue"}>
+              <p className="cr-helper">
+                {ev.track === "toxic_combination"
+                  ? "Several facts that are modest alone add up to a short route to administrative access. Fix any link in the chain."
+                  : "A weakness in how this identity is set up. It is not a route to anything by itself."}
+              </p>
+              <IdentityPath path={ev.path as never} />
+            </Section>
+          ) : null}
+          {Array.isArray(ev.severity_factors) ? (
+            <Section title="Why this severity">
+              <ul className="list-disc space-y-0.5 pl-5 text-sm">{(ev.severity_factors as string[]).map((x) => <li key={x}>{x}</li>)}</ul>
+            </Section>
+          ) : null}
+          {Array.isArray(ev.remediation_options) ? (
+            <Section title="How to fix it">
+              <RemediationOptions options={ev.remediation_options as never} />
+            </Section>
+          ) : null}
           <Section title="What this rests on">
             <dl className="grid grid-cols-[10rem_1fr] gap-x-3 gap-y-1 text-xs">
               {identityEvidenceRows(ev).map(([k, v]) => (

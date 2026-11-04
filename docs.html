@@ -1084,6 +1084,7 @@ For the full `dashboard` flag reference, see [CLI Commands](#cli-commands). For 
 | Trust Report | IAM trust findings, external principals |
 | Users & Groups | Every IAM user and group, which policies apply directly or through a group, explicit Deny markers, and console, MFA and access-key findings |
 | Identities | Per-role and per-account permission matrix, an IAM users table beside it, and a "who and what uses this role" section on each role |
+| Access Explorer | Who can do an action to a chosen user, group or role, asked of the stored policies |
 | Coverage | What is covered, what is not, and live collection state for the selected scan |
 | External Entities | Entity-centric view with blast actions |
 | Blast Explorer | 3D graph visualization of risk paths (Neo4j required) |
@@ -2112,6 +2113,7 @@ These routes power focused blast-radius and attack-path explainability. They are
 |--------|------|-------|
 | `GET` | `/api/scans/{id}/principals` | IAM users and groups with broad-permission and credential summaries |
 | `GET` | `/api/scans/{id}/principals/policies` | Policies that apply to one user or group, by source (direct or group), with Deny markers and credential findings |
+| `GET` | `/api/scans/{id}/identities/who-can` | Which users and roles can do an action (`action`, `arn`): sts:AssumeRole or an identity-only IAM action |
 | `GET` | `/api/scans/{id}/identities/usage` | Who and what uses a role (`role_arn`): workloads, principals that can assume it, and counts that could not be evaluated |
 | `GET` | `/api/coverage` | Live coverage report (`scan_id` optional); `Cache-Control: no-store`, includes `generated_at` |
 | `GET` | `/api/scans/{id}/blast-radius/summary` | Finding-root summary (`finding_id`, optional `mode`) |

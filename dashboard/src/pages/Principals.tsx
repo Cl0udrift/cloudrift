@@ -56,6 +56,11 @@ function Detail({ scanId, item }: { scanId: string; item: PrincipalListItem }) {
         <span className="font-semibold">{plural(v.sources.length, "policy", "policies")}</span> apply to {v.kind} <span className="font-mono">{v.name}</span>
         {v.groups.length ? <> (member of {v.groups.join(", ")})</> : null}. Permissions boundary: {v.boundary_status ?? "unknown"}.
       </p>
+      <p className="text-sm">
+        <Link className="underline" to={`/access?arn=${encodeURIComponent(item.arn)}&action=${v.kind === "user" ? "iam:AttachUserPolicy" : "iam:AttachGroupPolicy"}`}>
+          Who can change this {v.kind}'s permissions?
+        </Link>
+      </p>
       {v.kind === "user" ? (
         <p className="text-sm">
           <Link

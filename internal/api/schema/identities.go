@@ -297,6 +297,20 @@ type RoleAssumer struct {
 	Reason    string `json:"reason"`
 }
 
+// WhoCanResponse answers "which users and roles can do this action on this target".
+type WhoCanResponse struct {
+	ScanID    string        `json:"scan_id"`
+	Action    string        `json:"action"`
+	TargetARN string        `json:"target_arn"`
+	Callers   []RoleAssumer `json:"callers"`
+	Evaluated int           `json:"evaluated"`
+	Allowed   int           `json:"allowed"`
+	// Possible counts callers allowed by identity policies while organization controls were not checked.
+	Possible int      `json:"possible"`
+	Unknown  int      `json:"unknown"`
+	Notes    []string `json:"notes"`
+}
+
 // RoleUsageResponse answers "who and what can use this role".
 type RoleUsageResponse struct {
 	ScanID    string               `json:"scan_id"`

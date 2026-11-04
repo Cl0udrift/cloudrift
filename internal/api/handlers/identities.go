@@ -139,6 +139,66 @@ func GetRoleUsage(outputDir string) http.HandlerFunc {
 	}
 }
 
+// whoCanActions are the actions the explorer evaluates: role assumption and the identity-only IAM actions.
+func whoCanAction(action string) bool {
+	if action == iamauth.ActionAssumeRole {
+		return true
+	}
+	for _, c := range iamauth.Catalog() {
+		if c.Action == action && c.Evaluation == iamauth.EvalIdentityOnly && c.Support == iamauth.SupportEvaluated {
+			return true
+		}
+	}
+	return false
+}
+
+// GetWhoCan lists the users and roles that stored policies allow to perform an action on a user, group or role.
+func GetWhoCan(outputDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		if !ok {
+			return
+		}
+		action := strings.TrimSpace(r.URL.Query().Get("action"))
+		if !whoCanAction(action) {
+			writeError(w, http.StatusBadRequest, "unsupported_action", "this action is not evaluated by who-can: use sts:AssumeRole or an identity-only IAM action such as iam:AttachUserPolicy", nil)
+			return
+		}
+		arn := strings.TrimSpace(r.URL.Query().Get("arn"))
+		var target models.AssetNode
+		found := false
+		for _, a := range assets {
+			if a.ARN == arn && (a.AssetType == models.AssetIAMRole || a.AssetType == models.AssetIAMUser || a.AssetType == models.AssetIAMGroup) {
+				target, found = a, true
+				break
+			}
+		}
+		if !found {
+			writeError(w, http.StatusNotFound, "target_not_found", "that user, group or role was not collected in this scan", nil)
+			return
+		}
+		callers, evaluated, unknown := blastradius.WhoCan(scanID, action, target, assets, rels, time.Time{})
+		out := schema.WhoCanResponse{
+			ScanID: scanID, Action: action, TargetARN: target.ARN, Callers: callers, Evaluated: evaluated, Unknown: unknown,
+			Notes: []string{
+				"Callers are users and roles in this scan, checked against their own policies, permissions boundary and any collected SCPs. Principals in accounts that were not scanned are not listed.",
+				"This shows what stored policies allow, not what anyone did.",
+			},
+		}
+		if out.Callers == nil {
+			out.Callers = []schema.RoleAssumer{}
+		}
+		for _, c := range callers {
+			if c.Status == iamauth.StatusAllowed {
+				out.Allowed++
+			} else {
+				out.Possible++
+			}
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+
 // idleDaysParam accepts 1 to 3650; anything else falls back to the default threshold.
 func idleDaysParam(raw string) int {
 	n, err := strconv.Atoi(strings.TrimSpace(raw))

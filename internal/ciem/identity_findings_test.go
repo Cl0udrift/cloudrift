@@ -59,6 +59,12 @@ func TestScoreIdentityHygiene(t *testing.T) {
 	}
 
 	for _, f := range ScoreIdentityHygiene(assets, rels, now) {
+		if f.Evidence["issue_category"] == CatWeakCredentialToRole {
+			path, _ := f.Evidence["path"].([]PathNode)
+			if f.Evidence["track"] != "toxic_combination" || len(path) != 3 || path[0].Label != "alice" || path[2].Label != "Admin" {
+				t.Fatalf("a weak credential finding must explain its path: %#v", f.Evidence["path"])
+			}
+		}
 		if f.RemediationCmd == "" || !strings.Contains(f.RemediationCmd, "aws iam") {
 			t.Fatalf("%s has no remediation commands", f.Title)
 		}

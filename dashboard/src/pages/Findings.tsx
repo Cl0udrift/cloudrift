@@ -38,9 +38,10 @@ const TRIAGE_FETCH_PAGE_SIZE = 200;
 
 const SEVERITY_OPTIONS = ["", "critical", "high", "medium", "low"] as const;
 // Preset filters over existing API filters. Not stored per user; each is a plain URL state.
-const SAVED_VIEWS: { label: string; hint: string; filter: { module?: string; claimability?: string; adminLike?: boolean; trustStale?: boolean } }[] = [
+const SAVED_VIEWS: { label: string; hint: string; filter: { module?: string; claimability?: string; adminLike?: boolean; trustStale?: boolean; search?: string } }[] = [
   { label: "All findings", hint: "No module or flag filter", filter: {} },
   { label: "IAM identity risk", hint: "Declared permissions, user credentials and workload roles", filter: { module: "iam_entitlement" } },
+  { label: "Toxic combinations", hint: "Findings where several facts add up to a short route to admin", filter: { search: "toxic_combination" } },
   { label: "External access", hint: "Trust and resource policies naming external principals", filter: { module: "external_access" } },
   { label: "Admin-like trust", hint: "Trusted roles with admin-like declared permissions", filter: { adminLike: true } },
   { label: "Stale trust", hint: "Trust with no recent observed activity", filter: { trustStale: true } },
@@ -633,7 +634,7 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
             <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Saved views">
               <span className="cr-kpi-label mr-1">Views</span>
               {SAVED_VIEWS.map((view) => {
-                const active = (["module", "claimability", "adminLike", "trustStale"] as const).every(
+                const active = (["module", "claimability", "adminLike", "trustStale", "search"] as const).every(
                   (k) => (view.filter[k] ?? (k === "adminLike" || k === "trustStale" ? false : "")) === state[k]
                 );
                 return (
@@ -642,7 +643,7 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
                     type="button"
                     aria-pressed={active}
                     title={view.hint}
-                    onClick={() => patch({ severity: "", module: "", claimability: "", adminLike: false, trustStale: false, ...view.filter, page: 1 })}
+                    onClick={() => patch({ severity: "", module: "", claimability: "", adminLike: false, trustStale: false, search: "", ...view.filter, page: 1 })}
                     className={`hs-focus-ring rounded-md border px-2.5 py-1 text-xs font-medium ${
                       active
                         ? "border-cyan-500 bg-cyan-500/10 text-cyan-900 dark:text-cyan-200"

@@ -153,7 +153,7 @@ func Modules() []Module {
 		{
 			ID: "identities", Name: "Identities and permission matrix", Area: AreaInvestigate, Status: StatusReady,
 			Summary:     "Per-role and per-account view of declared permissions, last use and missing evidence.",
-			Covers:      []string{"Account by permission matrix", "Role profile with decisions and the reason for each", "Which users and roles can assume a role, and which workloads run as it", "Which controls are missing evidence"},
+			Covers:      []string{"Account by permission matrix", "Role profile with decisions and the reason for each", "Which users and roles can assume a role, and which workloads run as it", "Access Explorer: which users and roles can perform a role-assumption or identity-changing action on a chosen target", "Which controls are missing evidence"},
 			Limitations: []string{"Declared permissions are not evaluated access", "Who can assume a role comes from stored policies, not CloudTrail; accounts that were not scanned and federated principals are not listed", "The account matrix is for roles; users have their own table beside it"}, Page: "/identities",
 		},
 		{

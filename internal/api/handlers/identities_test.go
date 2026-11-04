@@ -106,3 +106,13 @@ func TestRoleUsageReturnsEmptyListsNotNull(t *testing.T) {
 		}
 	}
 }
+
+func TestWhoCanRejectsUnsupportedAction(t *testing.T) {
+	dir := t.TempDir()
+	writeScan(t, dir, "wc", time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), nil)
+	rr := httptest.NewRecorder()
+	GetWhoCan(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/wc/identities/who-can?action=s3:GetObject&arn=x", nil), "id", "wc"))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("an action the explorer cannot decide must be rejected, got %d %s", rr.Code, rr.Body.String())
+	}
+}

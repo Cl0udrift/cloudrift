@@ -18,25 +18,37 @@ const StatusPendingControls = "ALLOWED_PENDING_CONTROLS"
 // Denied callers, and callers that cannot be evaluated for lack of evidence, are counted but not listed. The result is a hypothesis
 // about what the stored policies allow, not a record of who did assume the role.
 func RoleAssumers(scanID string, target models.AssetNode, assets []models.AssetNode, rels []models.Relationship, when time.Time) (list []schema.RoleAssumer, evaluated, unknown int) {
+	return WhoCan(scanID, iamauth.ActionAssumeRole, target, assets, rels, when)
+}
+
+// WhoCan evaluates one action on target for every collected user and role. It supports sts:AssumeRole and
+// the identity-only IAM actions in the catalog (those decided by the caller's own policies), and the
+// result says what stored policies allow, not what anyone did.
+func WhoCan(scanID, action string, target models.AssetNode, assets []models.AssetNode, rels []models.Relationship, when time.Time) (list []schema.RoleAssumer, evaluated, unknown int) {
 	if when.IsZero() {
 		when = time.Unix(0, 0).UTC()
 	}
-	trust := trustSlot(target)
+	var trust iamauth.PolicySlot
+	resourceEvidence := "this action does not use a resource policy"
+	if action == iamauth.ActionAssumeRole {
+		trust = trustSlot(target)
+		resourceEvidence = "role assumption is governed by the trust policy"
+	}
 	for _, caller := range assets {
 		if caller.ARN == target.ARN || (caller.AssetType != models.AssetIAMRole && caller.AssetType != models.AssetIAMUser) {
 			continue
 		}
 		identity, _ := identitySlot(caller, assets, rels)
 		req := iamauth.AuthorizationRequest{
-			ScanID: scanID, PrincipalARN: caller.ARN, Action: iamauth.ActionAssumeRole,
+			ScanID: scanID, PrincipalARN: caller.ARN, Action: action,
 			ResourceARN: target.ARN, ResourceAccountID: target.AccountID, EvaluatedAt: when,
 			Identity: identity, TrustPolicy: trust,
 			PermissionsBoundary: boundaryFromRole(caller),
 			// A session policy can only narrow access, so none is assumed for this question.
 			SessionPolicies: iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "no session policy assumed; session policies only narrow access"},
 			SCPs:            orgControlSlot(caller, "scp"),
-			RCPs:            rcpForResource(assets, caller, target, iamauth.ActionAssumeRole, iamauth.PolicySlot{}),
-			ResourcePolicy:  iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "role assumption is governed by the trust policy"},
+			RCPs:            rcpForResource(assets, caller, target, action, iamauth.PolicySlot{}),
+			ResourcePolicy:  iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: resourceEvidence},
 		}
 		decision := iamauth.Evaluate(req)
 		evaluated++

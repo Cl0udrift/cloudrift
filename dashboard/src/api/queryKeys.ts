@@ -3,6 +3,7 @@ import type { ExternalEntitiesQueryParams, FindingsQueryParams } from "./types";
 export const queryKeys = {
   config: () => ["config"] as const,
   coverage: (scanId: string | null) => ["coverage", scanId] as const,
+  whoCan: (scanId: string | null, action: string, arn: string) => ["who-can", scanId, action, arn] as const,
   roleUsage: (scanId: string | null, arn: string | null) => ["role-usage", scanId, arn] as const,
   principals: (scanId: string | null) => ["principals", scanId] as const,
   principalPolicies: (scanId: string | null, arn: string | null) => ["principal-policies", scanId, arn] as const,

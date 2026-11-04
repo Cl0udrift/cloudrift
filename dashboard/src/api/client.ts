@@ -4,6 +4,7 @@ import type {
   CoverageReport,
   PrincipalListResponse,
   RoleUsageResponse,
+  WhoCanResponse,
   PrincipalPoliciesResponse,
   AccountsBreakdownResponse,
   DiffResponse,
@@ -100,6 +101,9 @@ export const apiClient = {
   },
   getRoleUsage(scanId: string, arn: string): Promise<RoleUsageResponse> {
     return fetchJSON<RoleUsageResponse>(`/scans/${encodeURIComponent(scanId)}/identities/usage${makeQueryString({ arn })}`);
+  },
+  getWhoCan(scanId: string, action: string, arn: string): Promise<WhoCanResponse> {
+    return fetchJSON<WhoCanResponse>(`/scans/${encodeURIComponent(scanId)}/identities/who-can${makeQueryString({ action, arn })}`);
   },
   getPrincipals(scanId: string): Promise<PrincipalListResponse> {
     return fetchJSON<PrincipalListResponse>(`/scans/${encodeURIComponent(scanId)}/principals`);

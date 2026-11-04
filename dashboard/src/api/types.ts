@@ -1316,6 +1316,18 @@ export interface RoleAssumer {
   status: string;
   reason: string;
 }
+export interface WhoCanResponse {
+  scan_id: string;
+  action: string;
+  target_arn: string;
+  callers: RoleAssumer[];
+  evaluated: number;
+  allowed: number;
+  possible: number;
+  unknown: number;
+  notes: string[];
+}
+
 export interface RoleUsageResponse {
   scan_id: string;
   role_arn: string;

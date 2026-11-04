@@ -39,7 +39,8 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/inventory", label: "Inventory", preserveSearch: true, Icon: IconBoxes },
       { to: "/identities", label: "Identities", preserveSearch: true, Icon: IconShield },
-      { to: "/principals", label: "Users & Groups", preserveSearch: true, Icon: IconShield }
+      { to: "/principals", label: "Users & Groups", preserveSearch: true, Icon: IconShield },
+      { to: "/access", label: "Access Explorer", preserveSearch: true, Icon: IconZap }
     ]
   },
   {

@@ -195,6 +195,7 @@ func identityFinding(subject models.AssetNode, category string, sev models.Sever
 	evidence["issue_category"] = strings.SplitN(category, "|", 2)[0]
 	evidence["assessment_version"] = "ciem-identity.1"
 	evidence["principal_arn"] = subject.ARN
+	enrichIdentityEvidence(subject, strings.SplitN(category, "|", 2)[0], evidence)
 	return models.Finding{
 		RemediationCmd: remediationFor(subject, strings.SplitN(category, "|", 2)[0], evidence),
 		ID:             hex.EncodeToString(sum[:6]), Title: title, Severity: sev, Module: models.ModuleIAMEntitlement,
@@ -240,4 +241,96 @@ func roleNameOf(arn string) string {
 		return arn[i+1:]
 	}
 	return arn
+}
+
+// PathNode is one step in the chain an analyst reads left to right. Kind "edge" is the link between two nodes.
+type PathNode struct {
+	Kind   string `json:"kind"` // user, group, role, workload, policy, edge
+	Label  string `json:"label"`
+	Detail string `json:"detail,omitempty"`
+	Risk   string `json:"risk,omitempty"` // bad, warn or empty
+}
+
+// RemediationOption is one way to fix a finding. The analyst picks a strategy and then reads its steps.
+type RemediationOption struct {
+	Strategy string   `json:"strategy"`
+	Why      string   `json:"why"`
+	Steps    []string `json:"steps"`
+}
+
+// enrichIdentityEvidence adds the track (is this exploitable now, or hygiene), the path that makes the
+// finding matter, the factors behind its severity, and fix strategies. All of it comes from stored facts.
+func enrichIdentityEvidence(subject models.AssetNode, category string, ev map[string]any) {
+	name := subject.Name
+	switch category {
+	case CatWeakCredentialToRole:
+		role, _ := ev["role_arn"].(string)
+		reason := "stale access key"
+		if b, _ := ev["console_without_mfa"].(bool); b {
+			reason = "console access, no MFA"
+		}
+		ev["track"] = "toxic_combination"
+		ev["path"] = []PathNode{
+			{Kind: "user", Label: name, Detail: reason, Risk: "warn"},
+			{Kind: "edge", Label: "can assume (trust and identity policies allow)"},
+			{Kind: "role", Label: roleNameOf(role), Detail: "administrative access", Risk: "bad"},
+		}
+		ev["severity_factors"] = []string{"the role has an unconditional administrative wildcard", "the user has a weak credential (" + reason + ")", "organization controls: " + strOf(ev["organization_controls"])}
+		ev["remediation_options"] = []RemediationOption{
+			{"Require MFA", "Makes a stolen password or key insufficient to reach the role.", []string{"Enable MFA for the user", "Add a aws:MultiFactorAuthPresent condition to the role's trust policy"}},
+			{"Narrow the trust", "Removes the route even if the credential is weak.", []string{"Edit the role's trust policy so only the principals that need it are listed", "Review who else can assume the role from the role page"}},
+			{"Remove the credential", "Deletes the weak credential if nobody needs it.", []string{"Delete the console password or the stale access key"}},
+		}
+	case CatWorkloadAdminRole:
+		ev["track"] = "toxic_combination"
+		path := []PathNode{{Kind: "workload", Label: workloadSummary(ev), Risk: "warn"}, {Kind: "edge", Label: "runs as"}, {Kind: "role", Label: name, Detail: "administrative access", Risk: "bad"}}
+		ev["path"] = path
+		ev["severity_factors"] = []string{"the role has an unconditional administrative wildcard", "it is attached to running compute, so a compromise of the workload inherits it"}
+		ev["remediation_options"] = []RemediationOption{
+			{"Replace the role", "Give the workload only what it needs.", []string{"Create a role scoped to the workload's real calls", "Attach it in place of the administrative role"}},
+			{"Scope the role", "Keep the role but remove the wildcard.", []string{"Replace the administrative policy with specific actions and resources"}},
+		}
+	case CatUserAdministrative:
+		ev["track"] = "posture"
+		src, _ := ev["sources"].([]string)
+		via := "directly"
+		if len(src) > 0 {
+			via = strings.Join(src, ", ")
+		}
+		ev["path"] = []PathNode{{Kind: "user", Label: name, Risk: "warn"}, {Kind: "edge", Label: "holds through"}, {Kind: "policy", Label: via, Detail: "administrative wildcard", Risk: "bad"}}
+		ev["severity_factors"] = []string{"an unconditional administrative wildcard Allow", "not evaluated: a Deny elsewhere could limit it"}
+		ev["remediation_options"] = []RemediationOption{
+			{"Move admin to a role", "Admins assume a role with MFA instead of holding standing access.", []string{"Create an administrator role that requires MFA", "Remove the administrative policy from the user or group"}},
+		}
+	case CatUserNoMFA:
+		ev["track"] = "posture"
+		ev["severity_factors"] = []string{"a console password exists", "no MFA device is active"}
+		ev["remediation_options"] = []RemediationOption{
+			{"Enable MFA", "Adds a second factor.", []string{"Have the user register an MFA device"}},
+			{"Remove console access", "If the user only needs API access.", []string{"Delete the login profile"}},
+		}
+	case CatUserKeyHygiene:
+		ev["track"] = "posture"
+		ev["severity_factors"] = []string{"an active key is old, unused or never used"}
+		ev["remediation_options"] = []RemediationOption{
+			{"Rotate", "Replace a key that is still needed.", []string{"Create a second key, move the caller to it, deactivate the old one"}},
+			{"Delete", "Remove a key nobody uses.", []string{"Deactivate it, wait a quiet period, then delete it"}},
+		}
+	}
+}
+
+func strOf(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func workloadSummary(ev map[string]any) string {
+	names, _ := ev["workloads"].([]string)
+	switch len(names) {
+	case 0:
+		return "workloads"
+	case 1:
+		return names[0]
+	}
+	return fmt.Sprintf("%s and %d more", names[0], len(names)-1)
 }
