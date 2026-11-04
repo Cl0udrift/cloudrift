@@ -36,12 +36,14 @@ type ScanSummaryResponse struct {
 	LowCount                  int     `json:"low_count"`
 	TotalMonthlyDirectCostUSD float64 `json:"total_monthly_direct_cost_usd"`
 	TotalMonthlyRiskCostUSD   float64 `json:"total_monthly_risk_cost_usd"`
-	ReclaimableCount          int     `json:"reclaimable_count"`
-	DanglingCount             int     `json:"dangling_count"`
-	BrokenCount               int     `json:"broken_count"`
-	EdgeObscuredCount         int     `json:"edge_obscured_count"`
-	ExternalAccessCount       int     `json:"external_access_count"`
-	OrphanedEdgeCount         int     `json:"orphaned_edge_count"`
+	// IdentityIssueCounts counts identity findings by evidence issue_category.
+	IdentityIssueCounts map[string]int `json:"identity_issue_counts"`
+	ReclaimableCount    int            `json:"reclaimable_count"`
+	DanglingCount       int            `json:"dangling_count"`
+	BrokenCount         int            `json:"broken_count"`
+	EdgeObscuredCount   int            `json:"edge_obscured_count"`
+	ExternalAccessCount int            `json:"external_access_count"`
+	OrphanedEdgeCount   int            `json:"orphaned_edge_count"`
 	// Trust rollups (external_access only); derived from finding evidence, same semantics as GET …/findings filters.
 	ExternalTrustStaleCount      int `json:"external_trust_stale_count"`
 	ExternalPrivilegedCount      int `json:"external_privileged_count"`

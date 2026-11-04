@@ -235,6 +235,7 @@ function HighSignalLayout({
         }
         onOpenStaleTrustExternal={() => goToFindings({ module: "external_access", trust_stale: "true", page: "1" })}
         onOpenAdminLikeExternal={() => goToFindings({ module: "external_access", admin_like: "true", page: "1" })}
+        onOpenIdentity={(category) => goToFindings({ search: category, page: "1" })}
         onOpenStalePrivilegedExternal={() =>
           goToFindings({
             module: "external_access",

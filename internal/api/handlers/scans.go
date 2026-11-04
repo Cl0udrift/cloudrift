@@ -203,11 +203,17 @@ func summarizeScan(scanID string, meta *models.ScanSnapshot, findings []models.F
 	resp := schema.ScanSummaryResponse{
 		ScanID:                        scanID,
 		FindingCount:                  len(findings),
+		IdentityIssueCounts:           map[string]int{},
 		ExternalPrincipalTypes:        []schema.ExternalPrincipalTypeCount{},
 		ExternalEntityByPrincipalType: []schema.ExternalEntityPrincipalTypeCount{},
 		ExternalEntitiesPreview:       []schema.ExternalEntityRow{},
 	}
 	for _, f := range findings {
+		if v, _ := f.Evidence["assessment_version"].(string); strings.HasPrefix(v, "ciem-identity") {
+			if c, _ := f.Evidence["issue_category"].(string); c != "" {
+				resp.IdentityIssueCounts[c]++
+			}
+		}
 		resp.TotalMonthlyDirectCostUSD += f.MonthlyDirectCost
 		resp.TotalMonthlyRiskCostUSD += f.MonthlyRiskCost
 		switch strings.ToLower(string(f.Severity)) {

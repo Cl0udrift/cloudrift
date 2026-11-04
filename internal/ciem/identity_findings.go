@@ -196,7 +196,8 @@ func identityFinding(subject models.AssetNode, category string, sev models.Sever
 	evidence["assessment_version"] = "ciem-identity.1"
 	evidence["principal_arn"] = subject.ARN
 	return models.Finding{
-		ID: hex.EncodeToString(sum[:6]), Title: title, Severity: sev, Module: models.ModuleIAMEntitlement,
+		RemediationCmd: remediationFor(subject, strings.SplitN(category, "|", 2)[0], evidence),
+		ID:             hex.EncodeToString(sum[:6]), Title: title, Severity: sev, Module: models.ModuleIAMEntitlement,
 		Claimability: models.ClaimUnknown, AffectedARN: subject.ARN, AccountID: subject.AccountID,
 		Impact: impact, Recommendation: recommendation, Evidence: evidence,
 	}
@@ -209,4 +210,34 @@ func hasUnconditionalAdmin(items []schema.PermissionCandidate) bool {
 		}
 	}
 	return false
+}
+
+// remediationFor gives read-only commands to inspect the problem, then the change as a comment
+// to run once the analyst has confirmed it. Nothing here is run by Cloudrift.
+func remediationFor(subject models.AssetNode, category string, evidence map[string]any) string {
+	name := subject.Name
+	switch category {
+	case CatUserNoMFA:
+		return "aws iam get-login-profile --user-name " + name + "\naws iam list-mfa-devices --user-name " + name +
+			"\n# Enable MFA for the user, or remove the console password if it is not needed:\n# aws iam delete-login-profile --user-name " + name
+	case CatUserKeyHygiene:
+		return "aws iam list-access-keys --user-name " + name + "\naws iam get-access-key-last-used --access-key-id <KEY_ID>" +
+			"\n# Deactivate a key nobody uses, then delete it after a quiet period:\n# aws iam update-access-key --user-name " + name + " --access-key-id <KEY_ID> --status Inactive"
+	case CatUserAdministrative:
+		return "aws iam list-attached-user-policies --user-name " + name + "\naws iam list-user-policies --user-name " + name + "\naws iam list-groups-for-user --user-name " + name
+	case CatWeakCredentialToRole:
+		role, _ := evidence["role_arn"].(string)
+		return "aws iam get-role --role-name " + roleNameOf(role) + " --query Role.AssumeRolePolicyDocument\naws iam list-mfa-devices --user-name " + name +
+			"\n# Add a condition requiring aws:MultiFactorAuthPresent to the trust policy, or narrow who can assume the role."
+	case CatWorkloadAdminRole:
+		return "aws iam list-attached-role-policies --role-name " + name + "\naws iam list-role-policies --role-name " + name
+	}
+	return ""
+}
+
+func roleNameOf(arn string) string {
+	if i := strings.LastIndex(arn, "/"); i >= 0 {
+		return arn[i+1:]
+	}
+	return arn
 }

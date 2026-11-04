@@ -7,6 +7,7 @@ import { queryKeys } from "../api/queryKeys";
 import type { PolicySource, PrincipalListItem } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
+import { SeverityBadge } from "../components/SeverityBadge";
 import { StateChip } from "../components/ui/StatusChip";
 import { useScanContext } from "../hooks/useScanContext";
 import { encodePrincipalId } from "../lib/principalId";
@@ -39,6 +40,13 @@ function Source({ s }: { s: PolicySource }) {
 
 function Detail({ scanId, item }: { scanId: string; item: PrincipalListItem }) {
   const query = useQuery({ queryKey: queryKeys.principalPolicies(scanId, item.arn), queryFn: () => apiClient.getPrincipalPolicies(scanId, item.arn) });
+  // Everything known about this identity in one place: its issues sit next to its policies.
+  const issues = useQuery({
+    queryKey: ["principal", "issues", scanId, item.arn],
+    queryFn: () => apiClient.getFindings(scanId, { search: item.arn, page: 1, page_size: 10 }),
+    staleTime: 30_000,
+    retry: false
+  });
   if (query.isLoading) return <StatePanel>Loading policies…</StatePanel>;
   if (query.isError || !query.data) return <StatePanel intent="error" title="Failed to load policies">{formatQueryError(query.error)}</StatePanel>;
   const v = query.data;
@@ -57,6 +65,19 @@ function Detail({ scanId, item }: { scanId: string; item: PrincipalListItem }) {
             Investigate escalation paths from this user
           </Link>
         </p>
+      ) : null}
+      {(issues.data?.items ?? []).length > 0 ? (
+        <div className="rounded border border-red-300 bg-red-50 p-3 text-sm dark:border-red-900/60 dark:bg-red-950/20">
+          <p className="font-semibold">{plural(issues.data!.pagination.total_items, "open finding")} on this {v.kind}</p>
+          <ul className="mt-1 space-y-1">
+            {issues.data!.items.map((f) => (
+              <li key={f.id} className="flex flex-wrap items-center gap-2">
+                <SeverityBadge severity={f.severity} />
+                <Link className="underline" to={`/findings?scan_id=${encodeURIComponent(scanId)}&finding_id=${encodeURIComponent(f.id)}`}>{f.title}</Link>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       {v.credentials ? (
         <div className="rounded border border-slate-200 p-3 text-sm dark:border-slate-700">

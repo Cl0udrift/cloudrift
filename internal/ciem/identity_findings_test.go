@@ -1,6 +1,7 @@
 package ciem
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,12 @@ func TestScoreIdentityHygiene(t *testing.T) {
 	} {
 		if got[cat] != sev {
 			t.Fatalf("%s: want %s, got %q (all: %v)", cat, sev, got[cat], got)
+		}
+	}
+
+	for _, f := range ScoreIdentityHygiene(assets, rels, now) {
+		if f.RemediationCmd == "" || !strings.Contains(f.RemediationCmd, "aws iam") {
+			t.Fatalf("%s has no remediation commands", f.Title)
 		}
 	}
 

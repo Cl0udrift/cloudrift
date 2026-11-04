@@ -31,6 +31,8 @@ export interface ExternalPrincipalTypeCount {
 
 export interface ScanSummaryResponse {
   scan_id: string;
+  /** Identity findings by issue category. Missing on scans summarized by an older server. */
+  identity_issue_counts?: Record<string, number>;
   finding_count: number;
   critical_count: number;
   high_count: number;
