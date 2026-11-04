@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,5 +81,28 @@ func TestIdentityInventoryFiltersAndProfile(t *testing.T) {
 	ListIdentities(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/missing/identities", nil), "id", "missing"))
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("missing scan status %d", rr.Code)
+	}
+}
+
+// A role nobody can assume must still return lists, because JSON null crashes the page.
+func TestRoleUsageReturnsEmptyListsNotNull(t *testing.T) {
+	dir := t.TempDir()
+	writeScan(t, dir, "ru-scan", time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), nil)
+	if err := os.MkdirAll(filepath.Join(dir, "ru-scan", "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	role := models.AssetNode{ARN: "arn:aws:iam::111111111111:role/Lonely", Name: "Lonely", AccountID: "111111111111", AssetType: models.AssetIAMRole, ScanID: "ru-scan", Properties: map[string]any{}}
+	writeJSONFile(t, filepath.Join(dir, "ru-scan", "assets", "roles.json"), []models.AssetNode{role})
+	writeJSONFile(t, filepath.Join(dir, "ru-scan", "relationships.json"), []models.Relationship{})
+
+	rr := httptest.NewRecorder()
+	GetRoleUsage(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/ru-scan/identities/usage?arn="+role.ARN, nil), "id", "ru-scan"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("%d %s", rr.Code, rr.Body.String())
+	}
+	for _, field := range []string{`"assumers":[]`, `"workloads":[]`, `"notes":[`} {
+		if !strings.Contains(rr.Body.String(), field) {
+			t.Fatalf("want %s in %s", field, rr.Body.String())
+		}
 	}
 }

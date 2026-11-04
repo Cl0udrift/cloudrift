@@ -121,6 +121,9 @@ func GetRoleUsage(outputDir string) http.HandlerFunc {
 				"This shows what stored policies allow. It does not show who assumed the role. That needs CloudTrail.",
 			},
 		}
+		if out.Assumers == nil {
+			out.Assumers = []schema.RoleAssumer{} // JSON null would crash the page
+		}
 		if out.Workloads == nil {
 			out.Workloads = []schema.WorkloadAttachment{}
 		}

@@ -14,7 +14,7 @@ password = "dev-password-only"
 org_role_name = ""   # role assumed in each member account for org-wide scans.
 #                                        # Set to "" for no-assume mode: scan only the caller's own
 #                                        # account using your current credentials (no role to deploy).
-management_profile = "defaults"         # AWS profile/credentials used to start the scan
+management_profile = "cloudrift"         # AWS profile/credentials used to start the scan
 
 # [synthesis]
 # provider = "anthropic"             # LLM provider for `cloudrift query` answer synthesis

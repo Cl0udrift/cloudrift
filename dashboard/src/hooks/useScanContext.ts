@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
@@ -6,13 +6,13 @@ import { queryKeys } from "../api/queryKeys";
 import type { ScanListItem } from "../api/types";
 
 export function useScanContext() {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const queryScanId = params.get("scan_id");
 
   const scansQuery = useQuery({
     queryKey: queryKeys.scans(),
     queryFn: () => apiClient.getScans(),
-    staleTime: 60_000,
+    staleTime: 15_000,
     gcTime: 300_000
   });
 
@@ -41,6 +41,26 @@ export function useScanContext() {
     }
   }, [queryScanId]);
 
+  /** Pin a scan: remembered across pages and reloads, and carried in the URL so the view can be shared. */
+  const selectScan = useCallback(
+    (scanId: string) => {
+      try {
+        window.localStorage.setItem("cloudrift.lastScan", scanId);
+      } catch {
+        /* ignore */
+      }
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("scan_id", scanId);
+          return next;
+        },
+        { replace: false }
+      );
+    },
+    [setParams]
+  );
+
   const currentScan = useMemo((): ScanListItem | null => {
     if (!selectedScanId) {
       return null;
@@ -53,6 +73,7 @@ export function useScanContext() {
     currentScan,
     scans,
     scansQuery,
+    selectScan,
     isResolvingScan: scansQuery.isLoading && !selectedScanId
   };
 }

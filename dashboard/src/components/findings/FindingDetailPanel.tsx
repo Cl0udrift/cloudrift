@@ -198,7 +198,7 @@ export function FindingDetailPanelContent({
             <CopyIdentifier value={String(ev.principal_arn || item.affected_arn || "")} />
             <p className="cr-helper">
               {String(ev.principal_arn || "").includes(":user/") ? (
-                <Link className="underline" to={`/principals${scanId ? `?scan_id=${encodeURIComponent(scanId)}` : ""}`}>Open Users &amp; Groups</Link>
+                <Link className="underline" to={`/principals?${scanId ? `scan_id=${encodeURIComponent(scanId)}&` : ""}principal=${encodeURIComponent(String(ev.principal_arn || ""))}`}>Open Users &amp; Groups</Link>
               ) : (
                 <Link className="underline" to={`/identities${scanId ? `?scan_id=${encodeURIComponent(scanId)}` : ""}`}>Open Identities</Link>
               )}

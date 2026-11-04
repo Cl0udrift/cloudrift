@@ -7,6 +7,7 @@ import { apiClient } from "../api/client";
 import { formatQueryError } from "../api/httpError";
 import { queryKeys } from "../api/queryKeys";
 import type { BlastAnalysisMode, BlastGraphEdge, BlastGraphNode, IdentityAttackReport, PermissionBlastReport } from "../api/types";
+import { BlastStarters } from "../components/blast/BlastStarters";
 import { BlastExplorerCanvas } from "../components/blast/BlastExplorerCanvas";
 import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
@@ -160,11 +161,9 @@ export function BlastExplorerPage() {
         </p>
       )}
       {(!scan || rootCount === 0 || rootCount > 1) && (
-        <StatePanel intent="empty" title="Choose a context">
-          Open this view from a critical/high finding (Blast radius card) or pass{" "}
-          <code className="rounded bg-slate-200 px-1 text-xs dark:bg-slate-800">?scan=…&amp;finding=…</code> or{" "}
-          <code className="rounded bg-slate-200 px-1 text-xs dark:bg-slate-800">entity=…</code> or{" "}
-          <code className="rounded bg-slate-200 px-1 text-xs dark:bg-slate-800">principal=…</code>.
+        <StatePanel intent="empty" title="Choose where to start">
+          <p className="mb-3">Pick a finding or a user below, or open this view from a finding's Blast radius card.</p>
+          {scan ? <BlastStarters scanId={scan} /> : <p>Select a scan first.</p>}
         </StatePanel>
       )}
 

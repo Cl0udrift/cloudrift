@@ -19,6 +19,15 @@ export function ScanSnapshotStrip({ scanId, summary, hasPreviousScan }: { scanId
     queryFn: () => apiClient.listIdentities(scanId, { page: 1, page_size: 1 }),
     staleTime: 60_000
   });
+  const principals = useQuery({
+    queryKey: ["overview", "principals", scanId],
+    queryFn: () => apiClient.getPrincipals(scanId),
+    staleTime: 60_000,
+    retry: false
+  });
+  const users = (principals.data?.items ?? []).filter((p) => p.kind === "user");
+  const noMfa = users.filter((p) => p.credentials_collected && p.console_enabled && !p.mfa_active).length;
+  const admins = users.filter((p) => p.broad_candidates.includes("administrative_wildcard")).length;
   const q = `?scan_id=${encodeURIComponent(scanId)}`;
   const supported = inventory.data?.collection?.supported_inventory;
   const q0 = `scan_id=${encodeURIComponent(scanId)}`;
@@ -46,7 +55,7 @@ export function ScanSnapshotStrip({ scanId, summary, hasPreviousScan }: { scanId
         ) : null}
       </div>
       <h3 className="cr-section-title">Scan snapshot</h3>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <MetricCard
           label="Discovered AWS resources"
           value={inventory.data ? inventory.data.total_assets : null}
@@ -60,6 +69,19 @@ export function ScanSnapshotStrip({ scanId, summary, hasPreviousScan }: { scanId
           context={identities.isError ? "Identity data not available for this scan" : "Declared permissions are not evaluated access"}
           to={`/identities${q}`}
           actionLabel="Explore identities"
+        />
+        <MetricCard
+          label="IAM users"
+          value={principals.data ? users.length : null}
+          context={
+            principals.isError
+              ? "User data not available for this scan"
+              : users.length === 0
+                ? "No users collected (policy inventory may be off)"
+                : `${noMfa} console without MFA · ${admins} with administrative access`
+          }
+          to={`/principals${q}`}
+          actionLabel="Open Users & Groups"
         />
       </div>
     </section>

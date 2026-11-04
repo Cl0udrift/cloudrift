@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { formatQueryError } from "../api/httpError";
@@ -8,6 +9,8 @@ import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
 import { StateChip } from "../components/ui/StatusChip";
 import { useScanContext } from "../hooks/useScanContext";
+import { encodePrincipalId } from "../lib/principalId";
+import { plural, principalReasons, sortByAttention } from "../lib/principalRisk";
 
 function Source({ s }: { s: PolicySource }) {
   return (
@@ -42,9 +45,19 @@ function Detail({ scanId, item }: { scanId: string; item: PrincipalListItem }) {
   return (
     <div className="space-y-3">
       <p className="text-sm">
-        <span className="font-semibold">{v.sources.length}</span> policies apply to {v.kind} <span className="font-mono">{v.name}</span>
+        <span className="font-semibold">{plural(v.sources.length, "policy", "policies")}</span> apply to {v.kind} <span className="font-mono">{v.name}</span>
         {v.groups.length ? <> (member of {v.groups.join(", ")})</> : null}. Permissions boundary: {v.boundary_status ?? "unknown"}.
       </p>
+      {v.kind === "user" ? (
+        <p className="text-sm">
+          <Link
+            className="underline"
+            to={`/blast-explorer?scan=${encodeURIComponent(scanId)}&principal=${encodeURIComponent(encodePrincipalId(item.arn, "iam_user", item.account_id))}&mode=attack_path`}
+          >
+            Investigate escalation paths from this user
+          </Link>
+        </p>
+      ) : null}
       {v.credentials ? (
         <div className="rounded border border-slate-200 p-3 text-sm dark:border-slate-700">
           <div className="flex flex-wrap items-center gap-2">
@@ -81,9 +94,23 @@ function Detail({ scanId, item }: { scanId: string; item: PrincipalListItem }) {
 export function PrincipalsPage() {
   const { selectedScanId } = useScanContext();
   const query = useQuery({ queryKey: queryKeys.principals(selectedScanId), queryFn: () => apiClient.getPrincipals(selectedScanId as string), enabled: Boolean(selectedScanId) });
-  const [selected, setSelected] = useState<string | null>(null);
-  const items = query.data?.items ?? [];
-  const current = items.find((i) => i.arn === selected) ?? null;
+  // The chosen principal lives in the URL so a finding or another page can link straight to it.
+  const [params, setParams] = useSearchParams();
+  const selected = params.get("principal");
+  const setSelected = (arn: string) =>
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("principal", arn);
+      return next;
+    });
+  const [needle, setNeedle] = useState("");
+  const [kind, setKind] = useState<"" | "user" | "group">("");
+  const all = query.data?.items ?? [];
+  const items = useMemo(() => {
+    const n = needle.trim().toLowerCase();
+    return sortByAttention(all).filter((i) => (!kind || i.kind === kind) && (!n || `${i.name} ${i.account_id} ${i.groups.join(" ")}`.toLowerCase().includes(n)));
+  }, [all, needle, kind]);
+  const current = all.find((i) => i.arn === selected) ?? null;
   return (
     <section className="space-y-4">
       <PageHeader
@@ -97,11 +124,22 @@ export function PrincipalsPage() {
         <StatePanel>Loading users and groups…</StatePanel>
       ) : query.isError ? (
         <StatePanel intent="error" title="Failed to load users and groups">{formatQueryError(query.error)}</StatePanel>
-      ) : items.length === 0 ? (
+      ) : all.length === 0 ? (
         <StatePanel>No users or groups in this scan. {query.data?.note}</StatePanel>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="hs-input min-w-[10rem] flex-1 text-sm" type="search" placeholder="Search name, account or group" aria-label="Search users and groups" value={needle} onChange={(e) => setNeedle(e.target.value)} />
+            <select className="hs-input text-sm" aria-label="Filter by kind" value={kind} onChange={(e) => setKind(e.target.value as "" | "user" | "group")}>
+              <option value="">Users and groups</option>
+              <option value="user">Users</option>
+              <option value="group">Groups</option>
+            </select>
+          </div>
+          <p className="cr-helper">Showing {items.length} of {all.length}. Those with something to check come first.</p>
           <ul className="max-h-[70vh] space-y-1 overflow-auto">
+            {items.length === 0 ? <li className="cr-helper">No match. Clear the search or the kind filter.</li> : null}
             {items.map((i) => (
               <li key={i.arn}>
                 <button
@@ -112,15 +150,19 @@ export function PrincipalsPage() {
                 >
                   <span className="font-medium">{i.name}</span> <span className="text-xs text-slate-500">{i.kind} · {i.account_id}</span>
                   <div className="text-xs text-slate-500">
-                    {i.policy_count} policies{i.groups.length ? ` · groups: ${i.groups.join(", ")}` : ""}
+                    {plural(i.policy_count, "policy", "policies")}{i.groups.length ? ` · groups: ${i.groups.join(", ")}` : ""}
                     {i.has_deny ? " · has Deny" : ""}
-                    {i.credentials_collected && i.console_enabled && !i.mfa_active ? " · console without MFA" : ""}
-                    {i.credential_findings > 0 ? ` · ${i.credential_findings} credential findings` : ""}
                   </div>
+                  {principalReasons(i).length > 0 ? (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {principalReasons(i).map((r) => <StateChip key={r} tone="warn" glyph="!" label={r} />)}
+                    </div>
+                  ) : null}
                 </button>
               </li>
             ))}
           </ul>
+          </div>
           <div>{current ? <Detail scanId={selectedScanId} item={current} /> : <StatePanel>Choose a user or group to see its policies.</StatePanel>}</div>
         </div>
       )}

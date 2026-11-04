@@ -1,7 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { apiClient } from "../api/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { useScanContext } from "../hooks/useScanContext";
+import { useScanRunStatusQuery } from "../hooks/useDashboardQueries";
 import type { InventorySummary } from "../api/types";
 import { formatCount } from "../lib/format";
 import { CollectionChip, StateChip } from "./ui/StatusChip";
@@ -13,7 +16,21 @@ function formatTimestamp(iso?: string): string {
 
 /** Persistent scan scope shown in the topbar on every page. Uses only fields the scan list API returns. */
 export function ScanContextBar() {
-  const { selectedScanId, currentScan, scansQuery, isResolvingScan } = useScanContext();
+  const { selectedScanId, currentScan, scans, scansQuery, selectScan, isResolvingScan } = useScanContext();
+  const queryClient = useQueryClient();
+  const runStatus = useScanRunStatusQuery(5000);
+  const previous = useRef<{ status?: string; newest?: string; selected: string | null }>({ selected: null });
+  // When a scan finishes, refetch everything and move to it unless the user is viewing an older scan on purpose.
+  useEffect(() => {
+    const status = runStatus.data?.status;
+    const before = previous.current;
+    if (before.status === "running" && status && status !== "running") {
+      void queryClient.invalidateQueries();
+      const finished = runStatus.data?.scan_id;
+      if (status !== "failed" && finished && (!before.selected || before.selected === before.newest)) selectScan(finished);
+    }
+    previous.current = { status, newest: scans[0]?.scan_id, selected: selectedScanId };
+  }, [runStatus.data?.status, runStatus.data?.scan_id, scans, selectedScanId, queryClient, selectScan]);
   // Shares its cache key with the Overview snapshot, so no extra request when both are mounted.
   const inventory = useQuery({
     queryKey: ["overview", "inventory", selectedScanId],
@@ -35,7 +52,23 @@ export function ScanContextBar() {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-700 dark:text-slate-300" aria-label="Selected scan">
       <span className="cr-kpi-label !text-[10px]">Scan</span>
-      <code className="cr-mono max-w-[14rem] truncate" title={selectedScanId}>{selectedScanId}</code>
+      {scans.length > 1 ? (
+        <select
+          className="hs-input max-w-[18rem] truncate py-0.5 text-xs"
+          aria-label="Choose which scan to view"
+          value={selectedScanId}
+          onChange={(e) => selectScan(e.target.value)}
+        >
+          {!scans.some((s) => s.scan_id === selectedScanId) ? <option value={selectedScanId}>{selectedScanId}</option> : null}
+          {scans.map((s) => (
+            <option key={s.scan_id} value={s.scan_id}>
+              {`${s.scan_id} · ${formatTimestamp(s.timestamp)} · ${s.finding_count} findings${s.synthetic ? " · demo" : ""}`}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <code className="cr-mono max-w-[14rem] truncate" title={selectedScanId}>{selectedScanId}</code>
+      )}
       {!currentScan && !selectedScanId.startsWith("demo") ? (
         <StateChip tone="unk" glyph="?" label="Origin unknown" title="Scan is not in the scan list yet" />
       ) : synthetic ? (

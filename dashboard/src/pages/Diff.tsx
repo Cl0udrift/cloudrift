@@ -47,9 +47,7 @@ export function DiffPage() {
         <ScanRequired />
       ) : !oldScanId ? (
         <StatePanel intent="empty" title="No baseline scan">
-          Need at least two scans, or select a scan that is not the oldest in the list. The baseline is always the{" "}
-          <strong className="text-slate-700 dark:text-slate-300">next</strong> scan after the current one in newest-first order from{" "}
-          <code className="text-cyan-800 dark:text-cyan-200/80">/api/scans</code>.
+          A diff needs an older scan to compare against. Run another scan, or choose a newer scan from the picker at the top: the baseline is the scan just before the one you are viewing.
         </StatePanel>
       ) : query.isLoading ? (
         <StatePanel>Loading diff…</StatePanel>
