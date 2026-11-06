@@ -135,11 +135,11 @@ func CollectOrgAuthorization(ctx context.Context, api OrgAuthorizationAPI, accou
 	return ev
 }
 
-// ApplyOrgEvidence stamps collected organization controls onto IAM roles.
-// Roles outside the collected account set are left unchanged.
+// ApplyOrgEvidence stamps collected organization controls onto IAM roles and users.
+// SCPs and RCPs limit users like roles. Principals outside the collected account set are left unchanged.
 func ApplyOrgEvidence(nodes []models.AssetNode, ev OrgAuthorizationEvidence) {
 	for i := range nodes {
-		if nodes[i].AssetType != models.AssetIAMRole {
+		if nodes[i].AssetType != models.AssetIAMRole && nodes[i].AssetType != models.AssetIAMUser {
 			continue
 		}
 		if _, ok := ev.Accounts[nodes[i].AccountID]; !ok && ev.Discovery == "collected" {

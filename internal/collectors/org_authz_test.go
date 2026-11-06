@@ -287,3 +287,12 @@ func TestOrgAuthorization_ConsolidatedBillingHasNoPolicies(t *testing.T) {
 		t.Fatalf("%v", nodes[0].Properties)
 	}
 }
+
+func TestOrgAuthorization_UsersGetControlEvidenceToo(t *testing.T) {
+	ev := CollectOrgAuthorization(context.Background(), &fakeOrgAuth{describeErr: orgAPIError{code: "AWSOrganizationsNotInUseException", message: "none"}}, []string{"111111111111"})
+	nodes := []models.AssetNode{{ARN: "arn:aws:iam::111111111111:user/bob", AssetType: models.AssetIAMUser, AccountID: "111111111111"}}
+	ApplyOrgEvidence(nodes, ev)
+	if nodes[0].Properties["scp_status"] != "confirmed_absent" {
+		t.Fatalf("user got no organization evidence: %v", nodes[0].Properties)
+	}
+}

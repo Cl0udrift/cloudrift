@@ -93,3 +93,19 @@ func TestPrincipalListNeverReturnsNullLists(t *testing.T) {
 		t.Fatalf("lists must be empty, not null, for the dashboard: %#v", items)
 	}
 }
+
+func TestNewUnusedKeyIsNotFlagged(t *testing.T) {
+	now := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	key := func(rotated string) models.AssetNode {
+		return models.AssetNode{ARN: "u", AssetType: models.AssetIAMUser, Properties: map[string]any{
+			"credential_report": "collected",
+			"access_keys":       []map[string]any{{"slot": "access_key_1", "active": true, "last_rotated": rotated, "last_used": ""}},
+		}}
+	}
+	if got := CredentialSummaryFor(key("2026-01-09T00:00:00Z"), now); len(got.Findings) != 0 {
+		t.Fatalf("a 1-day-old unused key was flagged: %v", got.Findings)
+	}
+	if got := CredentialSummaryFor(key("2026-01-01T00:00:00Z"), now); len(got.Findings) != 1 {
+		t.Fatalf("a 9-day-old unused key must be flagged: %v", got.Findings)
+	}
+}

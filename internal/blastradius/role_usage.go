@@ -61,6 +61,9 @@ func WhoCan(scanID, action string, target models.AssetNode, assets []models.Asse
 			probe.RCPs = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "not checked: RCPs were not collected"}
 			if again := iamauth.Evaluate(probe); again.Status == iamauth.StatusAllowed {
 				status, reason = StatusPendingControls, "identity and trust policies allow it; organization controls (SCP/RCP) were not checked"
+				if action == iamauth.ActionAssumeRole && trustAloneAllows(probe) {
+					reason = "the trust policy names this caller, so no identity policy is needed; organization controls (SCP/RCP) were not checked"
+				}
 			}
 		}
 		if status == iamauth.StatusDenied || reason == iamauth.ReasonNoAllow {
@@ -87,4 +90,11 @@ func WhoCan(scanID, action string, target models.AssetNode, assets []models.Asse
 		return list[i].ARN < list[j].ARN
 	})
 	return list, evaluated, unknown
+}
+
+// trustAloneAllows reports whether the call is allowed with no caller identity policy at all,
+// which is the same-account case where the trust policy names the caller.
+func trustAloneAllows(req iamauth.AuthorizationRequest) bool {
+	req.Identity = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "ignored to test the trust policy alone"}
+	return iamauth.Evaluate(req).Status == iamauth.StatusAllowed
 }

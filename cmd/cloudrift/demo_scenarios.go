@@ -623,7 +623,7 @@ func securityScenario(scanID, scenario string) ([]models.AssetNode, []models.Rel
 		caller := secRole(scanID, demoAcctCore, "SecUnauthCaller", map[string]any{
 			"policy_inventory_evidence": "demo observation: iam:ListRolePolicies and iam:ListAttachedRolePolicies returned no policies",
 		})
-		target := secRole(scanID, demoAcctCore, "SecUnauthTarget", map[string]any{"trust_policy_document": trustAllow(caller.ARN)})
+		target := secRole(scanID, demoAcctCore, "SecUnauthTarget", map[string]any{"trust_policy_document": trustAllow("arn:aws:iam::"+demoAcctCore+":root")})
 		add(caller, nil, target)
 		rels = append(rels, ownedBy(scanID, target))
 	case "attack-caller-session":

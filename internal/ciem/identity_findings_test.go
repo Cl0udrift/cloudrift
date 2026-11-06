@@ -104,3 +104,15 @@ func TestAdministrativeThroughGroup(t *testing.T) {
 		t.Fatalf("source should name the group: %v", got[0].Evidence["sources"])
 	}
 }
+
+func TestSameAccountNamedTrustIsClassified(t *testing.T) {
+	role := models.AssetNode{ARN: "arn:aws:iam::111111111111:role/R", AssetType: models.AssetIAMRole, AccountID: "111111111111", Properties: map[string]any{
+		"trust_policy_document": `{"Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::111111111111:user/bob"},"Action":"sts:AssumeRole"}]}`}}
+	if got := ClassifyRole(role, nil, nil); len(got) != 1 || got[0] != ClassSameAccount {
+		t.Fatalf("classes = %v", got)
+	}
+	role.Properties["trust_policy_document"] = `{"Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::222222222222:user/x"},"Action":"sts:AssumeRole"}]}`
+	if got := ClassifyRole(role, nil, nil); len(got) != 1 || got[0] != ClassUnresolved {
+		t.Fatalf("a different account must stay unresolved here, got %v", got)
+	}
+}

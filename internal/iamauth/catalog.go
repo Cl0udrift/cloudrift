@@ -249,7 +249,7 @@ func Catalog() []Capability {
 			Action: ActionAssumeRole, Service: "sts", Category: CategoryLateralMovement, Support: SupportEvaluated, Evaluation: EvalAssumeRole,
 			ResourceShape:  "role ARN",
 			RequiredPolicy: []string{"caller identity policy", "target trust policy", "boundary", "session policy", "SCP", "RCP"},
-			Consequence:    "Obtain credentials for the target role if both identity and trust policies allow the request.",
+			Consequence:    "Obtain credentials for the target role if the identity and trust policies allow the request, or, in the same account, if the trust policy names the caller.",
 		},
 	}
 	for i := range rows {

@@ -46,8 +46,13 @@ func ClassifyRole(role models.AssetNode, rels []models.Relationship, assets []mo
 	if trusts == 0 && strProp(role, "trust_policy_document") == "" && len(labels) == 0 {
 		labels[ClassUnresolved] = struct{}{}
 	}
-	if trusts == 0 && strProp(role, "trust_policy_document") != "" && len(labels) == 0 {
-		labels[ClassUnresolved] = struct{}{}
+	if doc := strProp(role, "trust_policy_document"); trusts == 0 && doc != "" && len(labels) == 0 {
+		// Same-account principals get no TRUSTS edge, so read them from the document itself.
+		if onlySameAccountPrincipals(doc, role.AccountID) {
+			labels[ClassSameAccount] = struct{}{}
+		} else {
+			labels[ClassUnresolved] = struct{}{}
+		}
 	}
 	purpose := 0
 	for _, label := range []string{ClassExternalDelegated, ClassInternalCrossAccount, ClassInternalNotScanned, ClassUnknownOrgMembership, ClassSameAccount, ClassAWSServiceRole, ClassFederatedRole} {
@@ -161,4 +166,19 @@ func relString(rel models.Relationship, key string) string {
 
 func scannedAccounts(assets []models.AssetNode) map[string]struct{} {
 	return orgMembership(assets).scanned
+}
+
+// onlySameAccountPrincipals is true when the trust document names at least one principal ARN
+// and every named account is the role's own. A bare "*" anywhere keeps it unresolved.
+func onlySameAccountPrincipals(doc, accountID string) bool {
+	matches := accountInPrincipal.FindAllStringSubmatch(doc, -1)
+	if len(matches) == 0 || strings.Contains(doc, `"*"`) {
+		return false
+	}
+	for _, m := range matches {
+		if m[1] != accountID {
+			return false
+		}
+	}
+	return true
 }

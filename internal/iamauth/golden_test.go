@@ -146,7 +146,19 @@ func goldenCases() []goldenCase {
 			r.RequestContext = map[string]string{"aws:username": "bob"}
 		})},
 		{"assume role needs identity and trust", docAssume, StatusAllowed, assumeReq(nil)},
-		{"assume role: trust alone is not enough", docAssume, StatusUnknown, assumeReq(func(r *AuthorizationRequest) { r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "none"} })},
+		{"assume role: root trust alone is not enough", docAssume, StatusUnknown, assumeReq(func(r *AuthorizationRequest) {
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "none"}
+			r.TrustPolicy = slotOf(StatementView{PolicyID: "trust", StatementID: "t", Effect: "Allow", Action: []string{"sts:AssumeRole"}, Principal: map[string]any{"AWS": "arn:aws:iam::111111111111:root"}})
+		})},
+		{"assume role: same-account trust naming the caller needs no identity Allow", docAssume, StatusAllowed, assumeReq(func(r *AuthorizationRequest) { r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "none"} })},
+		{"assume role: cross-account trust naming the caller still needs the identity Allow", docAssume, StatusUnknown, assumeReq(func(r *AuthorizationRequest) {
+			r.ResourceARN = "arn:aws:iam::222222222222:role/Target"
+			r.ResourceAccountID = "222222222222"
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "none"}
+		})},
+		{"assume role: named trust does not beat an identity Deny", docAssume, StatusDenied, assumeReq(func(r *AuthorizationRequest) {
+			r.Identity = statements("id", "D", "Deny", []string{"sts:AssumeRole"}, []string{r.ResourceARN}, nil)
+		})},
 		{"assume role: identity alone is not enough", docAssume, StatusUnknown, assumeReq(func(r *AuthorizationRequest) {
 			r.TrustPolicy = slotOf(StatementView{PolicyID: "trust", StatementID: "t", Effect: "Allow", Action: []string{"sts:AssumeRole"}, Principal: map[string]any{"AWS": "arn:aws:iam::111111111111:role/Someone"}})
 		})},

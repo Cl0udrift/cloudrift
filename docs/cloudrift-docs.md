@@ -208,7 +208,7 @@ For the full `dashboard` flag reference, see [CLI Commands](#cli-commands). For 
 | Trust Report | IAM trust findings, external principals |
 | Users & Groups | Every IAM user and group, which policies apply directly or through a group, explicit Deny markers, and console, MFA and access-key findings |
 | Identities | Per-role and per-account permission matrix, an IAM users table beside it, and a "who and what uses this role" section on each role |
-| Access Explorer | Who can do an action to a chosen user, group or role, asked of the stored policies |
+| Access Explorer | Who can do an action to a chosen user, group or role, asked of the stored policies. In the same account, a role trust policy that names a user or role is enough on its own, as in AWS |
 | Coverage | What is covered, what is not, and live collection state for the selected scan |
 | External Entities | Entity-centric view with blast actions |
 | Blast Explorer | 3D graph visualization of risk paths (Neo4j required) |

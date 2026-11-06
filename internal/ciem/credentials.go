@@ -7,7 +7,10 @@ import (
 	"github.com/Zero0x00/cloudrift/internal/models"
 )
 
-const staleKeyDays = 90
+const (
+	staleKeyDays    = 90
+	newKeyGraceDays = 7 // shortcut: fixed grace for "never used"; make it a setting if teams rotate faster
+)
 
 // CredentialSummaryFor reads the credential report facts stored on a user node.
 // It returns nil when the report was not collected for the user, so callers never
@@ -38,6 +41,9 @@ func CredentialSummaryFor(user models.AssetNode, now time.Time) *schema.Credenti
 			out.Findings = append(out.Findings, "Active access key older than 90 days")
 		}
 		if t, err := time.Parse(time.RFC3339, key.LastUsed); err != nil {
+			if key.AgeDays != nil && *key.AgeDays < newKeyGraceDays {
+				continue // a key made days ago has not had time to be used
+			}
 			out.Findings = append(out.Findings, "Active access key that has never been used")
 		} else if now.Sub(t).Hours()/24 > staleKeyDays {
 			out.Findings = append(out.Findings, "Active access key unused for over 90 days")

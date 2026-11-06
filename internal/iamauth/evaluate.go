@@ -22,9 +22,12 @@ import (
 // S3 object ACLs and Block Public Access are not evaluated. They must be declared
 // not applicable, or the result stays UNKNOWN.
 //
-// sts:AssumeRole always requires the caller identity policy and the target role trust
-// policy: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html.
-// A trust-policy Allow is not caller authorization by itself.
+// sts:AssumeRole needs the caller identity policy and the target role trust policy, with one
+// same-account exception: a trust Allow that names the caller's exact user or role ARN
+// is enough on its own: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_compare-resource-policies.html.
+// A trust Allow for the account root, a wildcard or another account still needs the identity Allow.
+// A permissions boundary on the caller is still required to allow the action here, which may
+// report UNKNOWN where AWS would allow; it never reports an allow AWS would refuse.
 //
 // Permissions boundaries and session policies intersect the request.
 // SCPs and RCPs require an Allow at every hierarchy node. Policies attached to
@@ -446,7 +449,7 @@ func finishAssumeRole(decision AuthorizationDecision, identity, trust groupResul
 	if blockedWithoutAllow(identity) || blockedWithoutAllow(trust) {
 		return finish(decision, StatusUnknown, ReasonUnsupportedCondition)
 	}
-	if identity.definiteAllow && trust.definiteAllow {
+	if trust.definiteAllow && (identity.definiteAllow || (decision.SameAccount && trust.namedAllow)) {
 		decision.SimulatorNote = "local evaluation only; iam:SimulatePrincipalPolicy was not called"
 		return finish(decision, StatusAllowed, ReasonAllowed)
 	}
@@ -585,6 +588,7 @@ func gate(slot PolicySlot, res groupResult, noAllowCode string) (string, bool) {
 
 type groupResult struct {
 	definiteAllow     bool
+	namedAllow        bool // a trust Allow listed the caller's exact ARN
 	conditional       bool
 	blocked           bool
 	undecidableDeny   bool
@@ -833,6 +837,13 @@ func classifyStatement(req AuthorizationRequest, result *groupResult, doc Policy
 		return
 	}
 	result.definiteAllow = true
+	if kind == "trust" {
+		for _, item := range scalarList(stmt.Principal["AWS"]) {
+			if strings.TrimSpace(item) == req.PrincipalARN {
+				result.namedAllow = true
+			}
+		}
+	}
 }
 
 func viewsFromModel(doc PolicyDocument, stmts []models.IAMPolicyStatement) []StatementView {

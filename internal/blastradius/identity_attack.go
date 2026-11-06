@@ -368,6 +368,9 @@ func feasibilityFor(status string) string {
 }
 
 func observedSessionState(role models.AssetNode) string {
+	if role.AssetType == models.AssetIAMUser {
+		return "confirmed_absent"
+	}
 	status, _ := permStringProp(role.Properties, "session_policy_status")
 	if status == "" {
 		return "missing"
@@ -376,6 +379,9 @@ func observedSessionState(role models.AssetNode) string {
 }
 
 func sessionEvidenceClass(role models.AssetNode) string {
+	if role.AssetType == models.AssetIAMUser {
+		return "scenario_assumption"
+	}
 	status, _ := permStringProp(role.Properties, "session_policy_status")
 	if status == "" {
 		return "missing"

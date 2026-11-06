@@ -75,6 +75,24 @@ func trusting() models.AssetNode {
 	return n
 }
 
+// trustingRoot trusts the whole account, so the caller still needs its own identity Allow.
+func trustingRoot() models.AssetNode {
+	n := target()
+	n.Properties["trust_policy_document"] = trustAllow("arn:aws:iam::111111111111:root")
+	return n
+}
+
+// A trust policy that names the user is enough in the same account, even with no assume policy.
+func TestNamedTrustNeedsNoIdentityAllow(t *testing.T) {
+	assets := []models.AssetNode{ugUserNode(allowDoc("s3:ListAllMyBuckets", "*")), trusting()}
+	if !userCanAssume(t, assets, nil) {
+		t.Fatal("same-account trust naming the user must allow the assume")
+	}
+	if userCanAssume(t, []models.AssetNode{ugUserNode(allowDoc("s3:ListAllMyBuckets", "*")), trustingRoot()}, nil) {
+		t.Fatal("root trust must still need the caller identity Allow")
+	}
+}
+
 func TestUserEffectivePolicies(t *testing.T) {
 	assume := allowDoc("sts:AssumeRole", ugTarget)
 	deny := denyDoc("sts:AssumeRole", ugTarget)
@@ -82,7 +100,7 @@ func TestUserEffectivePolicies(t *testing.T) {
 
 	t.Run("group allow plus user inline", func(t *testing.T) {
 		// Alice has nothing useful of her own; the group grants the assume.
-		assets := []models.AssetNode{ugUserNode(allowDoc("s3:ListAllMyBuckets", "*")), ugGroupNode(assume), trusting()}
+		assets := []models.AssetNode{ugUserNode(allowDoc("s3:ListAllMyBuckets", "*")), ugGroupNode(assume), trustingRoot()}
 		if !userCanAssume(t, assets, []models.Relationship{memberOf()}) {
 			t.Fatal("group allow was not inherited by the user")
 		}
@@ -93,7 +111,7 @@ func TestUserEffectivePolicies(t *testing.T) {
 
 	t.Run("managed policy plus inline", func(t *testing.T) {
 		user := ugUserNode(allowDoc("s3:ListAllMyBuckets", "*"))
-		assets := []models.AssetNode{user, adminLike, trusting()}
+		assets := []models.AssetNode{user, adminLike, trustingRoot()}
 		if !userCanAssume(t, assets, []models.Relationship{attached(ugUser, adminLike)}) {
 			t.Fatal("attached managed policy was not applied")
 		}
@@ -101,21 +119,21 @@ func TestUserEffectivePolicies(t *testing.T) {
 
 	t.Run("inline deny beats an attached allow", func(t *testing.T) {
 		user := ugUserNode(deny)
-		assets := []models.AssetNode{user, adminLike, trusting()}
+		assets := []models.AssetNode{user, adminLike, trustingRoot()}
 		if userCanAssume(t, assets, []models.Relationship{attached(ugUser, adminLike)}) {
 			t.Fatal("explicit inline Deny must override the managed Allow")
 		}
 	})
 
 	t.Run("group allow does not override user deny", func(t *testing.T) {
-		assets := []models.AssetNode{ugUserNode(deny), ugGroupNode(assume), trusting()}
+		assets := []models.AssetNode{ugUserNode(deny), ugGroupNode(assume), trustingRoot()}
 		if userCanAssume(t, assets, []models.Relationship{memberOf()}) {
 			t.Fatal("user Deny must win over the group Allow")
 		}
 	})
 
 	t.Run("group deny beats user allow", func(t *testing.T) {
-		assets := []models.AssetNode{ugUserNode(assume), ugGroupNode(deny), trusting()}
+		assets := []models.AssetNode{ugUserNode(assume), ugGroupNode(deny), trustingRoot()}
 		if userCanAssume(t, assets, []models.Relationship{memberOf()}) {
 			t.Fatal("group Deny must win over the user Allow")
 		}
@@ -124,7 +142,7 @@ func TestUserEffectivePolicies(t *testing.T) {
 	t.Run("uncollected group is not a silent allow or deny", func(t *testing.T) {
 		user := ugUserNode(assume)
 		user.Properties["group_membership_complete"] = false
-		if userCanAssume(t, []models.AssetNode{user, trusting()}, nil) {
+		if userCanAssume(t, []models.AssetNode{user, trustingRoot()}, nil) {
 			t.Fatal("a user with an uncollected group must not be validated as allowed")
 		}
 	})

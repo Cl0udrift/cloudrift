@@ -32,7 +32,7 @@ func identityScenario(scanID, scenario string) ([]models.AssetNode, []models.Rel
 	case "id-cross-trust":
 		return trustPair(scanID, demoAcctCore, demoAcctData, "IDCrossCaller", "IDCrossTarget", "id-cross", trustAllow(roleARN(demoAcctCore, "IDCrossCaller")), "", true)
 	case "id-trust-no-caller":
-		return trustPair(scanID, demoAcctCore, demoAcctCore, "IDNoPermCaller", "IDNoPermTarget", "id-noperm", trustAllow(roleARN(demoAcctCore, "IDNoPermCaller")), allowGet(objectARN("id-noperm", "readme.txt")), false)
+		return trustPair(scanID, demoAcctCore, demoAcctCore, "IDNoPermCaller", "IDNoPermTarget", "id-noperm", trustAllow("arn:aws:iam::"+demoAcctCore+":root"), allowGet(objectARN("id-noperm", "readme.txt")), false)
 	case "id-assume-ok":
 		return trustPair(scanID, demoAcctCore, demoAcctCore, "IDAssumeCaller", "IDAssumeTarget", "id-assume", trustAllow(roleARN(demoAcctCore, "IDAssumeCaller")), allowAssume(roleARN(demoAcctCore, "IDAssumeTarget")), false)
 	case "id-trust-deny":

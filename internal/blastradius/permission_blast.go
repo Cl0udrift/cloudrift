@@ -250,6 +250,9 @@ func sessionFromRoleProperty(req PermissionBlastRequest, role models.AssetNode) 
 }
 
 func sessionSlot(req PermissionBlastRequest, role models.AssetNode) iamauth.PolicySlot {
+	if role.AssetType == models.AssetIAMUser {
+		return iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: userKeySessionNote}
+	}
 	if sessionSource(req.SessionSource) == "missing" {
 		return iamauth.PolicySlot{
 			State:    iamauth.EvidenceMissing,
@@ -1221,3 +1224,6 @@ func usersExcept(assets []models.AssetNode, arn string) []models.AssetNode {
 	}
 	return out
 }
+
+// userKeySessionNote: the modeled start for a user is its long-term access key, which carries no session policy.
+const userKeySessionNote = "modeled as the user's long-term access key, which carries no session policy"
