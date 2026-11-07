@@ -190,7 +190,7 @@ export function FindingDetailPanelContent({
             {item.ou_path ? (<><dt className="cr-kpi-label">OU path</dt><dd className="break-all">{item.ou_path}</dd></>) : null}
             {item.team ? (<><dt className="cr-kpi-label">Team tag</dt><dd>{item.team}</dd></>) : null}
           </dl>
-          <p className="cr-helper">Read from collected account metadata. Cloudrift does not track ownership or assignment.</p>
+          <p className="cr-helper">Read from the Team or Owner tag on the account, user or role. Cloudrift does not track ownership or assignment.</p>
         </Section>
       ) : null}
       {identity ? (
