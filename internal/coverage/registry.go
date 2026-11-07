@@ -67,8 +67,8 @@ func Modules() []Module {
 		{
 			ID: "iam-inventory", Name: "IAM roles and policies", Area: AreaCollect, Status: StatusReady,
 			Summary:     "Collects roles, trust policies, and inline and managed policy documents.",
-			Covers:      []string{"Every IAM role with its policies when policy inventory is on", "Trust policies and trust relationships", "Permissions boundaries", "Policy retrieval status, so missing documents are never read as no access"},
-			Limitations: []string{"Session policies are not collected from STS", "Turning the setting off returns to the older scan that reads only roles trusting an external account"},
+			Covers:      []string{"Every IAM role with its policies when policy inventory is on", "Trust policies and trust relationships", "Permissions boundaries", "Role tags and customer managed policy descriptions, as free text written in IAM", "Policy retrieval status, so missing documents are never read as no access"},
+			Limitations: []string{"Session policies are not collected from STS", "Tags and descriptions come from the same iam:GetAccountAuthorizationDetails call, so a denied call leaves them empty; AWS managed policy descriptions are not collected", "Turning the setting off returns to the older scan that reads only roles trusting an external account"},
 			ConfigKeys:  []string{"scan.iam_policy_inventory"},
 			Page:        "/identities", AssetTypes: []string{"iam_role", "iam_policy"},
 		},
@@ -131,7 +131,7 @@ func Modules() []Module {
 		{
 			ID: "entitlements", Name: "Declared permissions and exposure findings", Area: AreaEvaluate, Status: StatusReady,
 			Summary:     "Reads policy documents for broad or sensitive grants and raises findings.",
-			Covers:      []string{"Administrative wildcards", "IAM policy modification", "Condition and resource breadth", "User console access without MFA and stale access keys", "Administrative access held by a user, directly or through a group", "A weak user credential that can assume an administrative role", "Workloads that run as an administrative role", "VPC endpoints with an open policy", "Each identity finding is tagged a toxic combination or a posture issue", "Identity findings show the attack path (user, edge, role), why the severity was chosen, and fix options by strategy"},
+			Covers:      []string{"Administrative wildcards", "IAM policy modification", "Condition and resource breadth", "User console access without MFA and stale access keys", "Administrative access held by a user, directly or through a group", "A weak user credential that can assume an administrative role", "Workloads that run as an administrative role", "VPC endpoints with an open policy", "Users that can read the whole IAM configuration", "Each identity finding is tagged a toxic combination or a posture issue", "Identity findings show the attack path (user, edge, role), why the severity was chosen, and fix options by strategy"},
 			Limitations: []string{"Paths, severity reasons and fix options exist only on scans made after this was added; rescan older ones", "A declared grant is not proof of effective access", "Unsupported statements are listed, not guessed", "A user whose credential report was not collected raises no credential finding", "The weak-credential finding rests on stored policies, and is High instead of Critical when SCPs and RCPs were not collected"},
 			Page:        "/findings", Docs: "docs/audits/phase-4f-final-entitlement-hardening.md",
 		},
@@ -204,8 +204,8 @@ func Modules() []Module {
 		{
 			ID: "users-groups", Name: "IAM users and groups", Area: AreaCollect, Status: StatusPartial,
 			Summary:     "Collects users and groups with their inline and managed policies, memberships and permissions boundaries.",
-			Covers:      []string{"Which policies apply to each user, directly or through a group", "Console access, MFA and access key age and use from the credential report", "Users in the account permission table", "Group membership", "User permissions boundaries", "An explicit Deny in any source overriding an Allow in another"},
-			Limitations: []string{"Needs iam:GetAccountAuthorizationDetails; if denied the scan continues without users and groups", "Credential data comes from the IAM credential report; if it is denied the users are still collected without it", "Root account keys and MFA are not assessed", "Hardware key and virtual MFA device details are not collected, only whether MFA is active"},
+			Covers:      []string{"Which policies apply to each user, directly or through a group", "Console access, MFA and access key age and use from the credential report", "Users in the account permission table", "Group membership", "User permissions boundaries", "IAM tags on users (a Team or Owner tag fills the finding's team)", "An explicit Deny in any source overriding an Allow in another"},
+			Limitations: []string{"Needs iam:GetAccountAuthorizationDetails; if denied the scan continues without users and groups", "Credential data comes from the IAM credential report; if it is denied the users are still collected without it", "Root account keys and MFA are not assessed", "Group tags are not collected", "Hardware key and virtual MFA device details are not collected, only whether MFA is active"},
 			Permissions: []string{"iam:GetAccountAuthorizationDetails", "iam:GenerateCredentialReport", "iam:GetCredentialReport"},
 			ConfigKeys:  []string{"scan.iam_policy_inventory"}, Collectors: []string{"iam_users_groups", "iam_credential_report"}, AssetTypes: []string{"iam_user", "iam_group"}, Page: "/principals",
 			Evidence: []string{"Tested with fakes for three cases: group plus own inline policy, managed plus inline, and an inline Deny over an Allow", "Not yet run against a real AWS account"},

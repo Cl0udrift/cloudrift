@@ -21,6 +21,7 @@ const (
 	CatUserAdministrative   = "user_administrative_access"
 	CatWeakCredentialToRole = "weak_credential_reaches_administrative_role"
 	CatWorkloadAdminRole    = "workload_runs_as_administrative_role"
+	CatReadsIAMConfig       = "user_reads_iam_configuration"
 )
 
 // scoringScan labels evaluations made before the scan id exists; the evaluator needs a non-empty id.
@@ -59,7 +60,17 @@ func ScoreIdentityHygiene(assets []models.AssetNode, rels []models.Relationship,
 					map[string]any{"problems": keyIssues, "keys": cred.Keys}))
 			}
 		}
-		if sources := administrativeSources(user, byARN, assets, rels); len(sources) > 0 {
+		sources := administrativeSources(user, byARN, assets, rels)
+		if len(sources) == 0 {
+			if via := readsIAMConfig(user, byARN, assets, rels); len(via) > 0 {
+				out = append(out, identityFinding(user, CatReadsIAMConfig, models.SeverityLow,
+					user.Name+" can read the whole IAM configuration",
+					"This user can list every user, role, group and policy in the account, with their trust policies, tags and descriptions. It changes nothing, but it shows anyone holding the credential what to target next.",
+					"Remove the permission unless the user needs it, or limit it to the user's own details.",
+					map[string]any{"via": via, "declared_not_validated": true}))
+			}
+		}
+		if len(sources) > 0 {
 			out = append(out, identityFinding(user, CatUserAdministrative, models.SeverityHigh,
 				"Administrative access held by user "+user.Name,
 				"This user holds an unconditional administrative wildcard Allow, directly or through a group. Effective authorization was not evaluated; a Deny elsewhere may limit it.",
@@ -200,7 +211,7 @@ func identityFinding(subject models.AssetNode, category string, sev models.Sever
 		RemediationCmd: remediationFor(subject, strings.SplitN(category, "|", 2)[0], evidence),
 		ID:             hex.EncodeToString(sum[:6]), Title: title, Severity: sev, Module: models.ModuleIAMEntitlement,
 		Claimability: models.ClaimUnknown, AffectedARN: subject.ARN, AccountID: subject.AccountID,
-		Impact: impact, Recommendation: recommendation, Evidence: evidence,
+		Impact: impact, Recommendation: recommendation, Evidence: evidence, Team: ownerTeam(subject),
 	}
 }
 
@@ -224,6 +235,9 @@ func remediationFor(subject models.AssetNode, category string, evidence map[stri
 	case CatUserKeyHygiene:
 		return "aws iam list-access-keys --user-name " + name + "\naws iam get-access-key-last-used --access-key-id <KEY_ID>" +
 			"\n# Deactivate a key nobody uses, then delete it after a quiet period:\n# aws iam update-access-key --user-name " + name + " --access-key-id <KEY_ID> --status Inactive"
+	case CatReadsIAMConfig:
+		return "aws iam list-attached-user-policies --user-name " + name + "\naws iam list-groups-for-user --user-name " + name +
+			"\n# Detach the policy that grants iam:Get*/List* if the user does not need it:\n# aws iam detach-user-policy --user-name " + name + " --policy-arn <POLICY_ARN>"
 	case CatUserAdministrative:
 		return "aws iam list-attached-user-policies --user-name " + name + "\naws iam list-user-policies --user-name " + name + "\naws iam list-groups-for-user --user-name " + name
 	case CatWeakCredentialToRole:
@@ -308,6 +322,18 @@ func enrichIdentityEvidence(subject models.AssetNode, category string, ev map[st
 		ev["remediation_options"] = []RemediationOption{
 			{"Enable MFA", "Adds a second factor.", []string{"Have the user register an MFA device"}},
 			{"Remove console access", "If the user only needs API access.", []string{"Delete the login profile"}},
+		}
+	case CatReadsIAMConfig:
+		ev["track"] = "posture"
+		via := "its policies"
+		if v, ok := ev["via"].([]string); ok && len(v) > 0 {
+			via = strings.Join(v, ", ")
+		}
+		ev["path"] = []PathNode{{Kind: "user", Label: name, Risk: "warn"}, {Kind: "edge", Label: "can read via"}, {Kind: "policy", Label: via, Detail: "the account's whole IAM configuration", Risk: "warn"}}
+		ev["severity_factors"] = []string{"it can call iam:GetAccountAuthorizationDetails without a condition", "read only: it changes nothing", "not evaluated: an organization control could still block it"}
+		ev["remediation_options"] = []RemediationOption{
+			{"Remove the read access", "A user that does not manage IAM does not need to see it.", []string{"Detach the policy that grants iam:Get* or iam:List*"}},
+			{"Narrow it", "Keep what the user needs.", []string{"Replace the wildcard with the specific read actions, scoped to the user's own ARN where possible"}},
 		}
 	case CatUserKeyHygiene:
 		ev["track"] = "posture"

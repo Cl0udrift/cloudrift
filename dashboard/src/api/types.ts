@@ -460,6 +460,8 @@ export interface RoleEntitlementProfile {
   collection_status: string;
   policy_retrieval: string;
   attached_policies?: string[];
+  policy_descriptions?: Record<string, string>;
+  tags?: Record<string, string>;
   inline_policy_count: number;
   broad_candidates?: string[];
   permission_candidates?: PermissionCandidate[];
@@ -1254,6 +1256,7 @@ export interface PrincipalListItem {
   mfa_active: boolean;
   active_keys: number;
   credential_findings: number;
+  tags?: Record<string, string>;
 }
 export interface PrincipalListResponse {
   scan_id: string;
@@ -1278,6 +1281,7 @@ export interface PolicySource {
   allows: number;
   denies: number;
   statements: PolicyStatementSummary[];
+  description?: string;
 }
 export interface PrincipalPoliciesResponse {
   scan_id: string;
@@ -1292,6 +1296,7 @@ export interface PrincipalPoliciesResponse {
   notes: string[];
   credentials?: CredentialSummary;
   broad_candidates: string[];
+  tags?: Record<string, string>;
 }
 export interface KeySummary {
   slot: string;

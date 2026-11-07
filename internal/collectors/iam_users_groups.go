@@ -77,6 +77,9 @@ func collectUsersGroups(ctx context.Context, accountID string, details IAMAuthDe
 			AccountID: accountID, Region: "global",
 			Properties: map[string]any{"path": awsv2.ToString(u.Path), "user_id": awsv2.ToString(u.UserId)},
 		}
+		if tags := tagMap(u.Tags); len(tags) > 0 {
+			node.Properties["tags"] = tags
+		}
 		if u.CreateDate != nil {
 			node.Properties["create_date"] = u.CreateDate.UTC().Format(time.RFC3339)
 		}
@@ -165,4 +168,63 @@ func principalPolicyBundle(ctx context.Context, client IAMAPI, node models.Asset
 	sort.Strings(bundle.AttachedARNs)
 	sort.Strings(bundle.InlineDocs)
 	return bundle
+}
+
+func tagMap(tags []iamtypes.Tag) map[string]string {
+	out := map[string]string{}
+	for _, t := range tags {
+		if k := awsv2.ToString(t.Key); k != "" {
+			out[k] = awsv2.ToString(t.Value)
+		}
+	}
+	return out
+}
+
+// iamMetadata is the free text IAM keeps about roles and customer managed policies: role tags
+// and policy descriptions. It adds no permission: it uses the same GetAccountAuthorizationDetails call.
+type iamMetadata struct {
+	RoleTags           map[string]map[string]string
+	PolicyDescriptions map[string]string
+}
+
+func collectIAMMetadata(ctx context.Context, details IAMAuthDetailsAPI) (iamMetadata, error) {
+	md := iamMetadata{RoleTags: map[string]map[string]string{}, PolicyDescriptions: map[string]string{}}
+	var marker *string
+	for {
+		out, err := details.GetAccountAuthorizationDetails(ctx, &iam.GetAccountAuthorizationDetailsInput{
+			Filter: []iamtypes.EntityType{iamtypes.EntityTypeRole, iamtypes.EntityTypeLocalManagedPolicy},
+			Marker: marker,
+		})
+		if err != nil {
+			return md, err
+		}
+		for _, r := range out.RoleDetailList {
+			if tags := tagMap(r.Tags); len(tags) > 0 {
+				md.RoleTags[awsv2.ToString(r.Arn)] = tags
+			}
+		}
+		for _, p := range out.Policies {
+			if d := strings.TrimSpace(awsv2.ToString(p.Description)); d != "" {
+				md.PolicyDescriptions[awsv2.ToString(p.Arn)] = d
+			}
+		}
+		if !out.IsTruncated || out.Marker == nil {
+			return md, nil
+		}
+		marker = out.Marker
+	}
+}
+
+func applyIAMMetadata(nodes []models.AssetNode, md iamMetadata) {
+	for i := range nodes {
+		if nodes[i].Properties == nil {
+			continue
+		}
+		if tags, ok := md.RoleTags[nodes[i].ARN]; ok && nodes[i].AssetType == models.AssetIAMRole {
+			nodes[i].Properties["tags"] = tags
+		}
+		if d, ok := md.PolicyDescriptions[nodes[i].ARN]; ok && nodes[i].AssetType == models.AssetIAMPolicy {
+			nodes[i].Properties["description"] = d
+		}
+	}
 }

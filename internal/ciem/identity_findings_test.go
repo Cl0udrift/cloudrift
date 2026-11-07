@@ -116,3 +116,33 @@ func TestSameAccountNamedTrustIsClassified(t *testing.T) {
 		t.Fatalf("a different account must stay unresolved here, got %v", got)
 	}
 }
+
+func TestUserReadsIAMConfiguration(t *testing.T) {
+	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	run := func(doc string, tags map[string]string) []models.Finding {
+		user := models.AssetNode{ARN: hUser, AssetType: models.AssetIAMUser, Name: "alice", AccountID: "111111111111",
+			Properties: map[string]any{"policy_retrieval_status": models.PolicyRetrievalOK}}
+		if tags != nil {
+			user.Properties["tags"] = tags
+		}
+		nodes, rels := collectors.BuildIdentityPolicyEvidence(user, []collectors.IdentityPolicyInput{{Name: "p", PolicyType: models.PolicyTypeInline, Document: doc, RetrievalStatus: models.PolicyRetrievalOK}})
+		return ScoreIdentityHygiene(append([]models.AssetNode{user}, nodes...), rels, now)
+	}
+	read := `{"Statement":[{"Effect":"Allow","Action":["iam:Get*","iam:List*"],"Resource":"*"}]}`
+	got := run(read, map[string]string{"Team": "payments"})
+	if len(got) != 1 || got[0].Evidence["issue_category"] != CatReadsIAMConfig || got[0].Severity != models.SeverityLow || got[0].Team != "payments" {
+		t.Fatalf("read-all user: %+v", got)
+	}
+	for name, doc := range map[string]string{
+		"deny":      `{"Statement":[{"Effect":"Allow","Action":"iam:Get*","Resource":"*"},{"Effect":"Deny","Action":"iam:GetAccountAuthorizationDetails","Resource":"*"}]}`,
+		"condition": `{"Statement":[{"Effect":"Allow","Action":"iam:Get*","Resource":"*","Condition":{"Bool":{"aws:MultiFactorAuthPresent":"true"}}}]}`,
+		"narrow":    `{"Statement":[{"Effect":"Allow","Action":"iam:GetUser","Resource":"*"}]}`,
+		"admin":     `{"Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}`,
+	} {
+		for _, f := range run(doc, nil) {
+			if f.Evidence["issue_category"] == CatReadsIAMConfig {
+				t.Fatalf("%s must not raise the read-all finding", name)
+			}
+		}
+	}
+}

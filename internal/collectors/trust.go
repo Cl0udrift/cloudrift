@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"net/url"
 	"regexp"
 	"sort"
@@ -339,6 +340,11 @@ func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI
 			}
 			nodes = append(nodes, userNodes...)
 			rels = append(rels, userRels...)
+			if md, mderr := collectIAMMetadata(ctx, details); mderr == nil {
+				applyIAMMetadata(nodes, md)
+			} else {
+				slog.Warn("role tags and policy descriptions were not collected", "account", accountID, "error", mderr)
+			}
 		}
 	}
 	return nodes, rels, nil

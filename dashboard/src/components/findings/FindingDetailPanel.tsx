@@ -140,7 +140,8 @@ const IDENTITY_LABELS: Record<string, string> = {
   user_access_key_hygiene: "Access key hygiene",
   user_administrative_access: "Administrative access held by a user",
   weak_credential_reaches_administrative_role: "Weak credential reaches an administrative role",
-  workload_runs_as_administrative_role: "Workload runs as an administrative role"
+  workload_runs_as_administrative_role: "Workload runs as an administrative role",
+  user_reads_iam_configuration: "User can read the whole IAM configuration"
 };
 
 function identityEvidenceRows(ev: Record<string, unknown>): [string, string][] {

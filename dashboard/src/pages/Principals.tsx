@@ -1,3 +1,4 @@
+import { TagList } from "../components/ui/TagList";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ function Source({ s }: { s: PolicySource }) {
         {s.allows > 0 ? <StateChip tone="ok" glyph="✓" label={`${s.allows} Allow`} /> : null}
         {s.retrieval_status !== "ok" ? <StateChip tone="warn" glyph="!" label={`document ${s.retrieval_status}`} /> : null}
       </div>
+      {s.description ? <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Description written in IAM: {s.description}</p> : null}
       <ul className="mt-2 space-y-1 font-mono text-xs text-slate-600 dark:text-slate-300">
         {s.statements.map((st, i) => (
           <li key={i}>
@@ -56,6 +58,7 @@ function Detail({ scanId, item }: { scanId: string; item: PrincipalListItem }) {
         <span className="font-semibold">{plural(v.sources.length, "policy", "policies")}</span> apply to {v.kind} <span className="font-mono">{v.name}</span>
         {v.groups.length ? <> (member of {v.groups.join(", ")})</> : null}. Permissions boundary: {v.boundary_status ?? "unknown"}.
       </p>
+      <TagList tags={v.tags} />
       <p className="text-sm">
         <Link className="underline" to={`/access?arn=${encodeURIComponent(item.arn)}&action=${v.kind === "user" ? "iam:AttachUserPolicy" : "iam:AttachGroupPolicy"}`}>
           Who can change this {v.kind}'s permissions?
@@ -179,6 +182,7 @@ export function PrincipalsPage() {
                     {plural(i.policy_count, "policy", "policies")}{i.groups.length ? ` · groups: ${i.groups.join(", ")}` : ""}
                     {i.has_deny ? " · has Deny" : ""}
                   </div>
+                  <TagList tags={i.tags} />
                   {principalReasons(i).length > 0 ? (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {principalReasons(i).map((r) => <StateChip key={r} tone="warn" glyph="!" label={r} />)}

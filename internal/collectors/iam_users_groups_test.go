@@ -168,3 +168,32 @@ func TestCollectUsersGroupsFetchesCredentialReport(t *testing.T) {
 	}
 	t.Fatal("credential facts did not reach the user node")
 }
+
+func TestIAMMetadataTagsAndDescriptions(t *testing.T) {
+	fake := &fakeUserGroupIAM{out: &iam.GetAccountAuthorizationDetailsOutput{
+		UserDetailList: []iamtypes.UserDetail{{
+			Arn: awsv2.String("arn:aws:iam::111111111111:user/alice"), UserName: awsv2.String("alice"),
+			Tags: []iamtypes.Tag{{Key: awsv2.String("Team"), Value: awsv2.String("payments")}},
+		}},
+		RoleDetailList: []iamtypes.RoleDetail{{
+			Arn: awsv2.String("arn:aws:iam::111111111111:role/r"), Tags: []iamtypes.Tag{{Key: awsv2.String("Team"), Value: awsv2.String("data")}},
+		}},
+		Policies: []iamtypes.ManagedPolicyDetail{{Arn: awsv2.String("arn:aws:iam::111111111111:policy/p"), Description: awsv2.String("owned by data")}},
+	}}
+	users, _, err := collectUsersGroups(context.Background(), "111111111111", fake, fake, newManagedPolicyCache())
+	if err != nil || users[0].Properties["tags"].(map[string]string)["Team"] != "payments" {
+		t.Fatalf("user tags: %v %v", err, users[0].Properties["tags"])
+	}
+	md, err := collectIAMMetadata(context.Background(), fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := []models.AssetNode{
+		{ARN: "arn:aws:iam::111111111111:role/r", AssetType: models.AssetIAMRole, Properties: map[string]any{}},
+		{ARN: "arn:aws:iam::111111111111:policy/p", AssetType: models.AssetIAMPolicy, Properties: map[string]any{}},
+	}
+	applyIAMMetadata(nodes, md)
+	if nodes[0].Properties["tags"].(map[string]string)["Team"] != "data" || nodes[1].Properties["description"] != "owned by data" {
+		t.Fatalf("metadata not applied: %v %v", nodes[0].Properties, nodes[1].Properties)
+	}
+}

@@ -1,3 +1,4 @@
+import { TagList } from "../components/ui/TagList";
 import { UserMatrix } from "../components/identities/UserMatrix";
 import { RoleUsage } from "../components/identities/RoleUsage";
 import { AccountPermissionMatrix, type MatrixSelection } from "../components/identities/AccountPermissionMatrix";
@@ -341,6 +342,10 @@ function RoleDetail({
           <li>Conditional candidates: {profile.conditional_count} · unknown evidence or unsupported constructs: {profile.unknown_count} · deny evidence: {profile.deny_evidence_count}</li>
         </ul>
         <p className="mt-1 text-sm">Attached names: {profile.attached_policies?.join(", ") || "none recorded"} · policy retrieval: {profile.policy_retrieval}</p>
+        {Object.entries(profile.policy_descriptions ?? {}).map(([name, d]) => (
+          <p key={name} className="text-xs text-slate-600 dark:text-slate-300">{name}, description written in IAM: {d}</p>
+        ))}
+        <div className="mt-1"><TagList tags={profile.tags} /></div>
         <ul className="mt-2 space-y-2">
           {(profile.permission_candidates ?? []).map((item) => (
             <li key={item.evidence_fingerprint} className="hs-card-soft space-y-1 p-3 text-sm">

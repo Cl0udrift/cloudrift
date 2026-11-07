@@ -34,6 +34,9 @@ func ListPrincipals(scanID string, assets []models.AssetNode, rels []models.Rela
 			PolicyCount: len(view.Sources), HasDeny: view.HasDeny, BoundaryStatus: view.Boundary, RetrievalStatus: status,
 			BroadCandidates: view.Broad,
 		}
+		if tags := tagsOf(a); len(tags) > 0 {
+			item.Tags = tags
+		}
 		if c := view.Credentials; c != nil {
 			item.CredentialsCollected, item.Console, item.MFA, item.CredentialFindings = true, c.Console, c.MFA, len(c.Findings)
 			for _, k := range c.Keys {
@@ -105,6 +108,9 @@ func PrincipalPolicies(scanID string, principal models.AssetNode, byARN map[stri
 		}
 		sort.Strings(out.Groups)
 	}
+	if tags := tagsOf(principal); len(tags) > 0 {
+		out.Tags = tags
+	}
 	out.Credentials = CredentialSummaryFor(principal, now)
 	out.Broad = principalBroad(scanID, principal, byARN, rels)
 	sort.SliceStable(out.Sources, func(i, j int) bool {
@@ -123,6 +129,7 @@ func policySource(policy models.AssetNode, via string, owner models.AssetNode) s
 	src := schema.PolicySource{
 		Via: via, PolicyName: policy.Name, PolicyARN: policy.ARN, PolicyType: policyType,
 		RetrievalStatus: status, Statements: []schema.PolicyStatementSummary{},
+		Description: strProp(policy, "description"),
 	}
 	if via == "group" {
 		src.GroupARN, src.GroupName = owner.ARN, owner.Name

@@ -27,10 +27,11 @@ type IdentityListItem struct {
 	UnknownEvidenceCount int `json:"unknown_evidence_count"`
 	// ControlsMissing names the authorization controls (permissions_boundary, scp, rcp) whose
 	// evidence was not collected for this role. Without them an allow cannot be validated.
-	ControlsMissing      []string `json:"controls_missing,omitempty"`
-	WorkloadCount        int      `json:"workload_count"`
-	EvidenceCompleteness string   `json:"evidence_completeness"`
-	CollectionStatus     string   `json:"collection_status"`
+	ControlsMissing      []string          `json:"controls_missing,omitempty"`
+	WorkloadCount        int               `json:"workload_count"`
+	EvidenceCompleteness string            `json:"evidence_completeness"`
+	CollectionStatus     string            `json:"collection_status"`
+	Tags                 map[string]string `json:"tags,omitempty"`
 }
 
 // IdentityListResponse is one page of IAM roles stored in a scan.
@@ -146,6 +147,8 @@ type RoleEntitlementProfile struct {
 	CollectionStatus      string                `json:"collection_status"`
 	PolicyRetrieval       string                `json:"policy_retrieval"`
 	AttachedPolicies      []string              `json:"attached_policies,omitempty"`
+	PolicyDescriptions    map[string]string     `json:"policy_descriptions,omitempty"`
+	Tags                  map[string]string     `json:"tags,omitempty"`
 	InlinePolicyCount     int                   `json:"inline_policy_count"`
 	BroadCandidates       []string              `json:"broad_candidates,omitempty"`
 	PermissionCandidates  []PermissionCandidate `json:"permission_candidates,omitempty"`
@@ -215,6 +218,8 @@ type PrincipalListItem struct {
 	MFA                  bool     `json:"mfa_active"`
 	ActiveKeys           int      `json:"active_keys"`
 	CredentialFindings   int      `json:"credential_findings"`
+	// Tags are the IAM tags on the user, which is where teams record an owner.
+	Tags map[string]string `json:"tags,omitempty"`
 }
 
 // PrincipalListResponse lists the users and groups of a scan.
@@ -246,6 +251,8 @@ type PolicySource struct {
 	Allows          int                      `json:"allows"`
 	Denies          int                      `json:"denies"`
 	Statements      []PolicyStatementSummary `json:"statements"`
+	// Description is the free text the policy author wrote in IAM; empty when none or not collected.
+	Description string `json:"description,omitempty"`
 }
 
 // PrincipalPoliciesResponse answers "which policies apply to this user or group".
@@ -264,6 +271,7 @@ type PrincipalPoliciesResponse struct {
 	// Credentials is set for users and only when the credential report was collected.
 	Credentials *CredentialSummary `json:"credentials,omitempty"`
 	Broad       []string           `json:"broad_candidates"`
+	Tags        map[string]string  `json:"tags,omitempty"`
 }
 
 // KeySummary is one access key slot from the credential report.

@@ -875,10 +875,11 @@ With IAM policy inventory on, Cloudrift also reports risk that sits in identitie
 | Category | Severity | What Happens | Rests on |
 |---|---|---|---|
 | `user_console_without_mfa` | High | A user can sign in to the console with a password and no MFA device. | Credential report |
-| `user_access_key_hygiene` | Medium (Low if only never used) | An active access key is older than 90 days, unused for 90 days, or never used. | Credential report |
+| `user_access_key_hygiene` | Medium (Low if only never used) | An active access key is older than 90 days, unused for 90 days, or never used. A key under 7 days old is not flagged as never used. | Credential report |
 | `user_administrative_access` | High | A user holds an unconditional administrative wildcard Allow, directly or through a group. | Policy documents of the user and its groups |
 | `weak_credential_reaches_administrative_role` | Critical (High when SCPs and RCPs were not collected) | A user with console access and no MFA, or with a stale key, is allowed by the stored policies to assume a role that holds administrative access. | Credential report, trust policy, the user's policies and groups |
 | `workload_runs_as_administrative_role` | Medium | A workload (EC2, Lambda, ECS, EKS) runs as a role that holds an unconditional administrative wildcard Allow. | Workload mapping, policy documents |
+| `user_reads_iam_configuration` | Low | A user can call `iam:GetAccountAuthorizationDetails` with no condition, so it can read every user, role, group and policy in the account. Administrative users are reported under administrative access instead. | Policy documents of the user and its groups |
 | `vpc_endpoint_open_policy` | Low | A VPC endpoint policy allows every principal everything on every resource, so the endpoint adds no data perimeter (`external_access` module). | VPC endpoint policy, collected with resource policies |
 
 The two compound findings are the reason these were added: a weak credential matters most when it is one step from admin, and an administrative role matters most when running compute holds it. Beyond findings, the dashboard answers the follow-up questions: **Users & Groups** shows what applies to a user and why, the role page lists who and what can use the role, and Blast Explorer searches escalation paths from a role session or a user.
