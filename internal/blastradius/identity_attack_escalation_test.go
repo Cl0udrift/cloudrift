@@ -139,7 +139,7 @@ func TestIdentityAttack_PassRoleServices(t *testing.T) {
 	}{
 		{"PASS_ROLE_CLOUDFORMATION", "cloudformation.amazonaws.com", []string{"cloudformation:CreateStack"}},
 		{"PASS_ROLE_GLUE_ENDPOINT", "glue.amazonaws.com", []string{"glue:CreateDevEndpoint", "glue:GetDevEndpoint"}},
-		{"PASS_ROLE_DATA_PIPELINE", "datapipeline.amazonaws.com", []string{"datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition"}},
+		{"PASS_ROLE_DATA_PIPELINE", "datapipeline.amazonaws.com", []string{"datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition", "datapipeline:ActivatePipeline"}},
 		{"PASS_ROLE_LAMBDA_ADDPERMISSION", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:AddPermission"}},
 	}
 	for _, c := range cases {
@@ -157,8 +157,12 @@ func TestIdentityAttack_PassRoleServices(t *testing.T) {
 		if r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, doc(c.actions), ""), trusted}, nil); !hasEscalation(r, c.kind, target) {
 			t.Errorf("%s: chain not found: %#v", c.kind, r.Escalations)
 		}
-		if r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, doc(c.actions[:len(c.actions)-1]), ""), trusted}, nil); hasEscalation(r, c.kind, target) {
-			t.Errorf("%s: escalated with a missing step", c.kind)
+		// Every step is required: dropping any one must stop the chain, not only the last.
+		for i := range c.actions {
+			rest := append(append([]string{}, c.actions[:i]...), c.actions[i+1:]...)
+			if r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, doc(rest), ""), trusted}, nil); hasEscalation(r, c.kind, target) {
+				t.Errorf("%s: escalated without %s", c.kind, c.actions[i])
+			}
 		}
 		wrongTrust := controlledRole(target, "", serviceTrust("ec2.amazonaws.com"))
 		if r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, doc(c.actions), ""), wrongTrust}, nil); hasEscalation(r, c.kind, target) {

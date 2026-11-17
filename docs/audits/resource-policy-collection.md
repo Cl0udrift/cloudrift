@@ -58,5 +58,5 @@ Each permission decision now carries `explanation` (plain language, `iamauth.Exp
 
 ## Accuracy validation
 
-- `internal/iamauth/golden_test.go`: 38 cases tied to AWS documentation. The suite fails on any mismatch and separately on any false allow (a case expected to be anything but VALIDATED_ALLOWED that comes back allowed). Current result: 15 expected allows, 15 evaluator allows, 0 false allows.
+- `internal/iamauth/golden_test.go`: hand-written cases tied to AWS documentation (the test logs the current count). The suite fails on any mismatch and separately on any false allow (a case expected to be anything but VALIDATED_ALLOWED that comes back allowed). It includes cases for a resource policy that names the account root, which only delegates to the identity policy.
 - `collectors.CompareWithSimulator` cross-checks local decisions against `iam:SimulatePrincipalPolicy` (read-only; permission `iam:SimulatePrincipalPolicy` on the audited roles). The simulator evaluates identity policies and boundaries only, not resource policies, SCPs or RCPs, so use it on probes where those are absent. It reports false allows (must be zero), bad denies, and conservative unknowns. It is tested with a mock and is not wired into any command or scan; nothing calls it yet.

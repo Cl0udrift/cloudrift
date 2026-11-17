@@ -75,6 +75,24 @@ func goldenCases() []goldenCase {
 			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "role has no policies"}
 			r.ResourcePolicy = bucketPolicy("Allow", "arn:aws:iam::111111111111:role/App", "s3:GetObject")
 		})},
+		{"same account resource policy naming the account root only delegates", docEval, StatusUnknown, getReq(func(r *AuthorizationRequest) {
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "role has no policies"}
+			r.ResourcePolicy = bucketPolicy("Allow", "arn:aws:iam::111111111111:root", "s3:GetObject")
+		})},
+		{"account root in the resource policy plus an identity allow", docEval, StatusAllowed, getReq(func(r *AuthorizationRequest) {
+			r.ResourcePolicy = bucketPolicy("Allow", "arn:aws:iam::111111111111:root", "s3:GetObject")
+		})},
+		{"same account resource policy for everyone grants alone", docEval, StatusAllowed, getReq(func(r *AuthorizationRequest) {
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "role has no policies"}
+			r.ResourcePolicy = bucketPolicy("Allow", "*", "s3:GetObject")
+		})},
+		{"secret policy naming the account root only delegates", docEval, StatusUnknown, func() AuthorizationRequest {
+			r := secretReq()
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "none"}
+			r.ResourcePolicy = slotOf(StatementView{PolicyID: "rp", StatementID: "r", Effect: "Allow", Action: []string{"secretsmanager:GetSecretValue"}, Resource: []string{"*"}, Principal: map[string]any{"AWS": "arn:aws:iam::111111111111:root"}})
+			r.SecretKMS = &SecretKMSEvidence{Mode: SecretKeyAWSManaged}
+			return r
+		}},
 		{"cross account needs both: identity only", docCross, StatusUnknown, getReq(func(r *AuthorizationRequest) {
 			r.PrincipalARN = "arn:aws:iam::222222222222:role/Ext"
 			r.Identity = statements("id", "A", "Allow", []string{"s3:GetObject"}, []string{obj}, nil)

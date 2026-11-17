@@ -159,6 +159,12 @@ func Catalog() []Capability {
 			Consequence:    "Define a pipeline that runs with a passed role if the evaluated request is allowed.",
 		},
 		{
+			Action: "datapipeline:ActivatePipeline", Service: "datapipeline", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
+			ResourceShape:  "hypothetical pipeline ARN the caller would create",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Start a pipeline so it runs with the passed role, if the evaluated request is allowed.",
+		},
+		{
 			Action: "iam:CreatePolicyVersion", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
 			ResourceShape:  "customer managed policy ARN attached to a reachable role",
 			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
@@ -331,6 +337,9 @@ var registryDetail = map[string]registryFacts{
 		unsupported: []string{"the probe uses a fixed pipeline name and Region"},
 	},
 	"datapipeline:PutPipelineDefinition": {
+		unsupported: []string{"the probe uses a fixed pipeline name and Region"},
+	},
+	"datapipeline:ActivatePipeline": {
 		unsupported: []string{"the probe uses a fixed pipeline name and Region"},
 	},
 	"iam:CreatePolicyVersion": {

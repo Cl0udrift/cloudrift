@@ -31,7 +31,7 @@ var passRolePlans = []passRolePlan{
 	{"PASS_ROLE_GLUE_ENDPOINT", "glue.amazonaws.com", []string{"glue:CreateDevEndpoint", "glue:GetDevEndpoint"}, func(a string) string {
 		return "arn:aws:glue:us-east-1:" + a + ":devEndpoint/cloudrift-probe"
 	}},
-	{"PASS_ROLE_DATA_PIPELINE", "datapipeline.amazonaws.com", []string{"datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition"}, func(a string) string {
+	{"PASS_ROLE_DATA_PIPELINE", "datapipeline.amazonaws.com", []string{"datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition", "datapipeline:ActivatePipeline"}, func(a string) string {
 		return "arn:aws:datapipeline:us-east-1:" + a + ":pipeline/cloudrift-probe"
 	}},
 }

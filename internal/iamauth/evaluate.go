@@ -17,7 +17,8 @@ import (
 // s3:GetObject uses the same-account and cross-account rules in
 // https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic.html
 // and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic-cross-account.html.
-// In the same account, an identity Allow or a bucket-policy Allow can grant the call.
+// In the same account, an identity Allow or a bucket-policy Allow that names the caller (or "*") can
+// grant the call. A bucket-policy Allow for the account root only delegates, so the identity policy must allow too.
 // Across accounts, both must allow. An applicable explicit Deny in any evaluated policy wins.
 // S3 object ACLs and Block Public Access are not evaluated. They must be declared
 // not applicable, or the result stays UNKNOWN.
@@ -468,7 +469,8 @@ func finishGetObject(decision AuthorizationDecision, identity, resource groupRes
 	case decision.SameAccount && req.ResourcePolicy.State == EvidenceAbsent:
 		granted = identity.definiteAllow
 	case decision.SameAccount && req.ResourcePolicy.State == EvidencePresent:
-		granted = identity.definiteAllow || resource.definiteAllow
+		// A resource policy that names the account root only delegates to the identity policy.
+		granted = identity.definiteAllow || (resource.definiteAllow && resource.namedAllow)
 	case !decision.SameAccount && req.ResourcePolicy.State != EvidencePresent:
 		decision.MissingEvidence = append(decision.MissingEvidence, ReasonCrossAccountResource)
 		return finish(decision, StatusUnknown, ReasonCrossAccountResource)
@@ -588,7 +590,7 @@ func gate(slot PolicySlot, res groupResult, noAllowCode string) (string, bool) {
 
 type groupResult struct {
 	definiteAllow     bool
-	namedAllow        bool // a trust Allow listed the caller's exact ARN
+	namedAllow        bool // a trust or resource Allow named the caller directly (not through the account root)
 	conditional       bool
 	blocked           bool
 	undecidableDeny   bool
@@ -837,9 +839,11 @@ func classifyStatement(req AuthorizationRequest, result *groupResult, doc Policy
 		return
 	}
 	result.definiteAllow = true
-	if kind == "trust" {
+	if kind == "trust" || kind == "resource" {
 		for _, item := range scalarList(stmt.Principal["AWS"]) {
-			if strings.TrimSpace(item) == req.PrincipalARN {
+			item = strings.TrimSpace(item)
+			// A bare "*" in a resource policy names everyone, so it grants directly. An account root does not.
+			if item == req.PrincipalARN || (kind == "resource" && item == "*") {
 				result.namedAllow = true
 			}
 		}
