@@ -210,7 +210,7 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 	})
 	report.Decisions = decisions
 	if req.PrivescChains {
-		report.PrivescChains = privescChains(req, role, roles, functions, eval)
+		report.PrivescChains = privescChains(req, role, roles, functions, append(append([]models.AssetNode{}, instances...), assetsOfType(req.Assets, models.AssetECSTask)...), eval)
 	}
 	fillCounts(&report)
 	report.AnalysisComplete = !report.Truncated && identity.State == iamauth.EvidencePresent && !hasMissingControl(decisions)

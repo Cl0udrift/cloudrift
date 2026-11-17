@@ -69,6 +69,8 @@ func pfLabel(perm string, passrole bool) string {
 		return "user_takeover"
 	case "lambda:UpdateFunctionCode":
 		return "edit_function_code"
+	case "ssm:StartSession", "ssm:SendCommand", "ec2-instance-connect:SendSSHPublicKey", "ecs:ExecuteCommand", "ec2:ModifyInstanceAttribute":
+		return "workload_exec" // runs commands or code on a workload that runs as a role
 	case "iam:DeleteAccessKey":
 		return "" // enabler only
 	}
@@ -150,6 +152,8 @@ func pfLabelsFromTech(t string) []string {
 		return []string{"user_takeover"}
 	case t == "EDIT_LAMBDA_CODE":
 		return []string{"edit_function_code"}
+	case strings.HasPrefix(t, "WORKLOAD_"):
+		return []string{"workload_exec"}
 	case strings.HasPrefix(t, "PASS_ROLE_") && pfKeyService(t) != "":
 		return []string{"passrole:" + pfKeyService(t)}
 	case strings.HasPrefix(t, "PASS_ROLE_LAMBDA"):
@@ -244,11 +248,23 @@ func pfRun(p pfPath, granted []string, deny string, mode ...string) (fired, tech
 		Properties: map[string]any{"function_policy_status": "confirmed_absent", "function_policy_evidence": "fixture"}}
 	inst := models.AssetNode{ARN: "arn:aws:ec2:us-east-1:" + pfAcct + ":instance/i-0123456789abcdef0", AssetType: models.AssetEC2Instance, AccountID: pfAcct, Properties: map[string]any{}}
 	prof := models.AssetNode{ARN: "arn:aws:iam::" + pfAcct + ":instance-profile/P", AssetType: models.AssetInstanceProfile, AccountID: pfAcct, Properties: map[string]any{}}
-	assets = append(assets, fn, inst, prof)
+	taskDef := models.AssetNode{ARN: "arn:aws:ecs:us-east-1:" + pfAcct + ":task-definition/app:1", AssetType: models.AssetECSTaskDefinition, AccountID: pfAcct, Properties: map[string]any{}}
+	task := models.AssetNode{ARN: "arn:aws:ecs:us-east-1:" + pfAcct + ":task/cluster/0123456789abcdef", AssetType: models.AssetECSTask, AccountID: pfAcct, Properties: map[string]any{}}
+	assets = append(assets, fn, inst, prof, taskDef, task)
+	if m == "norole" {
+		rels = append(rels, models.Relationship{SourceARN: fn.ARN, TargetARN: adminRole.ARN, RelType: models.RelLambdaUsesExecutionRole})
+	} else {
+		rels = append(rels,
+			models.Relationship{SourceARN: task.ARN, TargetARN: taskDef.ARN, RelType: models.RelECSTaskUsesTaskDef},
+			models.Relationship{SourceARN: taskDef.ARN, TargetARN: adminRole.ARN, RelType: models.RelECSTaskDefUsesTaskRole})
+	}
 	rels = append(rels,
-		models.Relationship{SourceARN: fn.ARN, TargetARN: adminRole.ARN, RelType: models.RelLambdaUsesExecutionRole},
-		models.Relationship{SourceARN: inst.ARN, TargetARN: prof.ARN, RelType: models.RelEC2UsesInstanceProfile},
-		models.Relationship{SourceARN: prof.ARN, TargetARN: adminRole.ARN, RelType: models.RelInstanceProfileContains})
+		models.Relationship{SourceARN: inst.ARN, TargetARN: prof.ARN, RelType: models.RelEC2UsesInstanceProfile})
+	if m != "norole" {
+		rels = append(rels,
+			models.Relationship{SourceARN: fn.ARN, TargetARN: adminRole.ARN, RelType: models.RelLambdaUsesExecutionRole},
+			models.Relationship{SourceARN: prof.ARN, TargetARN: adminRole.ARN, RelType: models.RelInstanceProfileContains})
+	}
 	report := AnalyzeIdentityAttack(context.Background(), IdentityAttackRequest{
 		ScanID: "audit", InitialPrincipal: attackerARN, SessionSource: "assumed", Assets: assets, Relationships: rels,
 	})
@@ -393,6 +409,15 @@ func TestPathfindingBenchmark(t *testing.T) {
 				out = append(out, c)
 			}
 		}
+		if workloadPerm(p.Required) {
+			// The permissions are held but no collected workload runs as a role, so there is nothing to reach.
+			nf, _ := pfRun(p, p.Required, "", "norole")
+			nc := pfCase{ID: p.ID, Variant: "norole", Expect: "not_exploitable", Fired: nf, Outcome: "not_detected"}
+			if len(nf) > 0 {
+				nc.Outcome = "detected"
+			}
+			out = append(out, nc)
+		}
 		if containsStr(p.Required, "iam:PassRole") {
 			// A trust policy conditioned on the caller's own account holds for what the service presents; another account's does not.
 			cf, _ := pfRun(p, p.Required, "", "condtrust")
@@ -431,14 +456,15 @@ func TestPathfindingBenchmark(t *testing.T) {
 var pfFloor = []string{
 	"apprunner-001", "batch-001", "batch-003", "bedrock-001", "bedrock-003", "bedrock-005", "bedrock-006",
 	"braket-001", "cloudformation-001", "cloudformation-003", "cloudformation-004", "codebuild-001",
-	"codebuild-004", "cognitoidentity-001", "datapipeline-001", "ec2-001", "ec2-003", "ecs-001", "ecs-002",
-	"ecs-003", "ecs-004", "ecs-005", "ecs-007", "ecs-008", "ecs-009", "emr-001", "emrserverless-001",
-	"gamelift-001", "glue-001", "glue-003", "glue-004", "glue-005", "glue-006", "glue-007", "iam-001", "iam-002",
-	"iam-003", "iam-004", "iam-005", "iam-006", "iam-007", "iam-008", "iam-009", "iam-010", "iam-011", "iam-012",
-	"iam-013", "iam-014", "iam-015", "iam-016", "iam-017", "iam-018", "iam-019", "iam-020", "iam-021",
-	"imagebuilder-001", "kinesisanalytics-001", "lambda-001", "lambda-002", "lambda-003", "lambda-004",
-	"lambda-005", "lambda-006", "omics-001", "sagemaker-001", "sagemaker-002", "sagemaker-003", "scheduler-001",
-	"ssm-003", "stepfunctions-001", "sts-001",
+	"codebuild-004", "cognitoidentity-001", "datapipeline-001", "ec2-001", "ec2-002", "ec2-003",
+	"ec2instanceconnect-003", "ecs-001", "ecs-002", "ecs-003", "ecs-004", "ecs-005", "ecs-006", "ecs-007",
+	"ecs-008", "ecs-009", "emr-001", "emrserverless-001", "gamelift-001", "glue-001", "glue-003", "glue-004",
+	"glue-005", "glue-006", "glue-007", "iam-001", "iam-002", "iam-003", "iam-004", "iam-005", "iam-006",
+	"iam-007", "iam-008", "iam-009", "iam-010", "iam-011", "iam-012", "iam-013", "iam-014", "iam-015", "iam-016",
+	"iam-017", "iam-018", "iam-019", "iam-020", "iam-021", "imagebuilder-001", "kinesisanalytics-001",
+	"lambda-001", "lambda-002", "lambda-003", "lambda-004", "lambda-005", "lambda-006", "omics-001",
+	"sagemaker-001", "sagemaker-002", "sagemaker-003", "scheduler-001", "ssm-001", "ssm-002", "ssm-003",
+	"stepfunctions-001", "sts-001",
 }
 
 func pfAssert(t *testing.T, out []pfCase, paths []pfPath) {
@@ -521,6 +547,15 @@ func pfKeyService(kind string) string {
 		return "glue"
 	}
 	return m[key]
+}
+
+func workloadPerm(req []string) bool {
+	for _, r := range req {
+		if pfLabel(r, false) == "workload_exec" {
+			return true
+		}
+	}
+	return false
 }
 
 func takeoverPerms(req []string) []string {

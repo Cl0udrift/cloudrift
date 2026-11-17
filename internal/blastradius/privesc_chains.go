@@ -78,7 +78,7 @@ func probeAsset(arn, account string) models.AssetNode {
 }
 
 // privescChains evaluates the multi-call escalations for one caller session.
-func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, functions []models.AssetNode, eval evalFunc) []schema.PrivescChain {
+func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, functions, workloads []models.AssetNode, eval evalFunc) []schema.PrivescChain {
 	account := caller.AccountID
 	var chains []schema.PrivescChain
 	candidates := append(append([]models.AssetNode{}, roles...), caller)
@@ -160,13 +160,75 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 		}
 		chains = append(chains, schema.PrivescChain{Kind: "CREATE_POLICY_VERSION", Service: "iam.amazonaws.com", RoleARN: holder, Status: d.Status, Steps: []schema.PermissionDecision{d}})
 	}
+	// Reach a role through an EC2 instance or ECS task that runs as it: the caller runs code there, so it obtains the role.
+	// A hop is reported once per kind and role, so once one workload gives an allowed chain the rest are skipped, and a
+	// chain stops at its first step that is not allowed (that step is the reason). This keeps accounts with thousands of
+	// instances cheap.
+	reached := map[string]bool{}
+	for _, w := range workloads {
+		role := workloadRole(w, req.Relationships)
+		if role == "" || role == caller.ARN || !containsARN(roles, role) {
+			continue
+		}
+		for _, esc := range iamauth.WorkloadEscalations {
+			if esc.Resource != string(w.AssetType) || reached[esc.Kind+"|"+role] {
+				continue
+			}
+			var steps []schema.PermissionDecision
+			for _, a := range esc.Required {
+				d := eval(capOf(a), w, req.RequestContext)
+				steps = append(steps, d)
+				if d.Status != iamauth.StatusAllowed {
+					break
+				}
+			}
+			status := combineSteps(steps)
+			if status == iamauth.StatusAllowed {
+				reached[esc.Kind+"|"+role] = true
+			}
+			chains = append(chains, schema.PrivescChain{Kind: esc.Kind, Service: string(w.AssetType), RoleARN: role, Status: status, Steps: steps, WorkloadARN: w.ARN, Precondition: esc.Precondition})
+		}
+	}
+	// Several workloads can run as one role. List an allowed chain before an unknown one for the same kind and role, so
+	// the hop is reported by the chain that works.
+	rank := map[string]int{iamauth.StatusAllowed: 0, iamauth.StatusConditional: 1, iamauth.StatusUnknown: 2, iamauth.StatusDenied: 3}
 	sort.SliceStable(chains, func(i, j int) bool {
-		if chains[i].Kind == chains[j].Kind {
+		if chains[i].Kind != chains[j].Kind {
+			return chains[i].Kind < chains[j].Kind
+		}
+		if chains[i].RoleARN != chains[j].RoleARN {
 			return chains[i].RoleARN < chains[j].RoleARN
 		}
-		return chains[i].Kind < chains[j].Kind
+		return rank[chains[i].Status] < rank[chains[j].Status]
 	})
 	return chains
+}
+
+// workloadRole is the role an EC2 instance or ECS task runs as: the instance's profile role, or the task definition's task role.
+func workloadRole(w models.AssetNode, rels []models.Relationship) string {
+	switch w.AssetType {
+	case models.AssetEC2Instance:
+		for _, r := range rels {
+			if r.RelType == models.RelEC2UsesInstanceProfile && r.SourceARN == w.ARN {
+				for _, c := range rels {
+					if c.RelType == models.RelInstanceProfileContains && c.SourceARN == r.TargetARN {
+						return c.TargetARN
+					}
+				}
+			}
+		}
+	case models.AssetECSTask:
+		for _, r := range rels {
+			if r.RelType == models.RelECSTaskUsesTaskDef && r.SourceARN == w.ARN {
+				for _, c := range rels {
+					if c.RelType == models.RelECSTaskDefUsesTaskRole && c.SourceARN == r.TargetARN {
+						return c.TargetARN
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func executionRole(fn models.AssetNode, rels []models.Relationship) string {
@@ -209,6 +271,9 @@ func AttackTechniques() []Technique {
 		{techniqueTakeover, "escalation", "iam:CreateAccessKey, iam:CreateLoginProfile or iam:UpdateLoginProfile on another user"},
 		{techniqueReadObject, "impact", "s3:GetObject on a collected object"},
 		{techniqueReadSecret, "impact", "secretsmanager:GetSecretValue including the KMS decrypt leg"},
+	}
+	for _, w := range iamauth.WorkloadEscalations {
+		out = append(out, Technique{w.Kind, "escalation", "existing " + strings.ReplaceAll(w.Resource, "_", " ") + " that runs as a role: " + strings.Join(w.Required, " and ") + " (pathfinding.cloud " + w.Reference + ")"})
 	}
 	for _, p := range allPassRolePlans() {
 		out = append(out, Technique{p.kind, "escalation", "iam:PassRole to " + p.service + " plus " + strings.Join(p.actions, " and ")})

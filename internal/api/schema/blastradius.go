@@ -194,6 +194,10 @@ type PrivescChain struct {
 	Status        string               `json:"status"`
 	Steps         []PermissionDecision `json:"steps"`
 	OptionalSteps []PermissionDecision `json:"optional_steps,omitempty"`
+	// WorkloadARN and Precondition are set for escalations through an EC2 instance or ECS task. Precondition is state
+	// the escalation also depends on that Cloudrift does not collect.
+	WorkloadARN  string `json:"workload_arn,omitempty"`
+	Precondition string `json:"precondition,omitempty"`
 }
 
 // PermissionBlastReport is the assumed-compromise permission impact for one role.

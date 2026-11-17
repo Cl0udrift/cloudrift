@@ -527,6 +527,12 @@ func attackDecisions(blast schema.PermissionBlastReport) []attackDecision {
 			h.Write([]byte(step.EvidenceFingerprint + "|"))
 			evidence = append(evidence, step.Action+" "+step.Status)
 		}
+		if c.WorkloadARN != "" {
+			evidence = append(evidence, "workload "+c.WorkloadARN)
+		}
+		if c.Precondition != "" {
+			evidence = append(evidence, "not verified: "+c.Precondition)
+		}
 		for _, step := range c.OptionalSteps {
 			if step.Status != iamauth.StatusAllowed {
 				evidence = append(evidence, "optional, not held: "+step.Action+" ("+step.Status+"); the chain relies on another way to run the result")
@@ -543,7 +549,7 @@ func attackDecisions(blast schema.PermissionBlastReport) []attackDecision {
 
 // isChainSession is true for chain techniques that end in a session as another role.
 func isChainSession(technique string) bool {
-	return strings.HasPrefix(technique, "PASS_ROLE_") || technique == "EDIT_LAMBDA_CODE"
+	return strings.HasPrefix(technique, "PASS_ROLE_") || strings.HasPrefix(technique, "WORKLOAD_") || technique == "EDIT_LAMBDA_CODE"
 }
 
 func chainReason(c schema.PrivescChain) string {

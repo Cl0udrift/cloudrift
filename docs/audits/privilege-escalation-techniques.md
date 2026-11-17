@@ -18,6 +18,10 @@ A validated result is modeled capability, never evidence that anyone did it.
 | PassExistingRoleToNewGlueDevEndpoint | `PASS_ROLE_GLUE_ENDPOINT` | Modeled |
 | PassExistingRoleToNewDataPipeline | `PASS_ROLE_DATA_PIPELINE` | Modeled |
 | EditExistingLambdaFunctionWithRole | `EDIT_LAMBDA_CODE` | Modeled |
+| SSM StartSession, SSM SendCommand on an instance that runs as a role | `WORKLOAD_SSM_001`, `WORKLOAD_SSM_002` | Modeled |
+| EC2 user-data swap (ModifyInstanceAttribute, StopInstances, StartInstances) | `WORKLOAD_EC2_002` | Modeled |
+| EC2 Instance Connect SendSSHPublicKey | `WORKLOAD_EC2INSTANCECONNECT_003` | Modeled |
+| ECS Exec on a running task | `WORKLOAD_ECS_006` | Modeled |
 | PassRole to Omics (`s3:GetObject` on a workflow object the caller places, decided from the identity policy alone) | `PASS_ROLE_OMICS_001` | Modeled |
 | PassRole to EC2, ECS, Batch, SageMaker, CodeBuild, Step Functions, EMR, EMR Serverless, App Runner, Bedrock AgentCore, Braket, GameLift, Image Builder, Kinesis Analytics, Cognito Identity, Scheduler, SSM Automation, Glue jobs and triggers, CloudFormation StackSets, Lambda event sources | `PASS_ROLE_<SERVICE>_<n>`, one per pathfinding.cloud record; 40 records in `iamauth/passrole_services.go` | Modeled |
 | PassExistingRoleToNewLambdaThenTrigger* (DynamoDB) | needs DynamoDB table and stream evidence | Not modeled |
@@ -30,6 +34,13 @@ A validated result is modeled capability, never evidence that anyone did it.
 | CreateAccessKey, CreateLoginProfile, UpdateLoginProfile | `TAKEOVER_USER` on another user, which then becomes a reachable identity; a key a user creates for itself is not an escalation | Modeled |
 
 The search can now start from a user as well as a role session. Users and groups come from the IAM user and group collector; a group that was not collected makes the decision UNKNOWN, never allowed.
+
+## Workload hops
+A collected EC2 instance (through its instance profile) or ECS task (through its task definition's task role) runs as a
+role. If the caller's identity policy allows the calls that run code there, the search reaches that role. The records
+are in `internal/iamauth/workload_escalations.go`. Every call is decided against the workload's own ARN. State that is not
+collected (SSM agent online, ECS Exec enabled, the instance reachable) is listed in the hop's evidence as
+"not verified". When several workloads run as one role, one allowed workload is enough and is the one shown.
 
 ## Adding a service
 A PassRole service is one record in `internal/iamauth/passrole_services.go`: the trust principal, the calls after

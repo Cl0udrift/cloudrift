@@ -1,6 +1,9 @@
 package iamauth
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 const (
 	CategoryDataRead              = "DATA_READ"
@@ -50,8 +53,26 @@ type Capability struct {
 	SupportVersion    string
 }
 
+var (
+	catalogOnce  sync.Once
+	catalogRows  []Capability
+	catalogIndex map[string]Capability
+)
+
 // Catalog is the authoritative capability registry. A row is not an authorization result.
+// It is built once; each call returns a copy of the slice.
 func Catalog() []Capability {
+	catalogOnce.Do(func() {
+		catalogRows = buildCatalog()
+		catalogIndex = make(map[string]Capability, len(catalogRows))
+		for _, r := range catalogRows {
+			catalogIndex[strings.ToLower(r.Action)] = r
+		}
+	})
+	return append([]Capability(nil), catalogRows...)
+}
+
+func buildCatalog() []Capability {
 	rows := []Capability{
 		{
 			Action: ActionGetObject, Service: "s3", Category: CategoryDataRead, Support: SupportEvaluated, Evaluation: EvalS3Object,
@@ -267,6 +288,7 @@ func Catalog() []Capability {
 		},
 	}
 	rows = append(rows, passRoleRows(rows)...)
+	rows = append(rows, workloadRows(rows)...)
 	for i := range rows {
 		detail := registryDetail[rows[i].Action]
 		rows[i].UnsupportedSemantics = detail.unsupported
@@ -431,12 +453,9 @@ var registryDetail = map[string]registryFacts{
 
 // CapabilityFor returns the catalog row for an action.
 func CapabilityFor(action string) (Capability, bool) {
-	for _, entry := range Catalog() {
-		if strings.EqualFold(entry.Action, strings.TrimSpace(action)) {
-			return entry, true
-		}
-	}
-	return Capability{}, false
+	Catalog() // builds the index on first use
+	entry, ok := catalogIndex[strings.ToLower(strings.TrimSpace(action))]
+	return entry, ok
 }
 
 // EvaluatedActions are the only actions that can become VALIDATED_ALLOWED or VALIDATED_DENIED.

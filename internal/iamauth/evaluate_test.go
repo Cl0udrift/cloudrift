@@ -390,7 +390,7 @@ func TestEvaluate_ScansRepeatAndUnsupported(t *testing.T) {
 		t.Fatalf("projection: %+v %+v", nodeA, relA)
 	}
 	unsupported := baseGet()
-	unsupported.Action = "ec2:StartInstances"
+	unsupported.Action = "ec2:CreateVpc"
 	unsupported.ResourceARN = "arn:aws:ec2:us-east-1:111111111111:instance/i-abc"
 	if d := Evaluate(unsupported); d.Status != StatusUnknown || d.Reason != ReasonUnsupportedAction {
 		t.Fatalf("unsupported service: %+v", d)
