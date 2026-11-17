@@ -3,7 +3,7 @@ import { CopyIdentifier } from "../ui/CopyIdentifier";
 import { SeverityBadge } from "../SeverityBadge";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { IdentityPath, RemediationOptions } from "./IdentityPath";
+import { IdentityPath, ReachableByList, RemediationOptions } from "./IdentityPath";
 import { formatQueryError } from "../../api/httpError";
 import type { FindingDetailItem } from "../../api/types";
 import { BlastRadiusSection } from "../blast/BlastRadiusSection";
@@ -146,7 +146,7 @@ const IDENTITY_LABELS: Record<string, string> = {
 };
 
 function identityEvidenceRows(ev: Record<string, unknown>): [string, string][] {
-  const skip = new Set(["issue_category", "assessment_version", "principal_arn", "keys", "track", "path", "severity_factors", "remediation_options", "family", "variants", "targets_shown"]);
+  const skip = new Set(["issue_category", "assessment_version", "principal_arn", "keys", "track", "path", "severity_factors", "remediation_options", "family", "variants", "targets_shown", "reachable_by"]);
   return Object.entries(ev)
     .filter(([k]) => !skip.has(k))
     .map(([k, v]) => [k.replace(/_/g, " "), Array.isArray(v) ? v.map(String).join(", ") : typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)]);
@@ -217,6 +217,11 @@ export function FindingDetailPanelContent({
                     : "A weakness in how this identity is set up. It is not a route to anything by itself."}
               </p>
               <IdentityPath path={ev.path as never} />
+            </Section>
+          ) : null}
+          {ev.reachable_by ? (
+            <Section title="Who can reach this role">
+              <ReachableByList reach={ev.reachable_by as never} scanId={scanId} />
             </Section>
           ) : null}
           {Array.isArray(ev.severity_factors) ? (

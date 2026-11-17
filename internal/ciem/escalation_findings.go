@@ -42,7 +42,7 @@ type EscalationStats struct {
 // Only validated escalations become findings. Unknown and conditional hops do not, and they are counted in the stats.
 // The session is assumed to carry no session policy (credentials from an instance profile or a function environment),
 // which is a stated scenario assumption: a session policy can only narrow what the result says.
-func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []models.Relationship, budget time.Duration) ([]models.Finding, EscalationStats) {
+func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []models.Relationship, budget time.Duration, now time.Time) ([]models.Finding, EscalationStats) {
 	stats := EscalationStats{Budget: budget}
 	if budget <= 0 {
 		return nil, stats
@@ -51,6 +51,7 @@ func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []mod
 	defer cancel()
 
 	byARN := indexAssets(assets)
+	rc := newReacher(assets, rels, now)
 	adminRoles := map[string]bool{}
 	for _, r := range administrativeRoles(assets, rels) {
 		adminRoles[r.ARN] = true
@@ -153,11 +154,11 @@ func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []mod
 			sort.Strings(targets)
 			if len(targets) > escalationCap {
 				stats.Capped++
-				out = append(out, rolledUpEscalation(p, fam, targets, direct[fam], byARN, adminRoles, assets, rels))
+				out = append(out, rolledUpEscalation(p, fam, targets, direct[fam], byARN, adminRoles, assets, rels, rc))
 				continue
 			}
 			for _, t := range targets {
-				out = append(out, escalationFinding(p, fam, direct[fam][t], byARN, adminRoles, assets, rels))
+				out = append(out, escalationFinding(p, fam, direct[fam][t], byARN, adminRoles, assets, rels, rc))
 			}
 		}
 	}
@@ -206,7 +207,7 @@ func escalationFamily(kind string) string {
 	return kind
 }
 
-func escalationFinding(p models.AssetNode, family string, g *escalationGroup, byARN map[string]models.AssetNode, adminRoles map[string]bool, assets []models.AssetNode, rels []models.Relationship) models.Finding {
+func escalationFinding(p models.AssetNode, family string, g *escalationGroup, byARN map[string]models.AssetNode, adminRoles map[string]bool, assets []models.AssetNode, rels []models.Relationship, rc *reacher) models.Finding {
 	e := g.esc
 	sort.Strings(g.variants)
 	privileged := targetIsPrivileged(e, byARN, adminRoles, assets, rels)
@@ -226,6 +227,7 @@ func escalationFinding(p models.AssetNode, family string, g *escalationGroup, by
 		"severity_factors":        escalationFactors(e, privileged),
 		"remediation_options":     text.options,
 	}
+	sev = attachReach(p, rc, sev, ev)
 	f := identityFinding(p, CatEscalation+"|"+family+"|"+e.TargetARN, sev, text.title(p.Name, target), text.impact, text.recommendation, ev)
 	f.RemediationCmd = text.command(p, e.TargetARN)
 	return f
@@ -233,7 +235,7 @@ func escalationFinding(p models.AssetNode, family string, g *escalationGroup, by
 
 // rolledUpEscalation is one finding for a principal and technique that reach more than escalationCap targets. It lists
 // the first few, states the count, and says it was rolled up.
-func rolledUpEscalation(p models.AssetNode, family string, targets []string, byTarget map[string]*escalationGroup, byARN map[string]models.AssetNode, adminRoles map[string]bool, assets []models.AssetNode, rels []models.Relationship) models.Finding {
+func rolledUpEscalation(p models.AssetNode, family string, targets []string, byTarget map[string]*escalationGroup, byARN map[string]models.AssetNode, adminRoles map[string]bool, assets []models.AssetNode, rels []models.Relationship, rc *reacher) models.Finding {
 	sev, privileged := models.SeverityMedium, 0
 	kind := byTarget[targets[0]].esc.Kind
 	for _, t := range targets {
@@ -256,6 +258,7 @@ func rolledUpEscalation(p models.AssetNode, family string, targets []string, byT
 		"severity_factors":        []string{fmt.Sprintf("it reaches %d targets by one technique, more than the %d listed individually", len(targets), escalationCap), fmt.Sprintf("%d of them hold administrative access", privileged)},
 		"remediation_options":     text.options,
 	}
+	sev = attachReach(p, rc, sev, ev)
 	f := identityFinding(p, CatEscalation+"|"+family+"|rolled_up", sev, text.title(p.Name, fmt.Sprintf("%d targets", len(targets))), text.impact+" It reaches "+fmt.Sprint(len(targets))+" targets, so they are rolled up into one finding.", text.recommendation, ev)
 	f.RemediationCmd = text.command(p, targets[0])
 	return f
@@ -309,4 +312,27 @@ func escalationFactors(e schema.AttackEscalation, privileged bool) []string {
 		out = append(out, "it also depends on state Cloudrift cannot see (agent, ECS Exec, reachability); see the evidence")
 	}
 	return out
+}
+
+// attachReach adds who can reach the principal (when it is a role) to the evidence, and raises the severity when a user
+// with a weak credential can. Users are not reached by assuming them, so nothing is attached for a user.
+func attachReach(p models.AssetNode, rc *reacher, sev models.Severity, ev map[string]any) models.Severity {
+	if p.AssetType != models.AssetIAMRole || rc == nil {
+		return sev
+	}
+	info := rc.reach(p)
+	ev["reachable_by"] = info
+	factors, _ := ev["severity_factors"].([]string)
+	switch {
+	case info.Total == 0:
+		factors = append(factors, "no user or role in this scan can assume it, so only a principal that already holds it (an instance, function or federated login) can use the path")
+	default:
+		factors = append(factors, fmt.Sprintf("%d user or role can assume it, %d of them with a weak credential", info.Total, info.Weak))
+	}
+	if raised := raiseForWeakCaller(sev, info); raised != sev {
+		factors = append(factors, "severity raised from "+string(sev)+" to "+string(raised)+": a user with a weak credential can reach this role")
+		sev = raised
+	}
+	ev["severity_factors"] = factors
+	return sev
 }

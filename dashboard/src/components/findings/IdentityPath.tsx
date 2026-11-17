@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 type PathNode = { kind: string; label: string; detail?: string; risk?: string };
 type Option = { strategy: string; why: string; steps: string[] };
@@ -58,6 +59,43 @@ export function RemediationOptions({ options }: { options: Option[] }) {
       <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-sm">
         {cur.steps.map((s) => <li key={s}>{s}</li>)}
       </ol>
+    </div>
+  );
+}
+
+type Caller = { arn: string; name: string; kind: string; status: string; weak_credential?: boolean; weakness?: string };
+export type ReachableBy = { callers?: Caller[]; total?: number; weak?: number; evaluated?: number; unknown?: number; note?: string };
+
+/** Who can assume the role an escalation finding is about, weak credentials first. */
+export function ReachableByList({ reach, scanId }: { reach: ReachableBy; scanId?: string }) {
+  const callers = reach.callers ?? [];
+  const total = reach.total ?? callers.length;
+  if (total === 0) {
+    return <p className="cr-helper">No user or role in this scan can assume it. Only a principal that already holds the role (an instance, a function, a federated login) can use this path.</p>;
+  }
+  const scan = scanId ? `scan_id=${encodeURIComponent(scanId)}&` : "";
+  return (
+    <div className="space-y-2">
+      <p className="text-sm">
+        <span className="font-semibold">{total}</span> {total === 1 ? "user or role can" : "users and roles can"} assume it
+        {reach.weak ? <>, <span className="font-semibold text-red-700 dark:text-red-300">{reach.weak} with a weak credential</span></> : null}.
+      </p>
+      <ul className="space-y-1 text-sm">
+        {callers.map((c) => (
+          <li key={c.arn} className="flex flex-wrap items-center gap-2">
+            {c.kind === "user" ? (
+              <Link className="underline" to={`/principals?${scan}principal=${encodeURIComponent(c.arn)}`}>{c.name}</Link>
+            ) : (
+              <span className="font-medium">{c.name}</span>
+            )}
+            <span className="text-xs text-slate-500">{c.kind}</span>
+            {c.weak_credential ? <span className="rounded border border-red-400 px-1.5 text-xs text-red-700 dark:border-red-800 dark:text-red-300">weak credential: {c.weakness}</span> : null}
+            {c.status === "ALLOWED_PENDING_CONTROLS" ? <span className="text-xs text-slate-500">by policies only; organization controls not checked</span> : null}
+          </li>
+        ))}
+      </ul>
+      {total > callers.length ? <p className="cr-helper">Showing {callers.length} of {total}. The Access Explorer lists all of them.</p> : null}
+      {reach.note ? <p className="cr-helper">{reach.note}</p> : null}
     </div>
   );
 }
