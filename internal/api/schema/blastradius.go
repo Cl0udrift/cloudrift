@@ -185,13 +185,15 @@ type PermissionBucketScope struct {
 
 // PrivescChain is a set of calls that together give the caller another identity's privileges, such as
 // iam:PassRole plus the service calls that return the passed role's credentials. Kind names the technique.
-// Status is VALIDATED_ALLOWED only when every step is allowed.
+// Status is VALIDATED_ALLOWED only when every required step is allowed. OptionalSteps are calls that
+// help (read the result back, trigger the code) but are not needed for the escalation; they never change Status.
 type PrivescChain struct {
-	Kind    string               `json:"kind"`
-	Service string               `json:"service"`
-	RoleARN string               `json:"role_arn"`
-	Status  string               `json:"status"`
-	Steps   []PermissionDecision `json:"steps"`
+	Kind          string               `json:"kind"`
+	Service       string               `json:"service"`
+	RoleARN       string               `json:"role_arn"`
+	Status        string               `json:"status"`
+	Steps         []PermissionDecision `json:"steps"`
+	OptionalSteps []PermissionDecision `json:"optional_steps,omitempty"`
 }
 
 // PermissionBlastReport is the assumed-compromise permission impact for one role.

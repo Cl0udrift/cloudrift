@@ -364,7 +364,7 @@ func TestPathfindingBenchmark(t *testing.T) {
 // pfFloor is every path the benchmark saw detected with the minimal reference permissions when it was added.
 // A path leaving this list is a regression. A path joining it should be added in the same change.
 var pfFloor = []string{
-	"cloudformation-001", "datapipeline-001", "lambda-001", "lambda-004", "lambda-006", "sts-001",
+	"cloudformation-001", "datapipeline-001", "glue-001", "lambda-001", "lambda-003", "lambda-004", "lambda-005", "lambda-006", "sts-001",
 	"iam-001", "iam-002", "iam-003", "iam-004", "iam-005", "iam-006", "iam-007", "iam-008", "iam-009", "iam-010", "iam-011",
 	"iam-012", "iam-013", "iam-014", "iam-015", "iam-016", "iam-017", "iam-018", "iam-019", "iam-020", "iam-021",
 }

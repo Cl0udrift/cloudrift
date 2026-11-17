@@ -527,6 +527,11 @@ func attackDecisions(blast schema.PermissionBlastReport) []attackDecision {
 			h.Write([]byte(step.EvidenceFingerprint + "|"))
 			evidence = append(evidence, step.Action+" "+step.Status)
 		}
+		for _, step := range c.OptionalSteps {
+			if step.Status != iamauth.StatusAllowed {
+				evidence = append(evidence, "optional, not held: "+step.Action+" ("+step.Status+"); the chain relies on another way to run the result")
+			}
+		}
 		out = append(out, attackDecision{schema.PermissionDecision{
 			Action: c.Steps[0].Action, Category: c.Steps[0].Category, ResourceARN: c.RoleARN, Status: c.Status,
 			Reason: chainReason(c), SameAccount: true, DecisionID: c.Steps[0].DecisionID,

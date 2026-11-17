@@ -38,10 +38,14 @@ The search can now start from a user as well as a role session. Users and groups
 - **Probe resource.** The calls that create something are evaluated against a made-up resource
   (`cloudrift-probe`, `us-east-1`). A policy scoped to other names or Regions is UNKNOWN. That can only miss an
   escalation, never invent one.
-- **Edit chains** need both `lambda:UpdateFunctionCode` and `lambda:InvokeFunction` on a collected function whose
-  execution role relationship is in the scan. An existing trigger could replace the invoke, so this can miss.
+- **Edit chains** need `lambda:UpdateFunctionCode` on a collected function whose execution role relationship is in
+  the scan. `lambda:InvokeFunction` and `lambda:AddPermission` are optional: an existing trigger or another invoker can
+  run the new code. When they are not held, the evidence says "optional, not held" so the analyst can see that the
+  code runs only if something else invokes the function.
+- **Required and optional steps.** A chain is decided by its required steps. Optional steps (reading a Glue dev
+  endpoint's address, invoking an edited function) are evaluated and shown, and never change the status.
 - **The policy written is assumed administrative.** The search does not choose a policy document.
-- **Status** is VALIDATED_ALLOWED only when every step is. Any deny gives DENIED. Missing evidence gives UNKNOWN.
+- **Status** is VALIDATED_ALLOWED only when every required step is. Any deny gives DENIED. Missing evidence gives UNKNOWN.
 
 ## Reporting
 

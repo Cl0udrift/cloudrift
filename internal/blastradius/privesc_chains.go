@@ -19,19 +19,21 @@ import (
 type passRolePlan struct {
 	kind, service string
 	actions       []string
-	probeARN      func(account string) string
+	// optional calls are evaluated and shown but never decide the chain.
+	optional []string
+	probeARN func(account string) string
 }
 
 var passRolePlans = []passRolePlan{
-	{"PASS_ROLE_LAMBDA", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:InvokeFunction"}, lambdaProbe},
-	{"PASS_ROLE_LAMBDA_ADDPERMISSION", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:AddPermission"}, lambdaProbe},
-	{"PASS_ROLE_CLOUDFORMATION", "cloudformation.amazonaws.com", []string{"cloudformation:CreateStack"}, func(a string) string {
+	{"PASS_ROLE_LAMBDA", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:InvokeFunction"}, nil, lambdaProbe},
+	{"PASS_ROLE_LAMBDA_ADDPERMISSION", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:AddPermission"}, nil, lambdaProbe},
+	{"PASS_ROLE_CLOUDFORMATION", "cloudformation.amazonaws.com", []string{"cloudformation:CreateStack"}, nil, func(a string) string {
 		return "arn:aws:cloudformation:us-east-1:" + a + ":stack/cloudrift-probe/00000000-0000-0000-0000-000000000000"
 	}},
-	{"PASS_ROLE_GLUE_ENDPOINT", "glue.amazonaws.com", []string{"glue:CreateDevEndpoint", "glue:GetDevEndpoint"}, func(a string) string {
+	{"PASS_ROLE_GLUE_ENDPOINT", "glue.amazonaws.com", []string{"glue:CreateDevEndpoint"}, []string{"glue:GetDevEndpoint"}, func(a string) string {
 		return "arn:aws:glue:us-east-1:" + a + ":devEndpoint/cloudrift-probe"
 	}},
-	{"PASS_ROLE_DATA_PIPELINE", "datapipeline.amazonaws.com", []string{"datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition", "datapipeline:ActivatePipeline"}, func(a string) string {
+	{"PASS_ROLE_DATA_PIPELINE", "datapipeline.amazonaws.com", []string{"datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition", "datapipeline:ActivatePipeline"}, nil, func(a string) string {
 		return "arn:aws:datapipeline:us-east-1:" + a + ":pipeline/cloudrift-probe"
 	}},
 }
@@ -64,9 +66,12 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 
 	for _, plan := range passRolePlans {
 		probe := probeAsset(plan.probeARN(account), account)
-		var steps []schema.PermissionDecision
+		var steps, optional []schema.PermissionDecision
 		for _, a := range plan.actions {
 			steps = append(steps, eval(capOf(a), probe, req.RequestContext))
+		}
+		for _, a := range plan.optional {
+			optional = append(optional, eval(capOf(a), probe, req.RequestContext))
 		}
 		ctx := map[string]string{}
 		for k, v := range req.RequestContext {
@@ -78,7 +83,7 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 				continue
 			}
 			all := append([]schema.PermissionDecision{eval(capOf("iam:PassRole"), target, ctx)}, steps...)
-			chains = append(chains, schema.PrivescChain{Kind: plan.kind, Service: plan.service, RoleARN: target.ARN, Status: combineSteps(all), Steps: all})
+			chains = append(chains, schema.PrivescChain{Kind: plan.kind, Service: plan.service, RoleARN: target.ARN, Status: combineSteps(all), Steps: all, OptionalSteps: optional})
 		}
 	}
 
@@ -88,8 +93,11 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 		if role == "" || role == caller.ARN || !containsARN(roles, role) {
 			continue
 		}
-		all := []schema.PermissionDecision{eval(capOf("lambda:UpdateFunctionCode"), fn, req.RequestContext), eval(capOf("lambda:InvokeFunction"), fn, req.RequestContext)}
-		chains = append(chains, schema.PrivescChain{Kind: "EDIT_LAMBDA_CODE", Service: "lambda.amazonaws.com", RoleARN: role, Status: combineSteps(all), Steps: all})
+		// Updating the code is the escalation. Invoking it, or letting another principal invoke it, only
+		// makes it run sooner; an existing trigger can run it, so those calls are optional.
+		all := []schema.PermissionDecision{eval(capOf("lambda:UpdateFunctionCode"), fn, req.RequestContext)}
+		optional := []schema.PermissionDecision{eval(capOf("lambda:InvokeFunction"), fn, req.RequestContext), eval(capOf("lambda:AddPermission"), fn, req.RequestContext)}
+		chains = append(chains, schema.PrivescChain{Kind: "EDIT_LAMBDA_CODE", Service: "lambda.amazonaws.com", RoleARN: role, Status: combineSteps(all), Steps: all, OptionalSteps: optional})
 	}
 
 	// Publish a new default version of a customer managed policy attached to a role. One decision per policy.

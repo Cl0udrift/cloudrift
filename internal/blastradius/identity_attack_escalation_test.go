@@ -2,6 +2,7 @@ package blastradius
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Zero0x00/cloudrift/internal/api/schema"
@@ -138,7 +139,7 @@ func TestIdentityAttack_PassRoleServices(t *testing.T) {
 		actions       []string
 	}{
 		{"PASS_ROLE_CLOUDFORMATION", "cloudformation.amazonaws.com", []string{"cloudformation:CreateStack"}},
-		{"PASS_ROLE_GLUE_ENDPOINT", "glue.amazonaws.com", []string{"glue:CreateDevEndpoint", "glue:GetDevEndpoint"}},
+		{"PASS_ROLE_GLUE_ENDPOINT", "glue.amazonaws.com", []string{"glue:CreateDevEndpoint"}},
 		{"PASS_ROLE_DATA_PIPELINE", "datapipeline.amazonaws.com", []string{"datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition", "datapipeline:ActivatePipeline"}},
 		{"PASS_ROLE_LAMBDA_ADDPERMISSION", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:AddPermission"}},
 	}
@@ -164,6 +165,13 @@ func TestIdentityAttack_PassRoleServices(t *testing.T) {
 				t.Errorf("%s: escalated without %s", c.kind, c.actions[i])
 			}
 		}
+		if c.kind == "PASS_ROLE_GLUE_ENDPOINT" {
+			// Reading the endpoint address back is optional; creating it is the escalation.
+			withOptional := doc(append(append([]string{}, c.actions...), "glue:GetDevEndpoint"))
+			if r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, withOptional, ""), trusted}, nil); !hasEscalation(r, c.kind, target) {
+				t.Errorf("%s: optional step changed the result", c.kind)
+			}
+		}
 		wrongTrust := controlledRole(target, "", serviceTrust("ec2.amazonaws.com"))
 		if r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, doc(c.actions), ""), wrongTrust}, nil); hasEscalation(r, c.kind, target) {
 			t.Errorf("%s: escalated for a role the service cannot assume", c.kind)
@@ -186,8 +194,24 @@ func TestIdentityAttack_EditLambdaCode(t *testing.T) {
 	if r := attackWithRels(caller, assets(both), rels); !hasEscalation(r, "EDIT_LAMBDA_CODE", exec) {
 		t.Fatalf("edit chain not found: %#v", r.Escalations)
 	}
-	if r := attackWithRels(caller, assets(allowDoc("lambda:UpdateFunctionCode", fn)), rels); hasEscalation(r, "EDIT_LAMBDA_CODE", exec) {
-		t.Fatal("update without invoke escalated")
+	// Updating the code is the escalation; invoke is optional (a trigger can run it), and the report says so.
+	r := attackWithRels(caller, assets(allowDoc("lambda:UpdateFunctionCode", fn)), rels)
+	if !hasEscalation(r, "EDIT_LAMBDA_CODE", exec) {
+		t.Fatal("update alone must escalate: the reference path needs only lambda:UpdateFunctionCode")
+	}
+	said := false
+	for _, tr := range r.Transitions {
+		for _, e := range tr.Evidence {
+			if strings.Contains(e, "optional, not held: lambda:InvokeFunction") {
+				said = true
+			}
+		}
+	}
+	if !said {
+		t.Fatal("the missing invoke permission must be shown in the evidence")
+	}
+	if r := attackWithRels(caller, assets(allowDoc("lambda:InvokeFunction", fn)), rels); hasEscalation(r, "EDIT_LAMBDA_CODE", exec) {
+		t.Fatal("invoke without update escalated")
 	}
 	if r := attackWithRels(caller, assets(both), nil); hasEscalation(r, "EDIT_LAMBDA_CODE", exec) {
 		t.Fatal("function with no known execution role escalated")
