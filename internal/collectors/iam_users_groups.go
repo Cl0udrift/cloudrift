@@ -77,6 +77,8 @@ func collectUsersGroups(ctx context.Context, accountID string, details IAMAuthDe
 			AccountID: accountID, Region: "global",
 			Properties: map[string]any{"path": awsv2.ToString(u.Path), "user_id": awsv2.ToString(u.UserId)},
 		}
+		// GetAccountAuthorizationDetails returns every user's tags, so an empty list means the user has none.
+		node.Properties["tags_collected"] = true
 		if tags := tagMap(u.Tags); len(tags) > 0 {
 			node.Properties["tags"] = tags
 		}
@@ -220,8 +222,11 @@ func applyIAMMetadata(nodes []models.AssetNode, md iamMetadata) {
 		if nodes[i].Properties == nil {
 			continue
 		}
-		if tags, ok := md.RoleTags[nodes[i].ARN]; ok && nodes[i].AssetType == models.AssetIAMRole {
-			nodes[i].Properties["tags"] = tags
+		if nodes[i].AssetType == models.AssetIAMRole {
+			nodes[i].Properties["tags_collected"] = true // the role pass returned every role's tags; a role with none is absent from the map
+			if tags, ok := md.RoleTags[nodes[i].ARN]; ok {
+				nodes[i].Properties["tags"] = tags
+			}
 		}
 		if d, ok := md.PolicyDescriptions[nodes[i].ARN]; ok && nodes[i].AssetType == models.AssetIAMPolicy {
 			nodes[i].Properties["description"] = d

@@ -272,6 +272,8 @@ type PrincipalPoliciesResponse struct {
 	Credentials *CredentialSummary `json:"credentials,omitempty"`
 	Broad       []string           `json:"broad_candidates"`
 	Tags        map[string]string  `json:"tags,omitempty"`
+	// CredentialNote says why a user has no credential data when the cause is a credential report older than the user.
+	CredentialNote string `json:"credential_note,omitempty"`
 }
 
 // KeySummary is one access key slot from the credential report.

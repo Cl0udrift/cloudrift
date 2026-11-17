@@ -98,6 +98,16 @@ type AuthorizationRequest struct {
 	// would choose (an S3 object holding a workflow, in a bucket the caller controls). Resource policies, ACLs and
 	// Block Public Access are not consulted.
 	IdentityOnlyProbe bool
+	// ResourceTagsKnown and PrincipalTagsKnown say the tags were collected, so an aws:ResourceTag or aws:PrincipalTag key that
+	// is not in RequestContext means the tag is absent, not that its value is unknown.
+	ResourceTagsKnown  bool
+	PrincipalTagsKnown bool
+}
+
+// TagGap is a resource tag an Allow statement's condition needs and the resource lacks (or holds another value for).
+type TagGap struct {
+	Key  string
+	Want string
 }
 
 // KMSGrant is one collected key grant. Constrained is true when the grant carries any
@@ -193,6 +203,8 @@ type StatementRef struct {
 // VALIDATED_ALLOWED means the request is allowed under the evaluated scope.
 // It does not mean an attack succeeded. UNKNOWN is not a deny.
 type AuthorizationDecision struct {
+	// TagGaps are the resource tags that would satisfy a condition that stopped an Allow statement from applying.
+	TagGaps               []TagGap
 	ID                    string
 	ScanID                string
 	PrincipalARN          string

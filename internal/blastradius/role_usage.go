@@ -39,8 +39,10 @@ func WhoCan(scanID, action string, target models.AssetNode, assets []models.Asse
 			continue
 		}
 		identity, _ := identitySlot(caller, assets, rels)
+		tagCtx, resourceTagsKnown, principalTagsKnown := tagContext(caller, target, nil)
 		req := iamauth.AuthorizationRequest{
 			ScanID: scanID, PrincipalARN: caller.ARN, Action: action,
+			RequestContext: tagCtx, ResourceTagsKnown: resourceTagsKnown, PrincipalTagsKnown: principalTagsKnown,
 			ResourceARN: target.ARN, ResourceAccountID: target.AccountID, EvaluatedAt: when,
 			Identity: identity, TrustPolicy: trust,
 			PermissionsBoundary: boundaryFromRole(caller),

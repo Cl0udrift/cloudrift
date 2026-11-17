@@ -1295,6 +1295,7 @@ export interface PrincipalPoliciesResponse {
   complete: boolean;
   notes: string[];
   credentials?: CredentialSummary;
+  credential_note?: string;
   broad_candidates: string[];
   tags?: Record<string, string>;
 }

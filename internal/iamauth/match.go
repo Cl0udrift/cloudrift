@@ -160,7 +160,14 @@ const (
 	condUnsupported
 )
 
-func evalCondition(cond map[string]any, ctx map[string]string) (condKind, []string) {
+// evalCondition decides a condition block for a request context. known, when given, says which keys have a determined value
+// even when the context has none: a resource tag on a resource whose tags were collected is absent, not unknown. AWS treats an
+// absent key as "not matched" for a positive operator (StringEquals) and as "matched" for a negated one (StringNotEquals).
+func evalCondition(cond map[string]any, ctx map[string]string, known ...func(string) bool) (condKind, []string) {
+	var isKnown func(string) bool
+	if len(known) > 0 {
+		isKnown = known[0]
+	}
 	if len(cond) == 0 {
 		return condMatch, nil
 	}
@@ -191,6 +198,12 @@ func evalCondition(cond map[string]any, ctx map[string]string) (condKind, []stri
 						}
 					}
 					continue
+				}
+				if isKnown != nil && isKnown(key) {
+					if negatedConditionOperator(base) {
+						continue
+					}
+					return condNoMatch, []string{key}
 				}
 				sawMissing = true
 				notes = append(notes, key)
@@ -440,4 +453,51 @@ func substituteExpected(expected any, ctx map[string]string) any {
 		list[i] = v
 	}
 	return list
+}
+
+func negatedConditionOperator(op string) bool {
+	switch op {
+	case "StringNotEquals", "StringNotLike", "StringNotEqualsIgnoreCase", "ArnNotEquals", "ArnNotLike", "NotIpAddress", "NumericNotEquals":
+		return true
+	}
+	return false
+}
+
+// tagGapsOf lists the resource tags a statement's condition would need set to be met: a StringEquals or StringLike on
+// aws:ResourceTag/<key> whose tag is absent (when known) or holds another value. Only literal wanted values are returned.
+// It is a hint about what to set; whether setting it makes the whole request allowed is decided by evaluating again.
+func tagGapsOf(cond map[string]any, ctx map[string]string, known func(string) bool) []TagGap {
+	var out []TagGap
+	for op, raw := range cond {
+		base := strings.TrimSuffix(strings.TrimSpace(op), "IfExists")
+		if base != "StringEquals" && base != "StringLike" {
+			continue
+		}
+		keys, _ := raw.(map[string]any)
+		for key, expected := range keys {
+			if !strings.HasPrefix(key, "aws:ResourceTag/") {
+				continue
+			}
+			value, present := ctxGet(ctx, key)
+			failing := false
+			switch {
+			case !present:
+				failing = known != nil && known(key)
+			case base == "StringEquals":
+				failing = !anyEquals(expected, value, false)
+			default:
+				failing = !anyWildcard(expected, value)
+			}
+			if !failing {
+				continue
+			}
+			for _, want := range scalarList(expected) {
+				if want != "" && !strings.ContainsAny(want, "*?$") {
+					out = append(out, TagGap{Key: strings.TrimPrefix(key, "aws:ResourceTag/"), Want: want})
+					break
+				}
+			}
+		}
+	}
+	return out
 }

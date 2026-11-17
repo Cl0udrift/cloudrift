@@ -142,6 +142,7 @@ func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []mod
 			stats.UnknownOnly++
 		}
 		out = append(out, unverifiedSwitchFindings(p, res.report, rc)...)
+		out = append(out, afterTaggingFindings(p, res.report, byARN, adminRoles, assets, rels, rc)...)
 		families := make([]string, 0, len(direct))
 		for k := range direct {
 			families = append(families, k)

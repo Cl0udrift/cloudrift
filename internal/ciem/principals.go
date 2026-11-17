@@ -112,6 +112,7 @@ func PrincipalPolicies(scanID string, principal models.AssetNode, byARN map[stri
 		out.Tags = tags
 	}
 	out.Credentials = CredentialSummaryFor(principal, now)
+	out.CredentialNote = credentialReportNote(principal)
 	out.Broad = principalBroad(scanID, principal, byARN, rels)
 	sort.SliceStable(out.Sources, func(i, j int) bool {
 		if out.Sources[i].Via != out.Sources[j].Via {
@@ -208,4 +209,23 @@ func principalBroad(scanID string, principal models.AssetNode, byARN map[string]
 		out = []string{}
 	}
 	return out
+}
+
+// credentialReportNote explains a user missing from the IAM credential report: AWS caches the report for up to four hours, so
+// a user created after it was generated has no row in it.
+func credentialReportNote(u models.AssetNode) string {
+	if u.AssetType != models.AssetIAMUser || strProp(u, "credential_report_state") != "not_in_report" {
+		return ""
+	}
+	at := strProp(u, "credential_report_generated_at")
+	note := "This user is not in the IAM credential report"
+	if at != "" {
+		note += ", which AWS generated at " + at
+		if created, err := time.Parse(time.RFC3339, strProp(u, "create_date")); err == nil {
+			if gen, gerr := time.Parse(time.RFC3339, at); gerr == nil && created.After(gen) {
+				note += " before this user was created"
+			}
+		}
+	}
+	return note + ". AWS caches the report for up to four hours, so this user's console, MFA and key data will appear once it is refreshed."
 }

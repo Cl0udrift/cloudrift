@@ -126,6 +126,7 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 		decision.Unsupported = append(decision.Unsupported, err.Error())
 		return finish(decision, StatusUnknown, ReasonMalformed)
 	}
+	decision.TagGaps = uniqueTagGaps(identity.tagGaps)
 	for _, g := range groups {
 		decision.Provenance = append(decision.Provenance, g.provenance...)
 		decision.ApplicableStatements = append(decision.ApplicableStatements, g.applicable...)
@@ -596,6 +597,7 @@ func gate(slot PolicySlot, res groupResult, noAllowCode string) (string, bool) {
 
 type groupResult struct {
 	definiteAllow     bool
+	tagGaps           []TagGap
 	namedAllow        bool // a trust or resource Allow named the caller directly (not through the account root)
 	conditional       bool
 	blocked           bool
@@ -813,7 +815,10 @@ func classifyStatement(req AuthorizationRequest, result *groupResult, doc Policy
 			return
 		}
 	}
-	cond, notes := evalCondition(stmt.Condition, req.RequestContext)
+	cond, notes := evalCondition(stmt.Condition, req.RequestContext, req.tagKeyKnown)
+	if cond == condNoMatch && kind == "identity" && strings.EqualFold(effect, "Allow") {
+		result.tagGaps = append(result.tagGaps, tagGapsOf(stmt.Condition, req.RequestContext, req.tagKeyKnown)...)
+	}
 	ref := StatementRef{
 		PolicyID:    firstNonEmpty(stmt.PolicyID, doc.ID),
 		StatementID: stmt.StatementID,
@@ -912,7 +917,7 @@ func isIAMIdentityARN(action, arn string) bool {
 	switch strings.ToLower(action) {
 	case "iam:attachgrouppolicy", "iam:putgrouppolicy", "iam:addusertogroup":
 		return strings.Contains(arn, ":group/")
-	case "iam:attachuserpolicy", "iam:putuserpolicy", "iam:createaccesskey", "iam:deleteaccesskey", "iam:createloginprofile", "iam:updateloginprofile":
+	case "iam:attachuserpolicy", "iam:putuserpolicy", "iam:createaccesskey", "iam:deleteaccesskey", "iam:taguser", "iam:createloginprofile", "iam:updateloginprofile":
 		return strings.Contains(arn, ":user/")
 	}
 	return isIAMRoleARN(arn)
@@ -1026,4 +1031,21 @@ func parsedStatements(doc PolicyDocument) ([]StatementView, error) {
 	parseCache.m[key] = e
 	parseCache.Unlock()
 	return e.statements, e.err
+}
+
+// tagKeyKnown reports whether a tag condition key has a determined value for this request even when RequestContext lacks it.
+func (r AuthorizationRequest) tagKeyKnown(key string) bool {
+	return (r.ResourceTagsKnown && strings.HasPrefix(key, "aws:ResourceTag/")) || (r.PrincipalTagsKnown && strings.HasPrefix(key, "aws:PrincipalTag/"))
+}
+
+func uniqueTagGaps(in []TagGap) []TagGap {
+	seen := map[TagGap]bool{}
+	var out []TagGap
+	for _, g := range in {
+		if !seen[g] {
+			seen[g] = true
+			out = append(out, g)
+		}
+	}
+	return out
 }

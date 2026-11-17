@@ -121,14 +121,18 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 	if boundary.Evidence != "" {
 		report.CoverageNotes = append(report.CoverageNotes, boundary.Evidence)
 	}
-	eval := func(cap iamauth.Capability, target models.AssetNode, reqCtx map[string]string) schema.PermissionDecision {
+	var eval func(cap iamauth.Capability, target models.AssetNode, reqCtx map[string]string) schema.PermissionDecision
+	eval = func(cap iamauth.Capability, target models.AssetNode, reqCtx map[string]string) schema.PermissionDecision {
+		tagCtx, resourceTagsKnown, principalTagsKnown := tagContext(role, target, reqCtx)
 		authReq := iamauth.AuthorizationRequest{
 			ScanID:              req.ScanID,
 			PrincipalARN:        report.RoleARN,
 			Action:              cap.Action,
 			ResourceARN:         target.ARN,
 			ResourceAccountID:   target.AccountID,
-			RequestContext:      reqCtx,
+			RequestContext:      tagCtx,
+			ResourceTagsKnown:   resourceTagsKnown,
+			PrincipalTagsKnown:  principalTagsKnown,
 			EvaluatedAt:         when,
 			Identity:            identity,
 			ResourcePolicy:      bucketPolicySlot(target, buckets),
@@ -159,6 +163,29 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 		}
 		authReq.IdentityOnlyProbe = cap.IdentityOnlyProbe
 		decision := iamauth.Evaluate(authReq)
+		// A tag condition stopped the call, but the principal may set that tag: the call is then allowed once the tag is set.
+		// That depends on an action the attacker takes first, so it is CONDITIONAL, not validated.
+		tagNote := ""
+		if decision.Status != iamauth.StatusAllowed && len(decision.TagGaps) > 0 && !isTagAction(cap.Action) {
+			if tagCap, ok := tagActionFor(target); ok {
+				if td := eval(tagCap, target, tagRequestContext(reqCtx, decision.TagGaps)); td.Status == iamauth.StatusAllowed {
+					after := authReq
+					after.RequestContext = make(map[string]string, len(authReq.RequestContext)+len(decision.TagGaps))
+					for k, v := range authReq.RequestContext {
+						after.RequestContext[k] = v
+					}
+					var want []string
+					for _, g := range decision.TagGaps {
+						after.RequestContext["aws:ResourceTag/"+g.Key] = g.Want
+						want = append(want, g.Key+"="+g.Want)
+					}
+					if iamauth.Evaluate(after).Status == iamauth.StatusAllowed {
+						decision.Status, decision.Reason = iamauth.StatusConditional, "satisfiable_by_tagging"
+						tagNote = "not allowed as the target is tagged now, but " + tagCap.Action + " is allowed on it, and with the tag " + strings.Join(want, ", ") + " the call is allowed"
+					}
+				}
+			}
+		}
 		hit := schema.PermissionDecision{
 			Action:               cap.Action,
 			Category:             cap.Category,
@@ -180,6 +207,10 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 		}
 		if decision.Reason != "" {
 			hit.Evidence = append(hit.Evidence, decision.Reason)
+		}
+		if tagNote != "" {
+			hit.Evidence = append(hit.Evidence, tagNote)
+			hit.Explanation = tagNote
 		}
 		return hit
 	}

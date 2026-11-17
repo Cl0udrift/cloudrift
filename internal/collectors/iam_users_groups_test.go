@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -134,8 +135,13 @@ func TestCredentialReportAnnotatesUsers(t *testing.T) {
 	user := models.AssetNode{ARN: "arn:aws:iam::111111111111:user/alice", AssetType: models.AssetIAMUser, Properties: map[string]any{}}
 	other := models.AssetNode{ARN: "arn:aws:iam::111111111111:user/ghost", AssetType: models.AssetIAMUser, Properties: map[string]any{}}
 	users := []models.AssetNode{user, other}
-	if err := annotateCredentials(users, []byte(credentialCSV)); err != nil {
-		t.Fatal(err)
+	generated := time.Date(2026, 11, 17, 18, 24, 57, 0, time.UTC)
+	missing, err := annotateCredentials(users, []byte(credentialCSV), generated)
+	if err != nil || missing != 1 {
+		t.Fatalf("one user is missing from the report: %d %v", missing, err)
+	}
+	if users[1].Properties["credential_report_state"] != "not_in_report" || users[0].Properties["credential_report_generated_at"] != "2026-11-17T18:24:57Z" {
+		t.Fatalf("the report age and the missing user must be recorded: %#v %#v", users[0].Properties, users[1].Properties)
 	}
 	p := users[0].Properties
 	if p["console_enabled"] != true || p["mfa_active"] != false {
@@ -148,7 +154,7 @@ func TestCredentialReportAnnotatesUsers(t *testing.T) {
 	if _, ok := users[1].Properties["credential_report"]; ok {
 		t.Fatal("a user missing from the report must stay not collected, not be recorded as having no credentials")
 	}
-	if err := annotateCredentials(users, []byte("user,arn\n")); err == nil {
+	if _, err := annotateCredentials(users, []byte("user,arn\n"), generated); err == nil {
 		t.Fatal("a report without the expected columns must be rejected")
 	}
 }

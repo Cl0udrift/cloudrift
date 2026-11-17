@@ -35,6 +35,14 @@ A validated result is modeled capability, never evidence that anyone did it.
 
 The search can now start from a user as well as a role session. Users and groups come from the IAM user and group collector; a group that was not collected makes the decision UNKNOWN, never allowed.
 
+## Tag conditions
+Policies that grant access by tag are decided from the collected tags of the target and the principal (users and roles; a scan
+that did not collect tags leaves the condition unknown, as before). A missing tag is "not met" for a positive operator and "met" for a
+negated one, as in AWS. When a call is allowed only once the target carries a tag, and the principal may set that tag
+(`iam:TagUser` or `iam:TagRole`, with the tag key and value as the request), the hop is CONDITIONAL with the reason
+`satisfiable_by_tagging`, and the scan raises an "after tagging" finding that names the tag. It is two steps, so it is never
+reported as a validated single-call path.
+
 ## Session policies
 A session policy can only narrow access. The session the search starts from is the one whose origin is unknown, so its
 session policy comes from what the caller states (assumed, verified, or missing, which gives UNKNOWN); the scan-time

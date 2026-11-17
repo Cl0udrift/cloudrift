@@ -13,7 +13,8 @@ import (
 // twice, and a missing one cannot be updated. The state comes from the credential report. When it was not
 // collected the result is UNKNOWN, never an allow. Only an allowed decision is changed.
 func gateTakeover(d schema.PermissionDecision, action string, target models.AssetNode, eval func(string) schema.PermissionDecision) schema.PermissionDecision {
-	if d.Status != iamauth.StatusAllowed {
+	// A call that is allowed once the target is tagged still has to succeed against the target's credential state.
+	if d.Status != iamauth.StatusAllowed && d.Reason != "satisfiable_by_tagging" {
 		return d
 	}
 	block := func(reason, why string) schema.PermissionDecision {
@@ -38,7 +39,7 @@ func gateTakeover(d schema.PermissionDecision, action string, target models.Asse
 	case "iam:createaccesskey":
 		if keysHeld(target) >= 2 {
 			// A user holds at most two keys. The caller can still free a slot with iam:DeleteAccessKey.
-			if del := eval("iam:DeleteAccessKey"); del.Status == iamauth.StatusAllowed {
+			if del := eval("iam:DeleteAccessKey"); del.Status == iamauth.StatusAllowed || del.Reason == "satisfiable_by_tagging" {
 				d.Evidence = append(d.Evidence, "the user holds two access keys; iam:DeleteAccessKey is also allowed, which frees a slot")
 				return d
 			}

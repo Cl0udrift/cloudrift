@@ -107,7 +107,7 @@ function Detail({ scanId, item }: { scanId: string; item: PrincipalListItem }) {
           )}
           {v.credentials.findings.map((f) => <p key={f} className="mt-1 text-xs text-red-700 dark:text-red-300">⚠ {f}</p>)}
         </div>
-      ) : v.kind === "user" ? <p className="cr-helper">Console, MFA and access key data was not collected for this user.</p> : null}
+      ) : v.kind === "user" ? <p className="cr-helper">Console, MFA and access key data was not collected for this user. {v.credential_note ?? ""}</p> : null}
       {v.has_deny ? <p className="text-sm text-red-700 dark:text-red-300">At least one policy has an explicit Deny. It wins over Allow statements in every other policy listed here.</p> : null}
       {!v.complete ? (
         <div role="status" className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-100">

@@ -268,6 +268,18 @@ func buildCatalog() []Capability {
 			Consequence:    "Delete one of a user's two access keys, which frees the slot for iam:CreateAccessKey, if the evaluated request is allowed.",
 		},
 		{
+			Action: "iam:TagUser", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly, ProbeOnly: true,
+			ResourceShape:  "user ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Set a tag on a user if the evaluated request is allowed. Policies often grant access by tag, so setting a tag can satisfy one.",
+		},
+		{
+			Action: "iam:TagRole", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly, ProbeOnly: true,
+			ResourceShape:  "role ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Set a tag on a role if the evaluated request is allowed. Policies often grant access by tag, so setting a tag can satisfy one.",
+		},
+		{
 			Action: "iam:CreateLoginProfile", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
 			ResourceShape:  "user ARN",
 			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
@@ -422,6 +434,12 @@ var registryDetail = map[string]registryFacts{
 	},
 	"iam:DeleteAccessKey": {
 		unsupported: []string{"which key is deleted; deleting a key the user relies on"},
+	},
+	"iam:TagUser": {
+		unsupported: []string{"tag keys and values the policy restricts with aws:TagKeys sets are checked only for the one tag needed"},
+	},
+	"iam:TagRole": {
+		unsupported: []string{"tag keys and values the policy restricts with aws:TagKeys sets are checked only for the one tag needed"},
 	},
 	"iam:CreateLoginProfile": {
 		unsupported: []string{"checked from the credential report (console_enabled); without it the result is UNKNOWN", "the password policy the new password must meet"},

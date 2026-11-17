@@ -24,38 +24,46 @@ var credentialReportPoll = time.Second
 
 // fetchCredentialReport generates the report and waits for it. AWS reports are cached for
 // four hours, so a recent one is returned at once.
-func fetchCredentialReport(ctx context.Context, api IAMCredentialReportAPI) ([]byte, error) {
+// fetchCredentialReport returns the report and when AWS generated it. AWS caches a report for up to four hours, so the report
+// can be older than the users it is asked about.
+func fetchCredentialReport(ctx context.Context, api IAMCredentialReportAPI) ([]byte, time.Time, error) {
 	for attempt := 0; attempt < 15; attempt++ {
 		out, err := api.GenerateCredentialReport(ctx, &iam.GenerateCredentialReportInput{})
 		if err != nil {
-			return nil, err
+			return nil, time.Time{}, err
 		}
 		if out.State == iamtypes.ReportStateTypeComplete {
 			report, err := api.GetCredentialReport(ctx, &iam.GetCredentialReportInput{})
 			if err != nil {
-				return nil, err
+				return nil, time.Time{}, err
 			}
-			return report.Content, nil
+			var generated time.Time
+			if report.GeneratedTime != nil {
+				generated = report.GeneratedTime.UTC()
+			}
+			return report.Content, generated, nil
 		}
 		select {
 		case <-time.After(credentialReportPoll):
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, time.Time{}, ctx.Err()
 		}
 	}
-	return nil, errors.New("credential report was not ready after 15 attempts")
+	return nil, time.Time{}, errors.New("credential report was not ready after 15 attempts")
 }
 
 // annotateCredentials copies console, MFA and access key facts from the report onto the
-// matching user nodes. A user missing from the report keeps no credential properties,
-// which the dashboard shows as not collected instead of as no credentials.
-func annotateCredentials(users []models.AssetNode, content []byte) error {
+// matching user nodes. A user missing from the report keeps no credential properties, which the dashboard shows as not
+// collected instead of as no credentials; it is marked credential_report_state=not_in_report, and every user carries
+// credential_report_generated_at, so a report that is older than the user can be told from a user with no credentials.
+// It returns how many users were missing.
+func annotateCredentials(users []models.AssetNode, content []byte, generatedAt time.Time) (int, error) {
 	rows, err := csv.NewReader(strings.NewReader(string(content))).ReadAll()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(rows) < 1 {
-		return errors.New("credential report is empty")
+		return 0, errors.New("credential report is empty")
 	}
 	col := map[string]int{}
 	for i, name := range rows[0] {
@@ -64,7 +72,7 @@ func annotateCredentials(users []models.AssetNode, content []byte) error {
 	need := []string{"arn", "password_enabled", "mfa_active", "access_key_1_active", "access_key_2_active"}
 	for _, n := range need {
 		if _, ok := col[n]; !ok {
-			return errors.New("credential report is missing column " + n)
+			return 0, errors.New("credential report is missing column " + n)
 		}
 	}
 	byARN := map[string]map[string]string{}
@@ -77,12 +85,21 @@ func annotateCredentials(users []models.AssetNode, content []byte) error {
 		}
 		byARN[rec["arn"]] = rec
 	}
+	missing := 0
 	for i := range users {
 		if users[i].AssetType != models.AssetIAMUser {
 			continue
 		}
+		if users[i].Properties == nil {
+			users[i].Properties = map[string]any{}
+		}
+		if !generatedAt.IsZero() {
+			users[i].Properties["credential_report_generated_at"] = generatedAt.Format(time.RFC3339)
+		}
 		rec, ok := byARN[users[i].ARN]
 		if !ok {
+			users[i].Properties["credential_report_state"] = "not_in_report"
+			missing++
 			continue
 		}
 		props := users[i].Properties
@@ -105,7 +122,7 @@ func annotateCredentials(users []models.AssetNode, content []byte) error {
 		}
 		props["access_keys"] = keys
 	}
-	return nil
+	return missing, nil
 }
 
 // reportTime keeps the report's RFC3339 value and turns its N/A and no_information into "".

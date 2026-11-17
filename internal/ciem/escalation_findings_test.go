@@ -372,3 +372,81 @@ func TestRollbackScenarioWithNoBroaderVersionIsQuiet(t *testing.T) {
 		t.Fatalf("no stored version is broader, so no finding: %+v", fs)
 	}
 }
+
+func keyRotationDoc(withTagging bool) string {
+	stmts := []string{`{"Effect":"Allow","Action":["iam:CreateAccessKey","iam:DeleteAccessKey"],"Resource":"arn:aws:iam::` + escAcct + `:user/*","Condition":{"StringEquals":{"aws:ResourceTag/developer":"true"}}}`}
+	if withTagging {
+		stmts = append(stmts, `{"Effect":"Allow","Action":"iam:TagUser","Resource":"arn:aws:iam::`+escAcct+`:user/*"}`)
+	}
+	return `{"Statement":[` + strings.Join(stmts, ",") + `]}`
+}
+
+// keyRotationWorld is CloudGoat iam_privesc_by_key_rotation: key management only on users tagged developer=true, and the
+// right to tag users; the target is an administrator whose tags were collected.
+func keyRotationWorld(withTagging bool, targetTags map[string]string) ([]models.AssetNode, []models.Relationship) {
+	manager := escNode("arn:aws:iam::"+escAcct+":user/manager", models.AssetIAMUser, keyRotationDoc(withTagging), "")
+	manager.Properties["credential_report"] = "collected"
+	admin := escNode("arn:aws:iam::"+escAcct+":user/admin", models.AssetIAMUser, adminDoc, "")
+	admin.Properties["credential_report"], admin.Properties["console_enabled"], admin.Properties["mfa_active"] = "collected", false, false
+	admin.Properties["access_keys"] = []map[string]any{{"slot": "access_key_1", "active": false, "last_rotated": "2026-11-17T00:00:00Z"}}
+	admin.Properties["tags_collected"] = true
+	if targetTags != nil {
+		admin.Properties["tags"] = targetTags
+	}
+	manager.Properties["tags_collected"] = true
+	return withPolicies([]models.AssetNode{manager, admin})
+}
+
+func findingsFor(t *testing.T, assets []models.AssetNode, rels []models.Relationship, principal string) []models.Finding {
+	t.Helper()
+	fs, _ := ScoreEscalations(context.Background(), assets, rels, time.Minute, escNow)
+	var out []models.Finding
+	for _, f := range fs {
+		if f.AffectedARN == "arn:aws:iam::"+escAcct+":user/"+principal {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func TestTagConditionedTakeoverIsAnAfterTaggingFinding(t *testing.T) {
+	assets, rels := keyRotationWorld(true, nil)
+	got := findingsFor(t, assets, rels, "manager")
+	if len(got) != 1 || got[0].Evidence["after_tagging"] != true || got[0].Evidence["tag"] != "developer=true" || got[0].Severity != models.SeverityHigh {
+		t.Fatalf("want one High after-tagging finding naming the tag: %+v", got)
+	}
+	if !strings.Contains(got[0].Title, "after tagging it developer=true") {
+		t.Fatalf("the title must say the path needs the tag: %q", got[0].Title)
+	}
+	if !strings.Contains(strings.Join(got[0].Evidence["severity_factors"].([]string), " "), "not a validated single-call path") {
+		t.Fatalf("the finding must say it is two steps: %v", got[0].Evidence["severity_factors"])
+	}
+}
+
+func TestTagConditionedTakeoverNeedsTheRightToTag(t *testing.T) {
+	assets, rels := keyRotationWorld(false, nil)
+	if got := findingsFor(t, assets, rels, "manager"); len(got) != 0 {
+		t.Fatalf("without iam:TagUser the tag cannot be set, so no finding: %+v", got)
+	}
+}
+
+func TestAlreadyTaggedTargetIsAValidatedFinding(t *testing.T) {
+	assets, rels := keyRotationWorld(true, map[string]string{"developer": "true"})
+	got := findingsFor(t, assets, rels, "manager")
+	if len(got) != 1 || got[0].Evidence["after_tagging"] != nil || got[0].Evidence["kind"] != "USER_TAKEOVER" {
+		t.Fatalf("a target that already carries the tag is a validated takeover, not an after-tagging one: %+v", got)
+	}
+}
+
+func TestCredentialReportNoteSaysTheReportIsOlderThanTheUser(t *testing.T) {
+	u := models.AssetNode{ARN: "arn:aws:iam::" + escAcct + ":user/new", AssetType: models.AssetIAMUser, Properties: map[string]any{
+		"credential_report_state": "not_in_report", "credential_report_generated_at": "2026-11-17T18:24:57Z", "create_date": "2026-11-17T19:00:00Z"}}
+	note := credentialReportNote(u)
+	if !strings.Contains(note, "2026-11-17T18:24:57Z") || !strings.Contains(note, "before this user was created") || !strings.Contains(note, "four hours") {
+		t.Fatalf("note: %q", note)
+	}
+	u.Properties["credential_report_state"] = ""
+	if credentialReportNote(u) != "" {
+		t.Fatal("a user that is in the report needs no note")
+	}
+}

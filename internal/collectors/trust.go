@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"regexp"
@@ -328,12 +329,17 @@ func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI
 			if err == nil {
 				if cr, ok := client.(IAMCredentialReportAPI); ok {
 					credStatus := CollectionStatus(accountID, "", "iam_credential_report", "global", "succeeded", "")
-					content, cerr := fetchCredentialReport(ctx, cr)
+					content, generated, cerr := fetchCredentialReport(ctx, cr)
+					var missing int
 					if cerr == nil {
-						cerr = annotateCredentials(userNodes, content)
+						missing, cerr = annotateCredentials(userNodes, content, generated)
 					}
-					if cerr != nil {
+					switch {
+					case cerr != nil:
 						credStatus = CollectionStatus(accountID, "", "iam_credential_report", "global", "failed", cerr.Error())
+					case missing > 0:
+						credStatus = CollectionStatus(accountID, "", "iam_credential_report", "global", "partial",
+							fmt.Sprintf("%d users are not in the credential report, which AWS generated at %s and caches for up to four hours; their credential data is not collected", missing, generated.Format(time.RFC3339)))
 					}
 					nodes = append(nodes, credStatus)
 				}
