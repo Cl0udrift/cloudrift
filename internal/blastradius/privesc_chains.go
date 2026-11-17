@@ -180,7 +180,8 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 			for _, a := range esc.Required {
 				d := eval(capOf(a), w, req.RequestContext)
 				steps = append(steps, d)
-				if d.Status != iamauth.StatusAllowed {
+				// A conditional step (a tag condition) does not stop the chain: the later steps still decide it.
+				if d.Status != iamauth.StatusAllowed && d.Status != iamauth.StatusConditional {
 					break
 				}
 			}

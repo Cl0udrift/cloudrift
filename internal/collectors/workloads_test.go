@@ -163,3 +163,20 @@ func TestOrganizationAccountNodes_UnscannedStaysInternal(t *testing.T) {
 		t.Fatal(nodes)
 	}
 }
+
+func TestInstanceTagsAreCollected(t *testing.T) {
+	tagged := ec2types.Instance{InstanceId: awsv2.String("i-1"), State: &ec2types.InstanceState{Name: ec2types.InstanceStateNameRunning},
+		Tags: []ec2types.Tag{{Key: awsv2.String("Name"), Value: awsv2.String("cg_admin_ec2")}}}
+	bare := ec2types.Instance{InstanceId: awsv2.String("i-2"), State: &ec2types.InstanceState{Name: ec2types.InstanceStateNameRunning}}
+	assets, _, err := collectEC2(context.Background(), "111111111111", "us-east-1", fakeEC2{instances: []ec2types.Instance{tagged}}, fakeProfiles{}, time.Now())
+	if err != nil || len(assets) == 0 {
+		t.Fatalf("collect: %v", err)
+	}
+	if assets[0].Properties["tags_collected"] != true || assets[0].Properties["tags"].(map[string]string)["Name"] != "cg_admin_ec2" {
+		t.Fatalf("tags not collected: %#v", assets[0].Properties)
+	}
+	bareAssets, _, _ := collectEC2(context.Background(), "111111111111", "us-east-1", fakeEC2{instances: []ec2types.Instance{bare}}, fakeProfiles{}, time.Now())
+	if bareAssets[0].Properties["tags_collected"] != true || bareAssets[0].Properties["tags"] != nil {
+		t.Fatalf("an untagged instance is collected with no tags, not with unknown tags: %#v", bareAssets[0].Properties)
+	}
+}

@@ -1,11 +1,6 @@
 package blastradius
 
-import (
-	"strings"
-
-	"github.com/Zero0x00/cloudrift/internal/iamauth"
-	"github.com/Zero0x00/cloudrift/internal/models"
-)
+import "github.com/Zero0x00/cloudrift/internal/models"
 
 // nodeTags returns a node's tags and whether they were collected. A node whose tags were collected and has none has no tags;
 // a node whose tags were not collected (an older scan, or a resource type without tag collection) has unknown tags.
@@ -50,34 +45,4 @@ func tagContext(principal, target models.AssetNode, base map[string]string) (ctx
 		}
 	}
 	return ctx, resourceKnown, principalKnown
-}
-
-func isTagAction(action string) bool {
-	return strings.EqualFold(action, "iam:TagUser") || strings.EqualFold(action, "iam:TagRole")
-}
-
-// tagActionFor is the call that sets a tag on the target, when the target type can be tagged here.
-func tagActionFor(target models.AssetNode) (iamauth.Capability, bool) {
-	switch target.AssetType {
-	case models.AssetIAMUser:
-		return capOf("iam:TagUser"), true
-	case models.AssetIAMRole:
-		return capOf("iam:TagRole"), true
-	}
-	return iamauth.Capability{}, false
-}
-
-// tagRequestContext is the context of a call that sets the tags in gaps on the target.
-func tagRequestContext(base map[string]string, gaps []iamauth.TagGap) map[string]string {
-	ctx := make(map[string]string, len(base)+len(gaps)+1)
-	for k, v := range base {
-		ctx[k] = v
-	}
-	for i, g := range gaps {
-		ctx["aws:RequestTag/"+g.Key] = g.Want
-		if i == 0 {
-			ctx["aws:TagKeys"] = g.Key
-		}
-	}
-	return ctx
 }

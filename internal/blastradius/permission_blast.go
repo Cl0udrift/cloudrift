@@ -31,6 +31,9 @@ type PermissionBlastRequest struct {
 	// instance profile or a function environment. It is a stated scenario assumption, not an observation; a session policy
 	// can only narrow access, so a result under it can overstate what a restricted session could do.
 	AssumeNoSessionPolicy bool
+	// ControlledPrincipals are the principals the attacker already holds on the path to this session (the start principal and the
+	// roles it assumed). Any of them may be the one that changes a tag to satisfy a tag condition.
+	ControlledPrincipals []string
 	// PrivescChains also evaluates iam:PassRole plus Lambda create and invoke for each service-trusted role. Only the attack search sets it.
 	PrivescChains       bool
 	SessionSource       string
@@ -163,27 +166,44 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 		}
 		authReq.IdentityOnlyProbe = cap.IdentityOnlyProbe
 		decision := iamauth.Evaluate(authReq)
-		// A tag condition stopped the call, but the principal may set that tag: the call is then allowed once the tag is set.
-		// That depends on an action the attacker takes first, so it is CONDITIONAL, not validated.
+		// A tag condition stopped the call, but a principal the attacker controls may change that tag: the call is then allowed
+		// once the tag is changed. That depends on an action the attacker takes first, so it is CONDITIONAL, not validated.
 		tagNote := ""
+		var enabler *schema.TagEnabler
 		if decision.Status != iamauth.StatusAllowed && len(decision.TagGaps) > 0 && !isTagAction(cap.Action) {
-			if tagCap, ok := tagActionFor(target); ok {
-				if td := eval(tagCap, target, tagRequestContext(reqCtx, decision.TagGaps)); td.Status == iamauth.StatusAllowed {
-					after := authReq
-					after.RequestContext = make(map[string]string, len(authReq.RequestContext)+len(decision.TagGaps))
-					for k, v := range authReq.RequestContext {
-						after.RequestContext[k] = v
-					}
-					var want []string
-					for _, g := range decision.TagGaps {
-						after.RequestContext["aws:ResourceTag/"+g.Key] = g.Want
-						want = append(want, g.Key+"="+g.Want)
-					}
-					if iamauth.Evaluate(after).Status == iamauth.StatusAllowed {
-						decision.Status, decision.Reason = iamauth.StatusConditional, "satisfiable_by_tagging"
-						tagNote = "not allowed as the target is tagged now, but " + tagCap.Action + " is allowed on it, and with the tag " + strings.Join(want, ", ") + " the call is allowed"
-					}
+			taggers := []string{report.RoleARN}
+			for _, c := range req.ControlledPrincipals {
+				if c != report.RoleARN {
+					taggers = append(taggers, c)
 				}
+			}
+			names := func(arn string) string {
+				if n, ok := findAsset(req.Assets, arn); ok && n.Name != "" {
+					return n.Name
+				}
+				return nameOfARN(arn)
+			}
+			enabler = findTagEnabler(target, decision.TagGaps, taggers, names,
+				func(tagger, action string, ctx map[string]string) bool {
+					if tagger == report.RoleARN {
+						return eval(capOf(action), target, ctx).Status == iamauth.StatusAllowed
+					}
+					node, ok := findAsset(req.Assets, tagger)
+					return ok && evaluateAs(req.ScanID, node, capOf(action), target, ctx, req.Assets, req.Relationships, when).Status == iamauth.StatusAllowed
+				},
+				authReq.RequestContext,
+				func(ctx map[string]string) bool {
+					after := authReq
+					after.RequestContext = ctx
+					return iamauth.Evaluate(after).Status == iamauth.StatusAllowed
+				})
+			if enabler != nil {
+				decision.Status, decision.Reason = iamauth.StatusConditional, "satisfiable_by_tagging"
+				by := enabler.TaggerName
+				if enabler.Tagger == report.RoleARN {
+					by = "this principal"
+				}
+				tagNote = "not allowed as the target's tags are now, but " + by + " can " + enabler.Action + " on it, and once it does (" + enabler.Change + ") the call is allowed"
 			}
 		}
 		hit := schema.PermissionDecision{
@@ -211,6 +231,7 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 		if tagNote != "" {
 			hit.Evidence = append(hit.Evidence, tagNote)
 			hit.Explanation = tagNote
+			hit.TagEnabler = enabler
 		}
 		return hit
 	}

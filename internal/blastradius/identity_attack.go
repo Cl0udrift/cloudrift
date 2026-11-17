@@ -145,7 +145,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 		// attacker chooses what to pass. Only the initial session, whose origin is unknown, depends on what the caller says.
 		openedByAttacker := state.depth > 0
 		noSessionPolicy := req.AssumeNoSessionPolicy || openedByAttacker
-		cacheKey := state.principal + "\n" + contextFP + "\n" + fmt.Sprint(noSessionPolicy)
+		cacheKey := state.principal + "\n" + contextFP + "\n" + fmt.Sprint(noSessionPolicy) + "\n" + strings.Join(state.roles, ">")
 		blast, ok := evalCache[cacheKey]
 		if !ok {
 			blast = AnalyzePermissionBlast(PermissionBlastRequest{
@@ -157,6 +157,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 				MaxDecisions:          attackMaxDecisions,
 				SessionSource:         report.SessionContextSource,
 				AssumeNoSessionPolicy: noSessionPolicy,
+				ControlledPrincipals:  state.roles,
 				RequestContext:        state.context,
 				Assets:                req.Assets,
 				Relationships:         req.Relationships,
@@ -197,6 +198,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 				SessionPolicyState:   sessionState,
 				SessionOrigin:        state.origin,
 				SessionEvidenceClass: sessionClass,
+				TagEnabler:           decision.TagEnabler,
 				TransitionID:         transitionIdentity(req.ScanID, state.principal, technique, decision.ResourceARN, decision.DecisionID, contextFP),
 			}
 			if decision.Status != iamauth.StatusAllowed {
@@ -560,9 +562,19 @@ func attackDecisions(blast schema.PermissionBlastReport) []attackDecision {
 				evidence = append(evidence, "optional, not held: "+step.Action+" ("+step.Status+"); the chain relies on another way to run the result")
 			}
 		}
+		reason, enabler := chainReason(c), (*schema.TagEnabler)(nil)
+		for _, step := range c.Steps {
+			if step.Status != iamauth.StatusAllowed {
+				// A chain held back only by a tag condition keeps that reason and who can change the tag.
+				if step.Reason == "satisfiable_by_tagging" && step.TagEnabler != nil && c.Status == iamauth.StatusConditional {
+					reason, enabler = "satisfiable_by_tagging", step.TagEnabler
+				}
+				break
+			}
+		}
 		out = append(out, attackDecision{schema.PermissionDecision{
 			Action: c.Steps[0].Action, Category: c.Steps[0].Category, ResourceARN: c.RoleARN, Status: c.Status,
-			Reason: chainReason(c), SameAccount: true, DecisionID: c.Steps[0].DecisionID,
+			Reason: reason, SameAccount: true, DecisionID: c.Steps[0].DecisionID, TagEnabler: enabler,
 			EvidenceFingerprint: hex.EncodeToString(h.Sum(nil))[:16], Evidence: evidence,
 		}, c.Kind})
 	}

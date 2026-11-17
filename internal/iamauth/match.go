@@ -463,14 +463,16 @@ func negatedConditionOperator(op string) bool {
 	return false
 }
 
-// tagGapsOf lists the resource tags a statement's condition would need set to be met: a StringEquals or StringLike on
+// tagGapsOf lists the resource tags a statement's condition would need changed to be met: set, for a positive operator,
+// or removed, for a negated one the tag breaks. A positive operator is described below: a StringEquals or StringLike on
 // aws:ResourceTag/<key> whose tag is absent (when known) or holds another value. Only literal wanted values are returned.
 // It is a hint about what to set; whether setting it makes the whole request allowed is decided by evaluating again.
 func tagGapsOf(cond map[string]any, ctx map[string]string, known func(string) bool) []TagGap {
 	var out []TagGap
 	for op, raw := range cond {
 		base := strings.TrimSuffix(strings.TrimSpace(op), "IfExists")
-		if base != "StringEquals" && base != "StringLike" {
+		negated := base == "StringNotEquals" || base == "StringNotLike" || base == "StringNotEqualsIgnoreCase"
+		if base != "StringEquals" && base != "StringLike" && !negated {
 			continue
 		}
 		keys, _ := raw.(map[string]any)
@@ -479,6 +481,24 @@ func tagGapsOf(cond map[string]any, ctx map[string]string, known func(string) bo
 				continue
 			}
 			value, present := ctxGet(ctx, key)
+			if negated {
+				// Met when the tag is absent, so only a tag that is present and matches breaks it: remove or change it.
+				if present {
+					broken := false
+					switch base {
+					case "StringNotEquals":
+						broken = anyEquals(expected, value, false)
+					case "StringNotEqualsIgnoreCase":
+						broken = anyEquals(expected, value, true)
+					default:
+						broken = anyWildcard(expected, value)
+					}
+					if broken {
+						out = append(out, TagGap{Key: strings.TrimPrefix(key, "aws:ResourceTag/"), Remove: true})
+					}
+				}
+				continue
+			}
 			failing := false
 			switch {
 			case !present:

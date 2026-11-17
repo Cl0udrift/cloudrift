@@ -38,10 +38,13 @@ The search can now start from a user as well as a role session. Users and groups
 ## Tag conditions
 Policies that grant access by tag are decided from the collected tags of the target and the principal (users and roles; a scan
 that did not collect tags leaves the condition unknown, as before). A missing tag is "not met" for a positive operator and "met" for a
-negated one, as in AWS. When a call is allowed only once the target carries a tag, and the principal may set that tag
-(`iam:TagUser` or `iam:TagRole`, with the tag key and value as the request), the hop is CONDITIONAL with the reason
-`satisfiable_by_tagging`, and the scan raises an "after tagging" finding that names the tag. It is two steps, so it is never
-reported as a validated single-call path.
+negated one, as in AWS. EC2 instance tags are collected too. When a call is blocked only by a tag, and a principal the
+attacker controls may change that tag, the hop is CONDITIONAL with the reason `satisfiable_by_tagging`. The change can be
+setting or changing a tag (`iam:TagUser`, `iam:TagRole`, `ec2:CreateTags`) or, for a condition the tag breaks (`StringNotEquals`),
+removing it (`iam:UntagUser`, `iam:UntagRole`, `ec2:DeleteTags`). The principal that changes the tag can be any session on the
+path so far: the start principal changes the tag, the role it assumed makes the call. The scan raises an "after tagging" finding
+that names the change and who makes it; for the two-principal case it is a finding on the starting principal that says which role it
+goes through. It is two steps, so it is never reported as a validated single-call path.
 
 ## Session policies
 A session policy can only narrow access. The session the search starts from is the one whose origin is unknown, so its

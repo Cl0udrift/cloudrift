@@ -108,6 +108,8 @@ type AuthorizationRequest struct {
 type TagGap struct {
 	Key  string
 	Want string
+	// Remove means the condition is a negated one that the tag's current value breaks: the tag has to be removed or changed.
+	Remove bool
 }
 
 // KMSGrant is one collected key grant. Constrained is true when the grant carries any

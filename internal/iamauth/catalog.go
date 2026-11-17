@@ -268,6 +268,30 @@ func buildCatalog() []Capability {
 			Consequence:    "Delete one of a user's two access keys, which frees the slot for iam:CreateAccessKey, if the evaluated request is allowed.",
 		},
 		{
+			Action: "iam:UntagUser", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly, ProbeOnly: true,
+			ResourceShape:  "user ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Remove a tag from a user if the evaluated request is allowed. A policy that denies by tag can be met by removing it.",
+		},
+		{
+			Action: "iam:UntagRole", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly, ProbeOnly: true,
+			ResourceShape:  "role ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Remove a tag from a role if the evaluated request is allowed. A policy that denies by tag can be met by removing it.",
+		},
+		{
+			Action: "ec2:CreateTags", Service: "ec2", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalEC2Instance, ProbeOnly: true,
+			ResourceShape:  "EC2 instance ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Set or change a tag on an instance if the evaluated request is allowed.",
+		},
+		{
+			Action: "ec2:DeleteTags", Service: "ec2", Category: CategoryInfrastructureControl, Support: SupportEvaluated, Evaluation: EvalEC2Instance, ProbeOnly: true,
+			ResourceShape:  "EC2 instance ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Remove a tag from an instance if the evaluated request is allowed.",
+		},
+		{
 			Action: "iam:TagUser", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly, ProbeOnly: true,
 			ResourceShape:  "user ARN",
 			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
@@ -434,6 +458,18 @@ var registryDetail = map[string]registryFacts{
 	},
 	"iam:DeleteAccessKey": {
 		unsupported: []string{"which key is deleted; deleting a key the user relies on"},
+	},
+	"iam:UntagUser": {
+		unsupported: []string{"tag keys are checked only for the one tag needed"},
+	},
+	"iam:UntagRole": {
+		unsupported: []string{"tag keys are checked only for the one tag needed"},
+	},
+	"ec2:CreateTags": {
+		unsupported: []string{"ec2:CreateAction and tag keys are checked only for the one tag needed"},
+	},
+	"ec2:DeleteTags": {
+		unsupported: []string{"the tag value is not matched; deleting a key removes it whatever its value"},
 	},
 	"iam:TagUser": {
 		unsupported: []string{"tag keys and values the policy restricts with aws:TagKeys sets are checked only for the one tag needed"},

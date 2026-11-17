@@ -917,7 +917,7 @@ func isIAMIdentityARN(action, arn string) bool {
 	switch strings.ToLower(action) {
 	case "iam:attachgrouppolicy", "iam:putgrouppolicy", "iam:addusertogroup":
 		return strings.Contains(arn, ":group/")
-	case "iam:attachuserpolicy", "iam:putuserpolicy", "iam:createaccesskey", "iam:deleteaccesskey", "iam:taguser", "iam:createloginprofile", "iam:updateloginprofile":
+	case "iam:attachuserpolicy", "iam:putuserpolicy", "iam:createaccesskey", "iam:deleteaccesskey", "iam:taguser", "iam:untaguser", "iam:createloginprofile", "iam:updateloginprofile":
 		return strings.Contains(arn, ":user/")
 	}
 	return isIAMRoleARN(arn)

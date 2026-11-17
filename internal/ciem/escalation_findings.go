@@ -77,6 +77,7 @@ func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []mod
 
 	type result struct {
 		report   schema.IdentityAttackReport
+		chain    schema.IdentityAttackReport // one role hop deep, only for principals that can assume a role
 		searched bool
 	}
 	results := make([]result, len(principals))
@@ -90,10 +91,19 @@ func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []mod
 				if ctx.Err() != nil {
 					continue
 				}
-				results[i] = result{searched: true, report: blastradius.AnalyzeIdentityAttack(ctx, blastradius.IdentityAttackRequest{
+				r := result{searched: true, report: blastradius.AnalyzeIdentityAttack(ctx, blastradius.IdentityAttackRequest{
 					ScanID: scoringScan, InitialPrincipal: principals[i].ARN, SessionSource: "assumed", AssumeNoSessionPolicy: true, DirectOnly: true,
 					Assets: assets, Relationships: rels,
 				})}
+				// Two principals can be needed for one path: one changes a tag, the role it assumes acts. Neither's own session shows
+				// that, so a principal that can assume a role gets one search a role hop deep, read only for tag-enabled hops.
+				if assumesARole(r.report) {
+					r.chain = blastradius.AnalyzeIdentityAttack(ctx, blastradius.IdentityAttackRequest{
+						ScanID: scoringScan, InitialPrincipal: principals[i].ARN, SessionSource: "assumed", AssumeNoSessionPolicy: true, MaxAssumeDepth: 1,
+						Assets: assets, Relationships: rels,
+					})
+				}
+				results[i] = r
 			}
 		}()
 	}
@@ -142,7 +152,8 @@ func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []mod
 			stats.UnknownOnly++
 		}
 		out = append(out, unverifiedSwitchFindings(p, res.report, rc)...)
-		out = append(out, afterTaggingFindings(p, res.report, byARN, adminRoles, assets, rels, rc)...)
+		out = append(out, afterTaggingFindings(p, res.report, byARN, adminRoles, assets, rels, rc, true)...)
+		out = append(out, afterTaggingFindings(p, res.chain, byARN, adminRoles, assets, rels, rc, false)...)
 		families := make([]string, 0, len(direct))
 		for k := range direct {
 			families = append(families, k)
@@ -372,4 +383,14 @@ func unverifiedSwitchFindings(p models.AssetNode, report schema.IdentityAttackRe
 		out = append(out, f)
 	}
 	return out
+}
+
+// assumesARole is true when the principal has a validated sts:AssumeRole hop in its own session.
+func assumesARole(r schema.IdentityAttackReport) bool {
+	for _, tr := range r.Transitions {
+		if tr.Technique == "ASSUME_ROLE" && tr.Depth == 0 && tr.Status == "VALIDATED_ALLOWED" {
+			return true
+		}
+	}
+	return false
 }

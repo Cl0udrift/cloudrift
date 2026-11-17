@@ -78,6 +78,7 @@ type BlastRadiusSummary struct {
 
 // AttackTransition is one evaluated technique from one role session.
 type AttackTransition struct {
+	TagEnabler *TagEnabler `json:"tag_enabler,omitempty"`
 	Technique            string   `json:"technique"`
 	SourcePrincipal      string   `json:"source_principal"`
 	TargetARN            string   `json:"target_arn"`
@@ -155,7 +156,18 @@ type IdentityAttackReport struct {
 }
 
 // PermissionDecision is one evaluated action against one concrete resource.
+// TagEnabler says who can change a tag so that a call blocked by a tag condition becomes allowed, with what call, and what the
+// change is. The tagger may be another principal than the one that makes the call: any principal the attacker already controls.
+type TagEnabler struct {
+	Tagger     string `json:"tagger"`
+	TaggerName string `json:"tagger_name"`
+	Action     string `json:"action"`
+	Change     string `json:"change"`
+}
+
 type PermissionDecision struct {
+	// TagEnabler is set when Reason is satisfiable_by_tagging.
+	TagEnabler *TagEnabler `json:"tag_enabler,omitempty"`
 	Action              string   `json:"action"`
 	Category            string   `json:"category"`
 	ResourceARN         string   `json:"resource_arn"`

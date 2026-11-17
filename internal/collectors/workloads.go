@@ -260,7 +260,12 @@ func collectEC2(ctx context.Context, accountID, region string, api EC2API, profi
 			Properties: map[string]any{
 				"instance_state": state, "collected_at": collectedAt.Format(time.RFC3339),
 				"source_api": "ec2:DescribeInstances",
+				// DescribeInstances returns every instance's tags, so an instance with none has none.
+				"tags_collected": true,
 			},
+		}
+		if tags := ec2TagMap(instance.Tags); len(tags) > 0 {
+			node.Properties["tags"] = tags
 		}
 		assoc, ok := assocByInstance[id]
 		if !ok || assoc.IamInstanceProfile == nil || awsv2.ToString(assoc.IamInstanceProfile.Arn) == "" {
@@ -435,4 +440,14 @@ func roleAttachment(relType models.RelType) bool {
 func relationshipID(parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return hex.EncodeToString(sum[:8])
+}
+
+func ec2TagMap(tags []ec2types.Tag) map[string]string {
+	out := map[string]string{}
+	for _, t := range tags {
+		if k := awsv2.ToString(t.Key); k != "" {
+			out[k] = awsv2.ToString(t.Value)
+		}
+	}
+	return out
 }

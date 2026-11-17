@@ -412,10 +412,10 @@ func findingsFor(t *testing.T, assets []models.AssetNode, rels []models.Relation
 func TestTagConditionedTakeoverIsAnAfterTaggingFinding(t *testing.T) {
 	assets, rels := keyRotationWorld(true, nil)
 	got := findingsFor(t, assets, rels, "manager")
-	if len(got) != 1 || got[0].Evidence["after_tagging"] != true || got[0].Evidence["tag"] != "developer=true" || got[0].Severity != models.SeverityHigh {
+	if len(got) != 1 || got[0].Evidence["after_tagging"] != true || got[0].Evidence["tag"] != "developer=true" || got[0].Evidence["tag_change"] != "set the tag developer=true" || got[0].Severity != models.SeverityHigh {
 		t.Fatalf("want one High after-tagging finding naming the tag: %+v", got)
 	}
-	if !strings.Contains(got[0].Title, "after tagging it developer=true") {
+	if !strings.Contains(got[0].Title, "after setting the tag developer=true on it") {
 		t.Fatalf("the title must say the path needs the tag: %q", got[0].Title)
 	}
 	if !strings.Contains(strings.Join(got[0].Evidence["severity_factors"].([]string), " "), "not a validated single-call path") {
@@ -448,5 +448,82 @@ func TestCredentialReportNoteSaysTheReportIsOlderThanTheUser(t *testing.T) {
 	u.Properties["credential_report_state"] = ""
 	if credentialReportNote(u) != "" {
 		t.Fatal("a user that is in the report needs no note")
+	}
+}
+
+// ec2World is CloudGoat iam_privesc_by_ec2: an admin instance protected by a tag condition on the management role, and a user
+// that may delete the tag and assume that role.
+func ec2World(userTagging, instanceName bool) ([]models.AssetNode, []models.Relationship) {
+	devDoc := `{"Statement":[{"Effect":"Allow","Action":"sts:AssumeRole","Resource":"arn:aws:iam::` + escAcct + `:role/mgmt"}`
+	if userTagging {
+		devDoc += `,{"Effect":"Allow","Action":["ec2:DeleteTags","ec2:CreateTags"],"Resource":"*"}`
+	}
+	devDoc += `]}`
+	dev := escNode("arn:aws:iam::"+escAcct+":user/dev", models.AssetIAMUser, devDoc, "")
+	mgmtDoc := `{"Statement":[{"Effect":"Allow","Action":["ec2:StartInstances","ec2:StopInstances","ec2:ModifyInstanceAttribute"],"Resource":"*","Condition":{"StringNotEquals":{"aws:ResourceTag/Name":"cg_admin_ec2"}}}]}`
+	mgmt := escRole("mgmt", mgmtDoc, trustUsers("dev"))
+	adminRole := escRole("ec2admin", adminDoc, svcTrust("ec2.amazonaws.com"))
+	inst := models.AssetNode{ARN: "arn:aws:ec2:us-east-1:" + escAcct + ":instance/i-0123456789abcdef0", AssetType: models.AssetEC2Instance, AccountID: escAcct,
+		Properties: map[string]any{"instance_state": "running", "tags_collected": true}}
+	if instanceName {
+		inst.Properties["tags"] = map[string]string{"Name": "cg_admin_ec2"}
+	}
+	prof := models.AssetNode{ARN: "arn:aws:iam::" + escAcct + ":instance-profile/p", AssetType: models.AssetInstanceProfile, AccountID: escAcct, Properties: map[string]any{}}
+	assets, rels := withPolicies([]models.AssetNode{dev, mgmt, adminRole})
+	assets = append(assets, inst, prof)
+	rels = append(rels,
+		models.Relationship{SourceARN: inst.ARN, TargetARN: prof.ARN, RelType: models.RelEC2UsesInstanceProfile},
+		models.Relationship{SourceARN: prof.ARN, TargetARN: adminRole.ARN, RelType: models.RelInstanceProfileContains})
+	return assets, rels
+}
+
+func TestTagProtectedAdminInstanceIsAChainFindingOnTheUserThatCanRemoveTheTag(t *testing.T) {
+	assets, rels := ec2World(true, true)
+	got := findingsFor(t, assets, rels, "dev")
+	var chain []models.Finding
+	for _, f := range got {
+		if f.Evidence["after_tagging"] == true {
+			chain = append(chain, f)
+		}
+	}
+	if len(chain) == 0 {
+		t.Fatalf("the user can remove the tag and assume the role: want a finding, got %+v", got)
+	}
+	f := chain[0]
+	if f.Severity != models.SeverityHigh || f.Evidence["via_role"] != "mgmt" || f.Evidence["tag_change"] != "remove the tag Name" || f.Evidence["tag_changed_by"] != "dev" {
+		t.Fatalf("the finding must name the role, the change and who makes it: %+v", f.Evidence)
+	}
+	if !strings.Contains(f.Title, "through mgmt after removing the tag Name from it") {
+		t.Fatalf("title: %q", f.Title)
+	}
+}
+
+func TestChainFindingNeedsSomeoneToBeAbleToChangeTheTag(t *testing.T) {
+	assets, rels := ec2World(false, true)
+	for _, f := range findingsFor(t, assets, rels, "dev") {
+		if f.Evidence["after_tagging"] == true {
+			t.Fatalf("nobody on the path can change the tag, so there is no finding: %s", f.Title)
+		}
+	}
+	// The role alone cannot change the tag either.
+	all, _ := ScoreEscalations(context.Background(), assets, rels, time.Minute, escNow)
+	for _, f := range all {
+		if f.Evidence["after_tagging"] == true {
+			t.Fatalf("no finding at all without a tag permission: %s", f.Title)
+		}
+	}
+}
+
+func TestUntaggedAdminInstanceIsAValidatedFindingOnTheRole(t *testing.T) {
+	assets, rels := ec2World(false, false) // no Name tag: the condition is already met
+	var got []models.Finding
+	all, _ := ScoreEscalations(context.Background(), assets, rels, time.Minute, escNow)
+	for _, f := range all {
+		if f.AffectedARN == "arn:aws:iam::"+escAcct+":role/mgmt" && f.Evidence["family"] == "WORKLOAD" {
+			got = append(got, f)
+		}
+	}
+	if len(got) != 1 || got[0].Evidence["after_tagging"] != nil {
+		t.Fatalf("with no Name tag the role can already act: one validated finding on the role, got %+v", got)
 	}
 }
