@@ -496,6 +496,13 @@ func TestTagProtectedAdminInstanceIsAChainFindingOnTheUserThatCanRemoveTheTag(t 
 	if !strings.Contains(f.Title, "through mgmt after removing the tag Name from it") {
 		t.Fatalf("title: %q", f.Title)
 	}
+	var labels []string
+	for _, n := range f.Evidence["path"].([]PathNode) {
+		labels = append(labels, n.Label)
+	}
+	if strings.Count(strings.Join(labels, " | "), "assumes") != 1 {
+		t.Fatalf("the path must say the role is assumed once: %v", labels)
+	}
 }
 
 func TestChainFindingNeedsSomeoneToBeAbleToChangeTheTag(t *testing.T) {

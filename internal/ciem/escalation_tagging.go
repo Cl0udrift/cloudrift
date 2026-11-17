@@ -88,9 +88,7 @@ func afterTaggingFindings(p models.AssetNode, report schema.IdentityAttackReport
 			factors = append(factors, "the target holds administrative access")
 		}
 		edge := gerund(en.Change) + ", then " + text.edge
-		if !direct {
-			edge = "assumes " + via + "; " + gerund(en.Change) + ", then " + text.edge
-		}
+
 		ev := map[string]any{
 			"kind": kind, "family": kind + "_AFTER_TAGGING", "technique": tr.Technique, "target_arn": tr.TargetARN, "after_tagging": true,
 			"tag_change": en.Change, "tag_changed_by": en.TaggerName, "tag_change_call": en.Action, "via_role": via,
@@ -104,8 +102,8 @@ func afterTaggingFindings(p models.AssetNode, report schema.IdentityAttackReport
 				{"Stop the tag change", "The policy trusts a tag that " + who + " can write.", []string{"Remove " + en.Action + " from " + who + " on the target, or deny changing that tag except for administrators"}},
 			}, text.options...),
 		}
-		if i := strings.LastIndex(en.Change, " "); i >= 0 {
-			ev["tag"] = en.Change[strings.LastIndex(en.Change, "tag ")+4:]
+		if i := strings.LastIndex(en.Change, "tag "); i >= 0 {
+			ev["tag"] = en.Change[i+len("tag "):]
 		}
 		sev = attachReach(p, rc, sev, ev)
 		title := text.title(p.Name, target) + " after " + gerund(en.Change) + onTarget(en.Change)
