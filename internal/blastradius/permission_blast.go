@@ -1180,6 +1180,15 @@ func combineSteps(steps []schema.PermissionDecision) string {
 
 // trustsService reports whether an unconditional Allow statement in the role trust policy names the service.
 func trustsService(role models.AssetNode, service string) bool {
+	return trustsServiceAction(role, service, "sts:AssumeRole")
+}
+
+// trustsServiceAction is trustsService for a trust policy that grants the service another assume action, such as
+// sts:AssumeRoleWithWebIdentity. An empty action means sts:AssumeRole.
+func trustsServiceAction(role models.AssetNode, service, action string) bool {
+	if action == "" {
+		action = "sts:AssumeRole"
+	}
 	doc, _ := permStringProp(role.Properties, "trust_policy_document")
 	var parsed struct {
 		Statement json.RawMessage
@@ -1200,7 +1209,7 @@ func trustsService(role models.AssetNode, service string) bool {
 			continue
 		}
 		principal, _ := st["Principal"].(map[string]any)
-		if containsString(principal["Service"], service) && (containsString(st["Action"], "sts:AssumeRole") || containsString(st["Action"], "sts:*")) {
+		if containsString(principal["Service"], service) && (containsString(st["Action"], action) || containsString(st["Action"], "sts:*")) {
 			return true
 		}
 	}

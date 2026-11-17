@@ -264,6 +264,7 @@ func Catalog() []Capability {
 			Consequence:    "Obtain credentials for the target role if the identity and trust policies allow the request, or, in the same account, if the trust policy names the caller.",
 		},
 	}
+	rows = append(rows, passRoleRows(rows)...)
 	for i := range rows {
 		detail := registryDetail[rows[i].Action]
 		rows[i].UnsupportedSemantics = detail.unsupported

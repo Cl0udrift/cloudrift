@@ -18,7 +18,8 @@ A validated result is modeled capability, never evidence that anyone did it.
 | PassExistingRoleToNewGlueDevEndpoint | `PASS_ROLE_GLUE_ENDPOINT` | Modeled |
 | PassExistingRoleToNewDataPipeline | `PASS_ROLE_DATA_PIPELINE` | Modeled |
 | EditExistingLambdaFunctionWithRole | `EDIT_LAMBDA_CODE` | Modeled |
-| CreateEC2WithExistingIP | needs instance profile evidence | Not modeled |
+| PassRole to EC2, ECS, Batch, SageMaker, CodeBuild, Step Functions, EMR, EMR Serverless, App Runner, Bedrock AgentCore, Braket, GameLift, Image Builder, Kinesis Analytics, Cognito Identity, Scheduler, SSM Automation, Glue jobs and triggers, CloudFormation StackSets, Lambda event sources | `PASS_ROLE_<SERVICE>_<n>`, one per pathfinding.cloud record; 40 records in `iamauth/passrole_services.go` | Modeled |
+| omics-001 (PassRole to Omics) | also needs `s3:GetObject` on a workflow the caller supplies | Not modeled |
 | PassExistingRoleToNewLambdaThenTrigger* (DynamoDB) | needs DynamoDB table and stream evidence | Not modeled |
 | PassExistingRoleToNewCodeStarProject, CodeStar* | CodeStar is closed to new customers | Not modeled |
 | UpdateExistingGlueDevEndpoint | Glue endpoints are not collected | Not modeled |
@@ -29,6 +30,13 @@ A validated result is modeled capability, never evidence that anyone did it.
 | CreateAccessKey, CreateLoginProfile, UpdateLoginProfile | `TAKEOVER_USER` on another user, which then becomes a reachable identity; a key a user creates for itself is not an escalation | Modeled |
 
 The search can now start from a user as well as a role session. Users and groups come from the IAM user and group collector; a group that was not collected makes the decision UNKNOWN, never allowed.
+
+## Adding a service
+A PassRole service is one record in `internal/iamauth/passrole_services.go`: the trust principal, the calls after
+`iam:PassRole`, and a probe resource ARN. Catalog rows for its actions are generated from the record, and the attack
+search, the Coverage page and this table read the same list. The permission lists come from pathfinding.cloud
+(Apache-2.0); `internal/blastradius/pathfinding_benchmark_test.go` checks every record against that catalog, with
+negative controls, and fails if a path stops being detected or a false positive appears.
 
 ## How a chain is decided
 

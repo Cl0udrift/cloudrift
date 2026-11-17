@@ -22,20 +22,35 @@ type passRolePlan struct {
 	// optional calls are evaluated and shown but never decide the chain.
 	optional []string
 	probeARN func(account string) string
+	// trustAction is the action the role's trust policy must allow the service; empty means sts:AssumeRole.
+	trustAction string
+}
+
+// allPassRolePlans is the five hand-written plans plus every record in iamauth.PassRoleServices.
+func allPassRolePlans() []passRolePlan {
+	plans := append([]passRolePlan{}, passRolePlans...)
+	for _, s := range iamauth.PassRoleServices {
+		s := s
+		plans = append(plans, passRolePlan{
+			kind: s.Kind, service: s.Principal, actions: s.Required, optional: s.Optional, trustAction: s.TrustAction,
+			probeARN: func(account string) string { return strings.ReplaceAll(s.Probe, "{account}", account) },
+		})
+	}
+	return plans
 }
 
 var passRolePlans = []passRolePlan{
-	{"PASS_ROLE_LAMBDA", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:InvokeFunction"}, nil, lambdaProbe},
-	{"PASS_ROLE_LAMBDA_ADDPERMISSION", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:AddPermission"}, nil, lambdaProbe},
+	{"PASS_ROLE_LAMBDA", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:InvokeFunction"}, nil, lambdaProbe, ""},
+	{"PASS_ROLE_LAMBDA_ADDPERMISSION", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:AddPermission"}, nil, lambdaProbe, ""},
 	{"PASS_ROLE_CLOUDFORMATION", "cloudformation.amazonaws.com", []string{"cloudformation:CreateStack"}, nil, func(a string) string {
 		return "arn:aws:cloudformation:us-east-1:" + a + ":stack/cloudrift-probe/00000000-0000-0000-0000-000000000000"
-	}},
+	}, ""},
 	{"PASS_ROLE_GLUE_ENDPOINT", "glue.amazonaws.com", []string{"glue:CreateDevEndpoint"}, []string{"glue:GetDevEndpoint"}, func(a string) string {
 		return "arn:aws:glue:us-east-1:" + a + ":devEndpoint/cloudrift-probe"
-	}},
+	}, ""},
 	{"PASS_ROLE_DATA_PIPELINE", "datapipeline.amazonaws.com", []string{"datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition", "datapipeline:ActivatePipeline"}, nil, func(a string) string {
 		return "arn:aws:datapipeline:us-east-1:" + a + ":pipeline/cloudrift-probe"
-	}},
+	}, ""},
 }
 
 func lambdaProbe(account string) string {
@@ -64,7 +79,16 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 	var chains []schema.PrivescChain
 	candidates := append(append([]models.AssetNode{}, roles...), caller)
 
-	for _, plan := range passRolePlans {
+	for _, plan := range allPassRolePlans() {
+		var targets []models.AssetNode
+		for _, target := range candidates {
+			if target.AccountID == account && trustsServiceAction(target, plan.service, plan.trustAction) {
+				targets = append(targets, target)
+			}
+		}
+		if len(targets) == 0 {
+			continue // no role the service can assume, so nothing to pass; skip evaluating the calls
+		}
 		probe := probeAsset(plan.probeARN(account), account)
 		var steps, optional []schema.PermissionDecision
 		for _, a := range plan.actions {
@@ -78,10 +102,7 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 			ctx[k] = v
 		}
 		ctx["iam:PassedToService"] = plan.service
-		for _, target := range candidates {
-			if target.AccountID != account || !trustsService(target, plan.service) {
-				continue
-			}
+		for _, target := range targets {
 			all := append([]schema.PermissionDecision{eval(capOf("iam:PassRole"), target, ctx)}, steps...)
 			chains = append(chains, schema.PrivescChain{Kind: plan.kind, Service: plan.service, RoleARN: target.ARN, Status: combineSteps(all), Steps: all, OptionalSteps: optional})
 		}
@@ -167,7 +188,7 @@ func AttackTechniques() []Technique {
 		{techniqueReadObject, "impact", "s3:GetObject on a collected object"},
 		{techniqueReadSecret, "impact", "secretsmanager:GetSecretValue including the KMS decrypt leg"},
 	}
-	for _, p := range passRolePlans {
+	for _, p := range allPassRolePlans() {
 		out = append(out, Technique{p.kind, "escalation", "iam:PassRole to " + p.service + " plus " + strings.Join(p.actions, " and ")})
 	}
 	return out

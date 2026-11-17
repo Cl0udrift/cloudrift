@@ -43,7 +43,7 @@ var pfServices = map[string][]string{
 	"bedrock-agentcore": {"bedrock-agentcore.amazonaws.com"}, "braket": {"braket.amazonaws.com"}, "cloudformation": {"cloudformation.amazonaws.com"},
 	"codebuild": {"codebuild.amazonaws.com"}, "cognito-identity": {"cognito-identity.amazonaws.com"}, "datapipeline": {"datapipeline.amazonaws.com", "elasticmapreduce.amazonaws.com"},
 	"ec2": {"ec2.amazonaws.com"}, "ecs": {"ecs-tasks.amazonaws.com", "ecs.amazonaws.com"}, "elasticmapreduce": {"elasticmapreduce.amazonaws.com", "ec2.amazonaws.com"},
-	"emr-serverless": {"emr-serverless.amazonaws.com"}, "gamelift": {"gamelift.amazonaws.com"}, "glue": {"glue.amazonaws.com"}, "imagebuilder": {"ec2.amazonaws.com", "imagebuilder.amazonaws.com"},
+	"emr-serverless": {"emr-serverless.amazonaws.com"}, "gamelift": {"gamelift.amazonaws.com", "ec2.amazonaws.com"}, "glue": {"glue.amazonaws.com"}, "imagebuilder": {"ec2.amazonaws.com", "imagebuilder.amazonaws.com"},
 	"kinesisanalytics": {"kinesisanalytics.amazonaws.com"}, "lambda": {"lambda.amazonaws.com"}, "omics": {"omics.amazonaws.com"}, "sagemaker": {"sagemaker.amazonaws.com"},
 	"scheduler": {"scheduler.amazonaws.com"}, "ssm": {"ssm.amazonaws.com"}, "states": {"states.amazonaws.com"},
 }
@@ -150,6 +150,8 @@ func pfLabelsFromTech(t string) []string {
 		return []string{"user_takeover"}
 	case t == "EDIT_LAMBDA_CODE":
 		return []string{"edit_function_code"}
+	case strings.HasPrefix(t, "PASS_ROLE_") && pfKeyService(t) != "":
+		return []string{"passrole:" + pfKeyService(t)}
 	case strings.HasPrefix(t, "PASS_ROLE_LAMBDA"):
 		return []string{"passrole:lambda"}
 	case t == "PASS_ROLE_CLOUDFORMATION":
@@ -189,7 +191,11 @@ func pfRun(p pfPath, granted []string, deny string, mode ...string) (fired, tech
 		for _, s := range pfServices[svc] {
 			ps = append(ps, `"`+s+`"`)
 		}
-		trust = `{"Statement":[{"Effect":"Allow","Principal":{"Service":[` + strings.Join(ps, ",") + `]},"Action":"sts:AssumeRole"}]}`
+		action := "sts:AssumeRole"
+		if svc == "cognito-identity" {
+			action = "sts:AssumeRoleWithWebIdentity" // the reference's trust policy for this path
+		}
+		trust = `{"Statement":[{"Effect":"Allow","Principal":{"Service":[` + strings.Join(ps, ",") + `]},"Action":"` + action + `"}]}`
 	}
 	if m == "wrongtrust" {
 		trust = `{"Statement":[{"Effect":"Allow","Principal":{"Service":["not-a-matching-service.amazonaws.com"]},"Action":"sts:AssumeRole"}]}`
@@ -403,9 +409,16 @@ func TestPathfindingBenchmark(t *testing.T) {
 // pfFloor is every path the benchmark saw detected with the minimal reference permissions when it was added.
 // A path leaving this list is a regression. A path joining it should be added in the same change.
 var pfFloor = []string{
-	"cloudformation-001", "datapipeline-001", "glue-001", "lambda-001", "lambda-003", "lambda-004", "lambda-005", "lambda-006", "sts-001",
-	"iam-001", "iam-002", "iam-003", "iam-004", "iam-005", "iam-006", "iam-007", "iam-008", "iam-009", "iam-010", "iam-011",
-	"iam-012", "iam-013", "iam-014", "iam-015", "iam-016", "iam-017", "iam-018", "iam-019", "iam-020", "iam-021",
+	"apprunner-001", "batch-001", "batch-003", "bedrock-001", "bedrock-003", "bedrock-005", "bedrock-006",
+	"braket-001", "cloudformation-001", "cloudformation-003", "cloudformation-004", "codebuild-001",
+	"codebuild-004", "cognitoidentity-001", "datapipeline-001", "ec2-001", "ec2-003", "ecs-001", "ecs-002",
+	"ecs-003", "ecs-004", "ecs-005", "ecs-007", "ecs-008", "ecs-009", "emr-001", "emrserverless-001",
+	"gamelift-001", "glue-001", "glue-003", "glue-004", "glue-005", "glue-006", "glue-007", "iam-001", "iam-002",
+	"iam-003", "iam-004", "iam-005", "iam-006", "iam-007", "iam-008", "iam-009", "iam-010", "iam-011", "iam-012",
+	"iam-013", "iam-014", "iam-015", "iam-016", "iam-017", "iam-018", "iam-019", "iam-020", "iam-021",
+	"imagebuilder-001", "kinesisanalytics-001", "lambda-001", "lambda-002", "lambda-003", "lambda-004",
+	"lambda-005", "lambda-006", "sagemaker-001", "sagemaker-002", "sagemaker-003", "scheduler-001", "ssm-003",
+	"stepfunctions-001", "sts-001",
 }
 
 func pfAssert(t *testing.T, out []pfCase, paths []pfPath) {
@@ -469,6 +482,20 @@ func pfAssert(t *testing.T, out []pfCase, paths []pfPath) {
 		r = float64(tp) / float64(tp+fn)
 	}
 	t.Logf("pathfinding benchmark: %d paths, detected %d, missed %d, false positives %d, true negatives %d; precision %.2f recall %.2f (simulated, minimal reference permissions)", tp+fn, tp, fn, fp, tn, p, r)
+}
+
+// pfKeyService maps the service key in a data-driven plan's kind (PASS_ROLE_<KEY>_<n>) to the service name the
+// reference uses in its permissions. It is naming only; it says nothing about which paths are exploitable.
+func pfKeyService(kind string) string {
+	key := strings.SplitN(strings.TrimPrefix(kind, "PASS_ROLE_"), "_", 2)[0]
+	m := map[string]string{"APPRUNNER": "apprunner", "BATCH": "batch", "BEDROCK": "bedrock-agentcore", "BRAKET": "braket", "CLOUDFORMATION": "cloudformation",
+		"CODEBUILD": "codebuild", "COGNITOIDENTITY": "cognito-identity", "EC2": "ec2", "ECS": "ecs", "EMR": "elasticmapreduce", "EMRSERVERLESS": "emr-serverless",
+		"GAMELIFT": "gamelift", "GLUE": "glue", "IMAGEBUILDER": "imagebuilder", "KINESISANALYTICS": "kinesisanalytics", "LAMBDA": "lambda", "SAGEMAKER": "sagemaker",
+		"SCHEDULER": "scheduler", "SSM": "ssm", "STEPFUNCTIONS": "states"}
+	if strings.HasPrefix(kind, "PASS_ROLE_GLUE_ENDPOINT") {
+		return "glue"
+	}
+	return m[key]
 }
 
 func takeoverPerms(req []string) []string {
