@@ -233,6 +233,12 @@ func Catalog() []Capability {
 			Consequence:    "Create an access key for a user if the evaluated request is allowed. The holder can then act as that user.",
 		},
 		{
+			Action: "iam:DeleteAccessKey", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly, ProbeOnly: true,
+			ResourceShape:  "user ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
+			Consequence:    "Delete one of a user's two access keys, which frees the slot for iam:CreateAccessKey, if the evaluated request is allowed.",
+		},
+		{
 			Action: "iam:CreateLoginProfile", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityOnly,
 			ResourceShape:  "user ARN",
 			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP", "RCP"},
@@ -376,17 +382,20 @@ var registryDetail = map[string]registryFacts{
 		technique:   "ADD_USER_TO_GROUP",
 	},
 	"iam:CreateAccessKey": {
-		unsupported: []string{"a user can hold at most two access keys, so the call can fail even when allowed", "the new credentials are not usable until the caller reads them"},
+		unsupported: []string{"the two-key limit is checked from the credential report, so a user without a collected report is UNKNOWN", "the new credentials are not usable until the caller reads them"},
 		inventory:   true,
 		technique:   "TAKEOVER_USER",
 	},
+	"iam:DeleteAccessKey": {
+		unsupported: []string{"which key is deleted; deleting a key the user relies on"},
+	},
 	"iam:CreateLoginProfile": {
-		unsupported: []string{"fails if the user already has a console password"},
+		unsupported: []string{"checked from the credential report (console_enabled); without it the result is UNKNOWN", "the password policy the new password must meet"},
 		inventory:   true,
 		technique:   "TAKEOVER_USER",
 	},
 	"iam:UpdateLoginProfile": {
-		unsupported: []string{"fails if the user has no console password"},
+		unsupported: []string{"checked from the credential report (console_enabled); without it the result is UNKNOWN"},
 		inventory:   true,
 		technique:   "TAKEOVER_USER",
 	},

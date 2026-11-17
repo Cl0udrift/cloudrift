@@ -186,7 +186,7 @@ func attackFrom(assets []models.AssetNode, rels ...models.Relationship) schema.I
 
 func TestUserTargetedEscalations(t *testing.T) {
 	const bob = "arn:aws:iam::111111111111:user/bob"
-	bobNode := controlled(models.AssetNode{ARN: bob, AssetType: models.AssetIAMUser, Name: "bob"})
+	bobNode := credUser(bob, false, 1) // the credential state AWS checks: one key, no console password
 	adminGroup := ugGroupNode(`{"Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}`)
 
 	selfGrant := attackFrom([]models.AssetNode{ugUserNode(allowDoc("iam:AttachUserPolicy", ugUser))})

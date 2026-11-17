@@ -189,7 +189,13 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 				report.Truncated = true
 				break
 			}
-			decisions = append(decisions, eval(cap, target, req.RequestContext))
+			d := eval(cap, target, req.RequestContext)
+			if cap.AttackTechnique == "TAKEOVER_USER" {
+				d = gateTakeover(d, cap.Action, target, func(a string) schema.PermissionDecision {
+					return eval(capOf(a), target, req.RequestContext)
+				})
+			}
+			decisions = append(decisions, d)
 		}
 		if report.Truncated {
 			break

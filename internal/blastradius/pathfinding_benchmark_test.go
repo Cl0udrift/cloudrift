@@ -203,7 +203,20 @@ func pfRun(p pfPath, granted []string, deny string, mode ...string) (fired, tech
 	adminRole.Properties["trust_policy_document"] = trust
 	target := controlled(models.AssetNode{ARN: pfRole("Target"), AssetType: models.AssetIAMRole, Name: "Target"})
 	target.Properties["trust_policy_document"] = trustAllow("arn:aws:iam::" + pfAcct + ":root")
-	victim := controlled(models.AssetNode{ARN: pfUser("victim"), AssetType: models.AssetIAMUser, Name: "victim"})
+	// The victim's credential state comes from the path's prerequisites: UpdateLoginProfile needs a console
+	// password, DeleteAccessKey is only needed when the victim already holds two keys, and the others need room.
+	console, keys := containsStr(p.Required, "iam:UpdateLoginProfile"), 1
+	if containsStr(p.Required, "iam:DeleteAccessKey") {
+		keys = 2
+	}
+	switch m {
+	case "blocked":
+		console, keys = !console, 2
+	}
+	victim := credUser(pfUser("victim"), console, keys)
+	if m == "noreport" {
+		victim = controlled(models.AssetNode{ARN: pfUser("victim"), AssetType: models.AssetIAMUser, Name: "victim"})
+	}
 	group := controlled(models.AssetNode{ARN: "arn:aws:iam::" + pfAcct + ":group/Admins", AssetType: models.AssetIAMGroup, Name: "Admins"}, admin)
 	devs := controlled(models.AssetNode{ARN: "arn:aws:iam::" + pfAcct + ":group/Devs", AssetType: models.AssetIAMGroup, Name: "Devs"})
 	assets = append(assets, adminRole, target, victim, group, devs)
@@ -341,6 +354,32 @@ func TestPathfindingBenchmark(t *testing.T) {
 			bc.Outcome = "detected"
 		}
 		out = append(out, bc)
+		if tk := takeoverPerms(p.Required); len(tk) > 0 && !containsStr(p.Required, "iam:DeleteAccessKey") {
+			// The call is allowed by policy but AWS would reject it for the victim's state, or the state is unknown.
+			var rest []string
+			for _, r := range p.Required {
+				if !containsStr(tk, r) {
+					rest = append(rest, r)
+				}
+			}
+			ambiguous := false
+			for _, q := range paths {
+				if q.ID != p.ID && len(q.Required) > 0 && subset(q.Required, rest) {
+					ambiguous = true
+				}
+			}
+			for _, mode := range []string{"blocked", "noreport"} {
+				f, _ := pfRun(p, p.Required, "", mode)
+				c := pfCase{ID: p.ID, Variant: mode, Expect: "not_exploitable", Fired: f, Outcome: "not_detected"}
+				if ambiguous {
+					c.Expect = "ambiguous"
+				}
+				if len(f) > 0 {
+					c.Outcome = "detected"
+				}
+				out = append(out, c)
+			}
+		}
 		if containsStr(p.Required, "iam:PassRole") {
 			wf, _ := pfRun(p, p.Required, "", "wrongtrust")
 			wc := pfCase{ID: p.ID, Variant: "wrongtrust", Expect: "not_exploitable", Fired: wf, Outcome: "not_detected"}
@@ -430,6 +469,17 @@ func pfAssert(t *testing.T, out []pfCase, paths []pfPath) {
 		r = float64(tp) / float64(tp+fn)
 	}
 	t.Logf("pathfinding benchmark: %d paths, detected %d, missed %d, false positives %d, true negatives %d; precision %.2f recall %.2f (simulated, minimal reference permissions)", tp+fn, tp, fn, fp, tn, p, r)
+}
+
+func takeoverPerms(req []string) []string {
+	var out []string
+	for _, r := range req {
+		switch r {
+		case "iam:CreateAccessKey", "iam:CreateLoginProfile", "iam:UpdateLoginProfile":
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func anyIn(a, b []string) bool {

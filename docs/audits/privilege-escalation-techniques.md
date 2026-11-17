@@ -44,6 +44,9 @@ The search can now start from a user as well as a role session. Users and groups
   code runs only if something else invokes the function.
 - **Required and optional steps.** A chain is decided by its required steps. Optional steps (reading a Glue dev
   endpoint's address, invoking an edited function) are evaluated and shown, and never change the status.
+- **Takeover state.** `iam:CreateAccessKey`, `iam:CreateLoginProfile` and `iam:UpdateLoginProfile` are allowed by policy and
+  then checked against the target's credential report: a user with two keys needs `iam:DeleteAccessKey` as well, a login
+  profile cannot be created twice, and a missing one cannot be updated. Without a collected report the result is UNKNOWN.
 - **The policy written is assumed administrative.** The search does not choose a policy document.
 - **Status** is VALIDATED_ALLOWED only when every required step is. Any deny gives DENIED. Missing evidence gives UNKNOWN.
 
