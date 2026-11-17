@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -141,7 +142,11 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 		queue = queue[1:]
 		report.StatesExplored++
 		contextFP := contextFingerprint(state.context)
-		cacheKey := state.principal + "\n" + contextFP
+		// A session the attacker opens by assuming a role has no session policy: session policies only narrow access and the
+		// attacker chooses what to pass. Only the initial session, whose origin is unknown, depends on what the caller says.
+		openedByAttacker := state.depth > 0
+		noSessionPolicy := req.AssumeNoSessionPolicy || openedByAttacker
+		cacheKey := state.principal + "\n" + contextFP + "\n" + fmt.Sprint(noSessionPolicy)
 		blast, ok := evalCache[cacheKey]
 		if !ok {
 			blast = AnalyzePermissionBlast(PermissionBlastRequest{
@@ -152,7 +157,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 				PrivescChains:         true,
 				MaxDecisions:          attackMaxDecisions,
 				SessionSource:         report.SessionContextSource,
-				AssumeNoSessionPolicy: req.AssumeNoSessionPolicy,
+				AssumeNoSessionPolicy: noSessionPolicy,
 				RequestContext:        state.context,
 				Assets:                req.Assets,
 				Relationships:         req.Relationships,
@@ -167,7 +172,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 		roleNode := findRole(req.Assets, state.principal)
 		sessionState := observedSessionState(roleNode)
 		sessionClass := sessionEvidenceClass(roleNode)
-		if req.AssumeNoSessionPolicy {
+		if noSessionPolicy {
 			sessionState, sessionClass = "confirmed_absent", "scenario_assumption"
 		}
 		var next []nextHop

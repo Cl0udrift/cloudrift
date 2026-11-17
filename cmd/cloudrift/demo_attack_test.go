@@ -62,8 +62,10 @@ func TestIdentityAttack_ChainAndRejections(t *testing.T) {
 	if attackHop(targetSession, "ASSUME_ROLE", roleARN(demoAcctCore, "SecOpenCaller"), roleARN(demoAcctCore, "SecOpenTarget")).Status != iamauth.StatusAllowed {
 		t.Fatal("caller with a recorded session did not assume")
 	}
-	if attackHop(targetSession, "READ_S3_OBJECT", roleARN(demoAcctCore, "SecOpenTarget"), objectARN("sec-open-target", "readme.txt")).Reason != iamauth.ReasonMissingSession || len(targetSession.ImpactedResources) != 0 {
-		t.Fatal("missing target session became a read")
+	// The attacker opens the target session with its own AssumeRole call and passes no session policy, so a target role with
+	// no recorded session policy does not block the read. A real scan never records one for a role.
+	if attackHop(targetSession, "READ_S3_OBJECT", roleARN(demoAcctCore, "SecOpenTarget"), objectARN("sec-open-target", "readme.txt")).Status != iamauth.StatusAllowed || len(targetSession.ImpactedResources) != 1 {
+		t.Fatal("a session the attacker opened was not treated as carrying no session policy")
 	}
 	mfa := attackReport(t, when, "attack-mfa", nil)
 	if attackHop(mfa, "ASSUME_ROLE", roleARN(demoAcctCore, "SecMFACaller"), roleARN(demoAcctCore, "SecMFATarget")).Status != iamauth.StatusConditional || len(mfa.Paths) != 0 {

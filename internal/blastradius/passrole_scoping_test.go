@@ -1,6 +1,7 @@
 package blastradius
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Zero0x00/cloudrift/internal/models"
@@ -76,5 +77,30 @@ func TestValidatedHopIsNotDroppedWhenUnknownHopsFillTheList(t *testing.T) {
 	r := analyzeAttack(caller, assets, nil)
 	if !hasEscalation(r, "PASS_ROLE_ECS_008", target) {
 		t.Fatalf("a validated escalation was dropped; transitions listed: %d, truncated: %v", len(r.Transitions), r.Truncated)
+	}
+}
+
+// A real scan never records a session policy for a role. A session the attacker opens by assuming a role carries none,
+// so a chain through that role must resolve instead of staying UNKNOWN with missing_session_policy.
+func TestChainThroughAssumedRoleResolvesWithoutRecordedSessionPolicy(t *testing.T) {
+	a, b, c := "arn:aws:iam::111111111111:role/A", "arn:aws:iam::111111111111:role/B", "arn:aws:iam::111111111111:role/Admin"
+	noSession := func(n models.AssetNode) models.AssetNode {
+		delete(n.Properties, "session_policy_status")
+		delete(n.Properties, "session_policy_evidence")
+		return n
+	}
+	assets := []models.AssetNode{
+		controlledRole(a, allowOn("sts:AssumeRole", b), ""), // the initial session's policy is stated, as a caller would
+		noSession(controlledRole(b, passRoleDoc(c, allowOn("lambda:CreateFunction", "*"), allowOn("lambda:InvokeFunction", "*")), trustAllow(a))),
+		noSession(controlledRole(c, "", serviceTrust("lambda.amazonaws.com"))),
+	}
+	r := AnalyzeIdentityAttack(context.Background(), IdentityAttackRequest{ScanID: permScan, InitialPrincipal: a, SessionSource: "assumed", Assets: assets})
+	if !hasEscalation(r, "PASS_ROLE_LAMBDA", c) {
+		t.Fatalf("the chain A to B to Admin did not resolve: escalations %#v unknown=%d", r.Escalations, r.UnknownTransitions)
+	}
+	for _, tr := range r.Transitions {
+		if tr.Depth >= 1 && tr.Reason == "missing_session_policy" {
+			t.Fatalf("a session the attacker opened must not be UNKNOWN for a missing session policy: %+v", tr)
+		}
 	}
 }

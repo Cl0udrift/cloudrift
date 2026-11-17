@@ -35,6 +35,14 @@ A validated result is modeled capability, never evidence that anyone did it.
 
 The search can now start from a user as well as a role session. Users and groups come from the IAM user and group collector; a group that was not collected makes the decision UNKNOWN, never allowed.
 
+## Session policies
+A session policy can only narrow access. The session the search starts from is the one whose origin is unknown, so its
+session policy comes from what the caller states (assumed, verified, or missing, which gives UNKNOWN); the scan-time
+search states "none". Every session the attacker opens after that (assuming a role, passing a role to a service, using a
+user's new key) carries none, because the attacker chooses what to pass. A real scan never records a session policy for a
+role, so treating a missing one as UNKNOWN made every chain through an assumed role invisible. These sessions are
+labeled as a scenario assumption in the hop evidence.
+
 ## Workload hops
 A collected EC2 instance (through its instance profile) or ECS task (through its task definition's task role) runs as a
 role. If the caller's identity policy allows the calls that run code there, the search reaches that role. The records
