@@ -153,6 +153,7 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 				authReq.ResourcePolicy = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "this action does not use a resource policy"}
 			}
 		}
+		authReq.IdentityOnlyProbe = cap.IdentityOnlyProbe
 		decision := iamauth.Evaluate(authReq)
 		hit := schema.PermissionDecision{
 			Action:               cap.Action,
@@ -1180,12 +1181,15 @@ func combineSteps(steps []schema.PermissionDecision) string {
 
 // trustsService reports whether an unconditional Allow statement in the role trust policy names the service.
 func trustsService(role models.AssetNode, service string) bool {
-	return trustsServiceAction(role, service, "sts:AssumeRole")
+	return trustsServiceAction(role, service, "sts:AssumeRole", nil)
 }
 
 // trustsServiceAction is trustsService for a trust policy that grants the service another assume action, such as
 // sts:AssumeRoleWithWebIdentity. An empty action means sts:AssumeRole.
-func trustsServiceAction(role models.AssetNode, service, action string) bool {
+//
+// A statement with a Condition counts only when the condition holds for ctx, the context the service presents (its source
+// account and source ARN). A condition that needs a key ctx lacks, or an unsupported operator, does not match.
+func trustsServiceAction(role models.AssetNode, service, action string, ctx map[string]string) bool {
 	if action == "" {
 		action = "sts:AssumeRole"
 	}
@@ -1205,8 +1209,14 @@ func trustsServiceAction(role models.AssetNode, service, action string) bool {
 		list = []map[string]any{one}
 	}
 	for _, st := range list {
-		if st["Effect"] != "Allow" || st["Condition"] != nil {
+		if st["Effect"] != "Allow" {
 			continue
+		}
+		if st["Condition"] != nil {
+			cond, _ := st["Condition"].(map[string]any)
+			if cond == nil || !iamauth.TrustConditionHolds(cond, ctx) {
+				continue
+			}
 		}
 		principal, _ := st["Principal"].(map[string]any)
 		if containsString(principal["Service"], service) && (containsString(st["Action"], action) || containsString(st["Action"], "sts:*")) {

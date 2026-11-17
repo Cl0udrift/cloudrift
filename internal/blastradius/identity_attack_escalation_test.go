@@ -100,9 +100,19 @@ func TestIdentityAttack_PassRoleLambda(t *testing.T) {
 	if r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, full, ""), controlledRole(target, "", trustAllow(caller))}, nil); hasEscalation(r, "PASS_ROLE_LAMBDA", target) {
 		t.Fatal("role Lambda cannot assume escalated")
 	}
+	// A condition counts when it holds for what the service presents: its source account and source ARN.
 	cond := lambdaTrust(`,"Condition":{"StringEquals":{"aws:SourceAccount":"111111111111"}}`)
-	if r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, full, ""), controlledRole(target, "", cond)}, nil); hasEscalation(r, "PASS_ROLE_LAMBDA", target) {
-		t.Fatal("conditional trust escalated")
+	if r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, full, ""), controlledRole(target, "", cond)}, nil); !hasEscalation(r, "PASS_ROLE_LAMBDA", target) {
+		t.Fatal("trust conditioned on the caller's own account must match")
+	}
+	for name, c := range map[string]string{
+		"another account":         `,"Condition":{"StringEquals":{"aws:SourceAccount":"999999999999"}}`,
+		"a key the service lacks": `,"Condition":{"StringEquals":{"sts:ExternalId":"abc"}}`,
+		"another resource":        `,"Condition":{"ArnLike":{"aws:SourceArn":"arn:aws:lambda:us-east-1:111111111111:function:other-*"}}`,
+	} {
+		if r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, full, ""), controlledRole(target, "", lambdaTrust(c))}, nil); hasEscalation(r, "PASS_ROLE_LAMBDA", target) {
+			t.Fatalf("trust conditioned on %s escalated", name)
+		}
 	}
 
 	ec2Only := `{"Statement":[{"Effect":"Allow","Action":"iam:PassRole","Resource":"` + target + `","Condition":{"StringEquals":{"iam:PassedToService":"ec2.amazonaws.com"}}},{"Effect":"Allow","Action":["lambda:CreateFunction","lambda:InvokeFunction"],"Resource":"*"}]}`

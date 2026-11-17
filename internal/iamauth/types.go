@@ -94,6 +94,10 @@ type AuthorizationRequest struct {
 	SecretKMS *SecretKMSEvidence
 	// KMSGrants are the collected grants on the key for kms:Decrypt requests.
 	KMSGrants []KMSGrant
+	// IdentityOnlyProbe decides the action from the caller's identity policy alone, as for a resource the caller
+	// would choose (an S3 object holding a workflow, in a bucket the caller controls). Resource policies, ACLs and
+	// Block Public Access are not consulted.
+	IdentityOnlyProbe bool
 }
 
 // KMSGrant is one collected key grant. Constrained is true when the grant carries any

@@ -195,7 +195,14 @@ func pfRun(p pfPath, granted []string, deny string, mode ...string) (fired, tech
 		if svc == "cognito-identity" {
 			action = "sts:AssumeRoleWithWebIdentity" // the reference's trust policy for this path
 		}
-		trust = `{"Statement":[{"Effect":"Allow","Principal":{"Service":[` + strings.Join(ps, ",") + `]},"Action":"` + action + `"}]}`
+		cond := ""
+		switch m {
+		case "condtrust":
+			cond = `,"Condition":{"StringEquals":{"aws:SourceAccount":"` + pfAcct + `"}}`
+		case "condtrust_wrong":
+			cond = `,"Condition":{"StringEquals":{"aws:SourceAccount":"999999999999"}}`
+		}
+		trust = `{"Statement":[{"Effect":"Allow","Principal":{"Service":[` + strings.Join(ps, ",") + `]},"Action":"` + action + `"` + cond + `}]}`
 	}
 	if m == "wrongtrust" {
 		trust = `{"Statement":[{"Effect":"Allow","Principal":{"Service":["not-a-matching-service.amazonaws.com"]},"Action":"sts:AssumeRole"}]}`
@@ -387,6 +394,19 @@ func TestPathfindingBenchmark(t *testing.T) {
 			}
 		}
 		if containsStr(p.Required, "iam:PassRole") {
+			// A trust policy conditioned on the caller's own account holds for what the service presents; another account's does not.
+			cf, _ := pfRun(p, p.Required, "", "condtrust")
+			cc := pfCase{ID: p.ID, Variant: "condtrust", Expect: "exploitable", Fired: cf, Want: want, Outcome: "not_detected"}
+			if len(want) > 0 && subset(want, cf) {
+				cc.Outcome = "detected"
+			}
+			out = append(out, cc)
+			xf, _ := pfRun(p, p.Required, "", "condtrust_wrong")
+			xc := pfCase{ID: p.ID, Variant: "condtrust_wrong", Expect: "not_exploitable", Fired: xf, Outcome: "not_detected"}
+			if len(xf) > 0 {
+				xc.Outcome = "detected"
+			}
+			out = append(out, xc)
 			wf, _ := pfRun(p, p.Required, "", "wrongtrust")
 			wc := pfCase{ID: p.ID, Variant: "wrongtrust", Expect: "not_exploitable", Fired: wf, Outcome: "not_detected"}
 			if len(wf) > 0 {
@@ -417,8 +437,8 @@ var pfFloor = []string{
 	"iam-003", "iam-004", "iam-005", "iam-006", "iam-007", "iam-008", "iam-009", "iam-010", "iam-011", "iam-012",
 	"iam-013", "iam-014", "iam-015", "iam-016", "iam-017", "iam-018", "iam-019", "iam-020", "iam-021",
 	"imagebuilder-001", "kinesisanalytics-001", "lambda-001", "lambda-002", "lambda-003", "lambda-004",
-	"lambda-005", "lambda-006", "sagemaker-001", "sagemaker-002", "sagemaker-003", "scheduler-001", "ssm-003",
-	"stepfunctions-001", "sts-001",
+	"lambda-005", "lambda-006", "omics-001", "sagemaker-001", "sagemaker-002", "sagemaker-003", "scheduler-001",
+	"ssm-003", "stepfunctions-001", "sts-001",
 }
 
 func pfAssert(t *testing.T, out []pfCase, paths []pfPath) {
@@ -456,6 +476,11 @@ func pfAssert(t *testing.T, out []pfCase, paths []pfPath) {
 			}
 		}
 	}
+	for _, c := range out {
+		if c.Variant == "condtrust" && containsStr(pfFloor, c.ID) && c.Outcome != "detected" {
+			t.Errorf("%s: a trust policy conditioned on the caller's account was not matched", c.ID)
+		}
+	}
 	for _, id := range pfFloor {
 		if !detected[id] {
 			t.Errorf("regression: %s was detected and no longer is", id)
@@ -490,7 +515,7 @@ func pfKeyService(kind string) string {
 	key := strings.SplitN(strings.TrimPrefix(kind, "PASS_ROLE_"), "_", 2)[0]
 	m := map[string]string{"APPRUNNER": "apprunner", "BATCH": "batch", "BEDROCK": "bedrock-agentcore", "BRAKET": "braket", "CLOUDFORMATION": "cloudformation",
 		"CODEBUILD": "codebuild", "COGNITOIDENTITY": "cognito-identity", "EC2": "ec2", "ECS": "ecs", "EMR": "elasticmapreduce", "EMRSERVERLESS": "emr-serverless",
-		"GAMELIFT": "gamelift", "GLUE": "glue", "IMAGEBUILDER": "imagebuilder", "KINESISANALYTICS": "kinesisanalytics", "LAMBDA": "lambda", "SAGEMAKER": "sagemaker",
+		"GAMELIFT": "gamelift", "GLUE": "glue", "IMAGEBUILDER": "imagebuilder", "KINESISANALYTICS": "kinesisanalytics", "LAMBDA": "lambda", "OMICS": "omics", "SAGEMAKER": "sagemaker",
 		"SCHEDULER": "scheduler", "SSM": "ssm", "STEPFUNCTIONS": "states"}
 	if strings.HasPrefix(kind, "PASS_ROLE_GLUE_ENDPOINT") {
 		return "glue"

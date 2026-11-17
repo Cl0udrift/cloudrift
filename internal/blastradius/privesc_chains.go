@@ -24,6 +24,9 @@ type passRolePlan struct {
 	probeARN func(account string) string
 	// trustAction is the action the role's trust policy must allow the service; empty means sts:AssumeRole.
 	trustAction string
+	// probes gives an action its own resource ARN; identityOnly actions are decided from the identity policy alone.
+	probes       map[string]string
+	identityOnly []string
 }
 
 // allPassRolePlans is the five hand-written plans plus every record in iamauth.PassRoleServices.
@@ -33,6 +36,7 @@ func allPassRolePlans() []passRolePlan {
 		s := s
 		plans = append(plans, passRolePlan{
 			kind: s.Kind, service: s.Principal, actions: s.Required, optional: s.Optional, trustAction: s.TrustAction,
+			probes: s.Probes, identityOnly: s.IdentityOnly,
 			probeARN: func(account string) string { return strings.ReplaceAll(s.Probe, "{account}", account) },
 		})
 	}
@@ -40,17 +44,17 @@ func allPassRolePlans() []passRolePlan {
 }
 
 var passRolePlans = []passRolePlan{
-	{"PASS_ROLE_LAMBDA", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:InvokeFunction"}, nil, lambdaProbe, ""},
-	{"PASS_ROLE_LAMBDA_ADDPERMISSION", "lambda.amazonaws.com", []string{"lambda:CreateFunction", "lambda:AddPermission"}, nil, lambdaProbe, ""},
-	{"PASS_ROLE_CLOUDFORMATION", "cloudformation.amazonaws.com", []string{"cloudformation:CreateStack"}, nil, func(a string) string {
+	{kind: "PASS_ROLE_LAMBDA", service: "lambda.amazonaws.com", actions: []string{"lambda:CreateFunction", "lambda:InvokeFunction"}, probeARN: lambdaProbe},
+	{kind: "PASS_ROLE_LAMBDA_ADDPERMISSION", service: "lambda.amazonaws.com", actions: []string{"lambda:CreateFunction", "lambda:AddPermission"}, probeARN: lambdaProbe},
+	{kind: "PASS_ROLE_CLOUDFORMATION", service: "cloudformation.amazonaws.com", actions: []string{"cloudformation:CreateStack"}, probeARN: func(a string) string {
 		return "arn:aws:cloudformation:us-east-1:" + a + ":stack/cloudrift-probe/00000000-0000-0000-0000-000000000000"
-	}, ""},
-	{"PASS_ROLE_GLUE_ENDPOINT", "glue.amazonaws.com", []string{"glue:CreateDevEndpoint"}, []string{"glue:GetDevEndpoint"}, func(a string) string {
+	}},
+	{kind: "PASS_ROLE_GLUE_ENDPOINT", service: "glue.amazonaws.com", actions: []string{"glue:CreateDevEndpoint"}, optional: []string{"glue:GetDevEndpoint"}, probeARN: func(a string) string {
 		return "arn:aws:glue:us-east-1:" + a + ":devEndpoint/cloudrift-probe"
-	}, ""},
-	{"PASS_ROLE_DATA_PIPELINE", "datapipeline.amazonaws.com", []string{"datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition", "datapipeline:ActivatePipeline"}, nil, func(a string) string {
+	}},
+	{kind: "PASS_ROLE_DATA_PIPELINE", service: "datapipeline.amazonaws.com", actions: []string{"datapipeline:CreatePipeline", "datapipeline:PutPipelineDefinition", "datapipeline:ActivatePipeline"}, probeARN: func(a string) string {
 		return "arn:aws:datapipeline:us-east-1:" + a + ":pipeline/cloudrift-probe"
-	}, ""},
+	}},
 }
 
 func lambdaProbe(account string) string {
@@ -80,9 +84,11 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 	candidates := append(append([]models.AssetNode{}, roles...), caller)
 
 	for _, plan := range allPassRolePlans() {
+		// What a service presents when it assumes the role for a resource the caller creates in this account.
+		presented := map[string]string{"aws:SourceAccount": account, "aws:SourceArn": plan.probeARN(account)}
 		var targets []models.AssetNode
 		for _, target := range candidates {
-			if target.AccountID == account && trustsServiceAction(target, plan.service, plan.trustAction) {
+			if target.AccountID == account && trustsServiceAction(target, plan.service, plan.trustAction, presented) {
 				targets = append(targets, target)
 			}
 		}
@@ -90,12 +96,28 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 			continue // no role the service can assume, so nothing to pass; skip evaluating the calls
 		}
 		probe := probeAsset(plan.probeARN(account), account)
+		// stepProbe is the resource the action acts on: its own type when the plan names one, else the plan's.
+		stepProbe := func(a string) models.AssetNode {
+			if arn, ok := plan.probes[a]; ok {
+				return probeAsset(strings.ReplaceAll(arn, "{account}", account), account)
+			}
+			return probe
+		}
+		stepCap := func(a string) iamauth.Capability {
+			c := capOf(a)
+			for _, id := range plan.identityOnly {
+				if strings.EqualFold(id, a) {
+					c.IdentityOnlyProbe = true
+				}
+			}
+			return c
+		}
 		var steps, optional []schema.PermissionDecision
 		for _, a := range plan.actions {
-			steps = append(steps, eval(capOf(a), probe, req.RequestContext))
+			steps = append(steps, eval(stepCap(a), stepProbe(a), req.RequestContext))
 		}
 		for _, a := range plan.optional {
-			optional = append(optional, eval(capOf(a), probe, req.RequestContext))
+			optional = append(optional, eval(stepCap(a), stepProbe(a), req.RequestContext))
 		}
 		ctx := map[string]string{}
 		for k, v := range req.RequestContext {

@@ -18,8 +18,8 @@ A validated result is modeled capability, never evidence that anyone did it.
 | PassExistingRoleToNewGlueDevEndpoint | `PASS_ROLE_GLUE_ENDPOINT` | Modeled |
 | PassExistingRoleToNewDataPipeline | `PASS_ROLE_DATA_PIPELINE` | Modeled |
 | EditExistingLambdaFunctionWithRole | `EDIT_LAMBDA_CODE` | Modeled |
+| PassRole to Omics (`s3:GetObject` on a workflow object the caller places, decided from the identity policy alone) | `PASS_ROLE_OMICS_001` | Modeled |
 | PassRole to EC2, ECS, Batch, SageMaker, CodeBuild, Step Functions, EMR, EMR Serverless, App Runner, Bedrock AgentCore, Braket, GameLift, Image Builder, Kinesis Analytics, Cognito Identity, Scheduler, SSM Automation, Glue jobs and triggers, CloudFormation StackSets, Lambda event sources | `PASS_ROLE_<SERVICE>_<n>`, one per pathfinding.cloud record; 40 records in `iamauth/passrole_services.go` | Modeled |
-| omics-001 (PassRole to Omics) | also needs `s3:GetObject` on a workflow the caller supplies | Not modeled |
 | PassExistingRoleToNewLambdaThenTrigger* (DynamoDB) | needs DynamoDB table and stream evidence | Not modeled |
 | PassExistingRoleToNewCodeStarProject, CodeStar* | CodeStar is closed to new customers | Not modeled |
 | UpdateExistingGlueDevEndpoint | Glue endpoints are not collected | Not modeled |
@@ -42,9 +42,12 @@ negative controls, and fails if a path stops being detected or a false positive 
 
 - **PassRole chains** require every step to be allowed: `iam:PassRole` on the role with
   `iam:PassedToService` set to the service, plus the service calls. The role's collected trust policy must let that
-  service assume it with no condition, and the role must be in the caller's account.
+  service assume it, and the role must be in the caller's account. A condition on that trust counts only when it holds for what
+  the service presents: `aws:SourceAccount` is the caller's account and `aws:SourceArn` is the resource being created.
+  Any other condition key, or an unsupported operator, does not match.
 - **Probe resource.** The calls that create something are evaluated against a made-up resource
-  (`cloudrift-probe`, `us-east-1`). A policy scoped to other names or Regions is UNKNOWN. That can only miss an
+  (`cloudrift-probe`, `us-east-1`), of the type each call acts on where a chain mixes types (ECS cluster, service and task
+  definition; Glue job and trigger; Batch queue and compute environment). A policy scoped to other names or Regions is UNKNOWN. That can only miss an
   escalation, never invent one.
 - **Edit chains** need `lambda:UpdateFunctionCode` on a collected function whose execution role relationship is in
   the scan. `lambda:InvokeFunction` and `lambda:AddPermission` are optional: an existing trigger or another invoker can

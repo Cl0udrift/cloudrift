@@ -79,6 +79,9 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 		return finish(decision, StatusUnknown, ReasonInvalidResource)
 	}
 	cap, ok := CapabilityFor(decision.Action)
+	if ok && req.IdentityOnlyProbe && cap.Support == SupportEvaluated {
+		cap.Evaluation = EvalIdentityResource
+	}
 	if !ok || cap.Evaluation == EvalUnsupported || cap.Support != SupportEvaluated {
 		decision.Unsupported = append(decision.Unsupported, decision.Action)
 		return finish(decision, StatusUnknown, ReasonUnsupportedAction)
@@ -530,6 +533,9 @@ func missingControls(req AuthorizationRequest) []string {
 		missing = append(missing, ReasonMissingIdentity)
 	}
 	cap, _ := CapabilityFor(req.Action)
+	if req.IdentityOnlyProbe {
+		cap.Evaluation = EvalIdentityResource
+	}
 	switch cap.Evaluation {
 	case EvalAssumeRole:
 		if req.TrustPolicy.State != EvidencePresent {

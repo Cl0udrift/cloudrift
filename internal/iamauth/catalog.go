@@ -43,9 +43,11 @@ type Capability struct {
 	InventorySupported   bool
 	PermissionImpact     bool
 	// ProbeOnly rows are evaluated against a hypothetical resource the caller would create, never against collected ones.
-	ProbeOnly       bool
-	AttackTechnique string
-	SupportVersion  string
+	ProbeOnly bool
+	// IdentityOnlyProbe asks the evaluator to decide the action from the identity policy alone; see AuthorizationRequest.
+	IdentityOnlyProbe bool
+	AttackTechnique   string
+	SupportVersion    string
 }
 
 // Catalog is the authoritative capability registry. A row is not an authorization result.
