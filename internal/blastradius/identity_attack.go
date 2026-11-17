@@ -21,6 +21,7 @@ const (
 	techniqueRewriteTrust = "REWRITE_TRUST"
 	techniqueGrantPolicy  = "GRANT_ROLE_POLICY"
 	techniquePolicyVer    = "CREATE_POLICY_VERSION"
+	techniqueSetDefault   = "SET_DEFAULT_POLICY_VERSION"
 	techniqueGrantUser    = "GRANT_USER_POLICY"
 	techniqueGrantGroup   = "GRANT_GROUP_POLICY"
 	techniqueJoinGroup    = "ADD_USER_TO_GROUP"
@@ -261,9 +262,13 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 					addEscalation(&report, "SELF_GROUP_JOIN", hop, "This session's user may add itself to "+decision.ResourceARN+", a group with administrative policies.")
 				}
 			}
-			if technique == techniqueGrantPolicy || technique == techniquePolicyVer || technique == techniqueGrantUser {
+			if technique == techniqueGrantPolicy || technique == techniquePolicyVer || technique == techniqueSetDefault || technique == techniqueGrantUser {
 				if decision.ResourceARN == state.principal {
-					addEscalation(&report, "SELF_POLICY_GRANT", hop, "This session may change a policy that applies to its own role, so it can grant itself any permission.")
+					why := "This session may change a policy that applies to its own role, so it can grant itself any permission."
+					if technique == techniqueSetDefault {
+						why = switchWhy(hop)
+					}
+					addEscalation(&report, "SELF_POLICY_GRANT", hop, why)
 				} else {
 					grants = append(grants, hop)
 				}
@@ -540,6 +545,9 @@ func attackDecisions(blast schema.PermissionBlastReport) []attackDecision {
 		for _, step := range c.Steps {
 			h.Write([]byte(step.EvidenceFingerprint + "|"))
 			evidence = append(evidence, step.Action+" "+step.Status)
+		}
+		if c.Note != "" {
+			evidence = append(evidence, c.Note)
 		}
 		if c.WorkloadARN != "" {
 			evidence = append(evidence, "workload "+c.WorkloadARN)

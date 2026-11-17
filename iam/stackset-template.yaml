@@ -45,6 +45,7 @@ Resources:
                   - iam:GetRolePolicy
                   - iam:GetPolicy
                   - iam:GetPolicyVersion
+                  - iam:ListPolicyVersions
                   - iam:GetInstanceProfile
                   - ec2:DescribeInstances
                   - ec2:DescribeIamInstanceProfileAssociations

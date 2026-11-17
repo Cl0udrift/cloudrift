@@ -160,6 +160,8 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 		}
 		chains = append(chains, schema.PrivescChain{Kind: "CREATE_POLICY_VERSION", Service: "iam.amazonaws.com", RoleARN: holder, Status: d.Status, Steps: []schema.PermissionDecision{d}})
 	}
+	chains = append(chains, setDefaultVersionChains(req, caller, roles, eval)...)
+
 	// Reach a role through an EC2 instance or ECS task that runs as it: the caller runs code there, so it obtains the role.
 	// A hop is reported once per kind and role, so once one workload gives an allowed chain the rest are skipped, and a
 	// chain stops at its first step that is not allowed (that step is the reason). This keeps accounts with thousands of
@@ -275,6 +277,7 @@ func AttackTechniques() []Technique {
 	for _, w := range iamauth.WorkloadEscalations {
 		out = append(out, Technique{w.Kind, "escalation", "existing " + strings.ReplaceAll(w.Resource, "_", " ") + " that runs as a role: " + strings.Join(w.Required, " and ") + " (pathfinding.cloud " + w.Reference + ")"})
 	}
+	out = append(out, Technique{techniqueSetDefault, "escalation", "iam:SetDefaultPolicyVersion on a customer managed policy that applies to the session or a reachable role, when a stored non-default version grants administrative access"})
 	for _, p := range allPassRolePlans() {
 		out = append(out, Technique{p.kind, "escalation", "iam:PassRole to " + p.service + " plus " + strings.Join(p.actions, " and ")})
 	}

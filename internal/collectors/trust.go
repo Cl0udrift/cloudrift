@@ -345,6 +345,7 @@ func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI
 			} else {
 				slog.Warn("role tags and policy descriptions were not collected", "account", accountID, "error", mderr)
 			}
+			collectSwitchablePolicyVersions(ctx, client, nodes)
 		}
 	}
 	return nodes, rels, nil

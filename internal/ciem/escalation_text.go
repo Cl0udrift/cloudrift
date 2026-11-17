@@ -15,6 +15,32 @@ type escText struct {
 	command        func(p models.AssetNode, target string) string
 }
 
+// escalationTextFor is escalationText, except for the technique whose meaning the kind alone does not say: an escalation
+// to the principal itself is a "self policy grant" by kind, but here it is a switch to an older policy version.
+func escalationTextFor(kind, technique string) escText {
+	if technique != "SET_DEFAULT_POLICY_VERSION" {
+		return escalationText(kind)
+	}
+	return escText{
+		edge:           "can switch to an administrative version of a policy that applies to",
+		impact:         "This principal may make an older version of a policy the default, and a stored version of that policy grants administrative access.",
+		recommendation: "Remove iam:SetDefaultPolicyVersion, and delete the old versions that grant more than the current one.",
+		options: []RemediationOption{
+			{"Remove the permission", "Stops the switch.", []string{"Remove iam:SetDefaultPolicyVersion from the principal's policies"}},
+			{"Delete the old versions", "Leaves nothing broader to switch to.", []string{"Delete the non-default versions that grant more than the current one (iam:DeletePolicyVersion)"}},
+		},
+		title: func(p, t string) string {
+			if p == t {
+				return p + " can switch to an administrative version of its own policy"
+			}
+			return p + " can switch to an administrative version of a policy that applies to " + t
+		},
+		command: func(_ models.AssetNode, t string) string {
+			return "aws iam list-policy-versions --policy-arn <POLICY_ARN>\naws iam get-policy-version --policy-arn <POLICY_ARN> --version-id <VERSION>\n# Delete a broader old version:\n# aws iam delete-policy-version --policy-arn <POLICY_ARN> --version-id <VERSION>"
+		},
+	}
+}
+
 // escalationText is the wording and fix options for one escalation kind. The fix is always the same shape: remove the
 // permission that makes the path work, or stop the target from being usable that way.
 func escalationText(kind string) escText {

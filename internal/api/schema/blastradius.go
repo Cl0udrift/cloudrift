@@ -198,6 +198,8 @@ type PrivescChain struct {
 	// the escalation also depends on that Cloudrift does not collect.
 	WorkloadARN  string `json:"workload_arn,omitempty"`
 	Precondition string `json:"precondition,omitempty"`
+	// Note is shown in the hop's evidence, for what made the chain allowed or unknown (a version that grants admin).
+	Note string `json:"note,omitempty"`
 }
 
 // PermissionBlastReport is the assumed-compromise permission impact for one role.

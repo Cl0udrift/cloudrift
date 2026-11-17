@@ -141,6 +141,7 @@ func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []mod
 		if len(direct) == 0 && res.report.UnknownTransitions > 0 && res.report.ValidatedTransitionCount == 0 {
 			stats.UnknownOnly++
 		}
+		out = append(out, unverifiedSwitchFindings(p, res.report, rc)...)
 		families := make([]string, 0, len(direct))
 		for k := range direct {
 			families = append(families, k)
@@ -215,7 +216,7 @@ func escalationFinding(p models.AssetNode, family string, g *escalationGroup, by
 	if privileged {
 		sev = models.SeverityHigh
 	}
-	text := escalationText(e.Kind)
+	text := escalationTextFor(e.Kind, e.Technique)
 	target := nameOf(e.TargetARN)
 	ev := map[string]any{
 		"kind": e.Kind, "family": family, "variants": g.variants, "technique": e.Technique, "target_arn": e.TargetARN, "explanation": e.Explanation,
@@ -244,7 +245,7 @@ func rolledUpEscalation(p models.AssetNode, family string, targets []string, byT
 			sev = models.SeverityHigh
 		}
 	}
-	text := escalationText(kind)
+	text := escalationTextFor(kind, byTarget[targets[0]].esc.Technique)
 	first := targets
 	if len(first) > 10 {
 		first = first[:10]
@@ -279,7 +280,7 @@ func nameOf(arn string) string {
 }
 
 func escalationPath(p models.AssetNode, e schema.AttackEscalation, target string, privileged bool) []PathNode {
-	text := escalationText(e.Kind)
+	text := escalationTextFor(e.Kind, e.Technique)
 	risk := "warn"
 	if privileged {
 		risk = "bad"
@@ -335,4 +336,39 @@ func attachReach(p models.AssetNode, rc *reacher, sev models.Severity, ev map[st
 	}
 	ev["severity_factors"] = factors
 	return sev
+}
+
+// unverifiedSwitchFindings raises a Medium finding where the principal may switch the default version of a policy but the
+// policy's other versions were not read, so whether one is broader is unknown. It says exactly that, and nothing more.
+func unverifiedSwitchFindings(p models.AssetNode, report schema.IdentityAttackReport, rc *reacher) []models.Finding {
+	var out []models.Finding
+	seen := map[string]bool{}
+	for _, tr := range report.Transitions {
+		if tr.Technique != "SET_DEFAULT_POLICY_VERSION" || tr.Depth != 0 || tr.SourcePrincipal != p.ARN || !strings.HasSuffix(tr.Reason, "policy_versions_not_collected") || seen[tr.TargetARN] {
+			continue
+		}
+		seen[tr.TargetARN] = true
+		target := nameOf(tr.TargetARN)
+		ev := map[string]any{
+			"kind": "SET_DEFAULT_POLICY_VERSION", "family": "SET_DEFAULT_POLICY_VERSION", "technique": tr.Technique, "target_arn": tr.TargetARN,
+			"unverified": true, "versions_collected": false, "explanation": strings.Join(tr.Evidence, "; "), "track": "attack_path",
+			"evaluated_authorization": "identity, boundary and SCP policies; the session is assumed to carry no session policy",
+			"session_policy":          "scenario_assumption",
+			"path":                    []PathNode{{Kind: nodeKind(p), Label: p.Name, Risk: "warn"}, {Kind: "edge", Label: "can switch the version of a policy on"}, {Kind: "policy", Label: target, Detail: "other versions not read", Risk: "warn"}},
+			"severity_factors":        []string{"it is allowed to make any stored version of the policy the default", "the policy's other versions were not read, so whether one is broader is unknown", "allow iam:ListPolicyVersions for the audit role so the versions are collected and this becomes a confirmed result or goes away"},
+			"remediation_options": []RemediationOption{
+				{"Collect the versions", "Turns this into a confirmed escalation or removes it.", []string{"Allow iam:ListPolicyVersions and iam:GetPolicyVersion for the audit role and scan again"}},
+				{"Remove the permission", "If the principal does not need to switch versions.", []string{"Remove iam:SetDefaultPolicyVersion from its policies"}},
+			},
+		}
+		sev := models.SeverityMedium
+		sev = attachReach(p, rc, sev, ev)
+		f := identityFinding(p, CatEscalation+"|SET_DEFAULT_POLICY_VERSION|"+tr.TargetARN+"|unverified", sev,
+			p.Name+" can change which version of a policy applies to "+target+", and the versions were not read",
+			"This principal may make any stored version of a policy the default. Cloudrift did not read the policy's other versions, so it cannot say whether one grants more. If one does, this is a full privilege escalation.",
+			"Collect the policy versions, or remove iam:SetDefaultPolicyVersion if it is not needed.", ev)
+		f.RemediationCmd = "aws iam list-policy-versions --policy-arn <POLICY_ARN>\naws iam get-policy-version --policy-arn <POLICY_ARN> --version-id <VERSION>"
+		out = append(out, f)
+	}
+	return out
 }

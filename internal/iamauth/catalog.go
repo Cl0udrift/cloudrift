@@ -188,6 +188,12 @@ func buildCatalog() []Capability {
 			Consequence:    "Start a pipeline so it runs with the passed role, if the evaluated request is allowed.",
 		},
 		{
+			Action: "iam:SetDefaultPolicyVersion", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
+			ResourceShape:  "customer managed policy ARN",
+			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
+			Consequence:    "Make a stored non-default version of a managed policy the default if the evaluated request is allowed.",
+		},
+		{
 			Action: "iam:CreatePolicyVersion", Service: "iam", Category: CategoryIdentityControl, Support: SupportEvaluated, Evaluation: EvalIdentityResource, ProbeOnly: true,
 			ResourceShape:  "customer managed policy ARN attached to a reachable role",
 			RequiredPolicy: []string{"identity policy", "boundary", "session policy", "SCP"},
@@ -372,6 +378,9 @@ var registryDetail = map[string]registryFacts{
 	},
 	"datapipeline:ActivatePipeline": {
 		unsupported: []string{"the probe uses a fixed pipeline name and Region"},
+	},
+	"iam:SetDefaultPolicyVersion": {
+		unsupported: []string{"the policy's other versions come from a separate read (iam:ListPolicyVersions); without it the attack search reports UNKNOWN", "the five-version limit does not apply to switching"},
 	},
 	"iam:CreatePolicyVersion": {
 		unsupported: []string{"the five-version limit per policy; policies attached to groups or users, which are not collected"},

@@ -313,3 +313,62 @@ func TestEscalationCallerListIsCappedButTheTotalIsNot(t *testing.T) {
 		t.Fatalf("total %d weak %d listed %d", info.Total, info.Weak, len(info.Callers))
 	}
 }
+
+const raynorPolicy = "arn:aws:iam::" + escAcct + ":policy/cg-raynor-policy"
+
+// raynorWorld is CloudGoat iam_privesc_by_rollback: a user that may switch the default version of its own policy.
+func raynorWorld(status string, versions ...string) ([]models.AssetNode, []models.Relationship) {
+	switchDoc := `{"Statement":[{"Effect":"Allow","Action":["iam:Get*","iam:List*","iam:SetDefaultPolicyVersion"],"Resource":"*"}]}`
+	user := escNode("arn:aws:iam::"+escAcct+":user/raynor", models.AssetIAMUser, `{"Statement":[{"Effect":"Allow","Action":"iam:SetDefaultPolicyVersion","Resource":"`+raynorPolicy+`"}]}`, "")
+	pol := models.AssetNode{ARN: raynorPolicy, AssetType: models.AssetIAMPolicy, Name: "cg-raynor-policy", AccountID: escAcct,
+		Properties: map[string]any{"policy_type": models.PolicyTypeManaged, "retrieval_status": models.PolicyRetrievalOK, "policy_document": switchDoc}}
+	if status != "" {
+		pol.Properties["policy_versions_status"] = status
+	}
+	if status == "collected" {
+		var vs []map[string]any
+		for i, d := range versions {
+			vs = append(vs, map[string]any{"version_id": fmt.Sprintf("v%d", i+2), "document": d})
+		}
+		pol.Properties["non_default_versions"] = vs
+	}
+	assets, rels := withPolicies([]models.AssetNode{user})
+	return append(assets, pol), append(rels, models.Relationship{SourceARN: user.ARN, TargetARN: raynorPolicy, RelType: models.RelPolicyAttachedTo})
+}
+
+func TestRollbackScenarioIsAFindingWhenAnAdministrativeVersionIsStored(t *testing.T) {
+	assets, rels := raynorWorld("collected", readDoc, adminDoc, readDoc, readDoc)
+	fs, stats := ScoreEscalations(context.Background(), assets, rels, time.Minute, escNow)
+	var got []models.Finding
+	for _, f := range fs {
+		if f.Evidence["technique"] == "SET_DEFAULT_POLICY_VERSION" {
+			got = append(got, f)
+		}
+	}
+	if len(got) != 1 || got[0].Severity != models.SeverityHigh || got[0].Title != "raynor can switch to an administrative version of its own policy" {
+		t.Fatalf("want one High finding naming the switch: %+v stats %+v", got, stats)
+	}
+	if got[0].Evidence["unverified"] != nil || !strings.Contains(fmt.Sprint(got[0].Evidence["explanation"]), "version v3") {
+		t.Fatalf("the finding must name the version: %v", got[0].Evidence)
+	}
+}
+
+func TestRollbackScenarioWithoutVersionsIsAnUnverifiedMediumFinding(t *testing.T) {
+	for _, status := range []string{"", "failed"} {
+		assets, rels := raynorWorld(status)
+		fs, _ := ScoreEscalations(context.Background(), assets, rels, time.Minute, escNow)
+		if len(fs) != 1 || fs[0].Severity != models.SeverityMedium || fs[0].Evidence["unverified"] != true || fs[0].Evidence["versions_collected"] != false {
+			t.Fatalf("status %q: want one unverified Medium finding, got %+v", status, fs)
+		}
+		if !strings.Contains(fs[0].Title, "versions were not read") {
+			t.Fatalf("the title must say the versions were not read: %q", fs[0].Title)
+		}
+	}
+}
+
+func TestRollbackScenarioWithNoBroaderVersionIsQuiet(t *testing.T) {
+	assets, rels := raynorWorld("collected", readDoc, readDoc)
+	if fs, _ := ScoreEscalations(context.Background(), assets, rels, time.Minute, escNow); len(fs) != 0 {
+		t.Fatalf("no stored version is broader, so no finding: %+v", fs)
+	}
+}

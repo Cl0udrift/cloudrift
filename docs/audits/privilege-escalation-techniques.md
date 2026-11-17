@@ -27,7 +27,7 @@ A validated result is modeled capability, never evidence that anyone did it.
 | PassExistingRoleToNewLambdaThenTrigger* (DynamoDB) | needs DynamoDB table and stream evidence | Not modeled |
 | PassExistingRoleToNewCodeStarProject, CodeStar* | CodeStar is closed to new customers | Not modeled |
 | UpdateExistingGlueDevEndpoint | Glue endpoints are not collected | Not modeled |
-| SetExistingDefaultPolicyVersion | policy version documents are not collected | Not modeled |
+| SetExistingDefaultPolicyVersion (`iam:SetDefaultPolicyVersion`) | `SET_DEFAULT_POLICY_VERSION` on a customer managed policy that applies to the session, its group or a role; needs a stored non-default version that grants administrative access; versions are read only for policies someone can switch (`iam:ListPolicyVersions`); without them the hop is UNKNOWN and a Medium finding says the versions were not read | Modeled |
 | AttachUserPolicy, PutUserPolicy | `GRANT_USER_POLICY`; escalation on the caller itself, or on another user the caller can reach | Modeled |
 | AttachGroupPolicy, PutGroupPolicy | `GRANT_GROUP_POLICY`; escalation only when the caller is a member of that group | Modeled |
 | AddUserToGroup | `ADD_USER_TO_GROUP`; escalation only when the group has administrative policies | Modeled |
