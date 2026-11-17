@@ -35,6 +35,10 @@ type Config struct {
 		// true. External-access findings still come only from roles that trust an
 		// external principal. Set false to keep the older external-trust-only scan.
 		IAMPolicyInventory bool `toml:"iam_policy_inventory"`
+		// EscalationSearchSeconds is the time budget for the scan-time privilege-escalation search, which runs the
+		// attack search from every user and role and stores validated escalations as findings. 0 turns it off.
+		// Principals the budget does not reach are counted in the scan's coverage, never reported as clean.
+		EscalationSearchSeconds int `toml:"escalation_search_seconds"`
 		// ResourcePolicies collects Secrets Manager secret metadata and resource policies and
 		// KMS customer-managed key policies, so secretsmanager:GetSecretValue and kms:Decrypt can
 		// be evaluated. Opt-in, default false. Needs extra read actions; see docs/audits/resource-policy-collection.md.
@@ -118,6 +122,7 @@ func Default() *Config {
 	c.Scan.HTTPTimeoutSeconds = 10
 	c.Scan.UserAgent = "github.com/Zero0x00/cloudrift/0.1"
 	c.Scan.IAMPolicyInventory = true
+	c.Scan.EscalationSearchSeconds = 120
 	c.Cost.Currency = "USD"
 	c.Cost.RiskMultiplierReclaimable = 5.0
 	c.Cost.RiskMultiplierDangling = 3.0

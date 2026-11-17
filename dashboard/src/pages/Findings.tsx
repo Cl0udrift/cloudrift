@@ -41,6 +41,7 @@ const SEVERITY_OPTIONS = ["", "critical", "high", "medium", "low"] as const;
 const SAVED_VIEWS: { label: string; hint: string; filter: { module?: string; claimability?: string; adminLike?: boolean; trustStale?: boolean; search?: string } }[] = [
   { label: "All findings", hint: "No module or flag filter", filter: {} },
   { label: "IAM identity risk", hint: "Declared permissions, user credentials and workload roles", filter: { module: "iam_entitlement" } },
+  { label: "Escalation paths", hint: "Validated paths from a principal to more access, found at scan time", filter: { search: "privilege_escalation" } },
   { label: "Toxic combinations", hint: "Findings where several facts add up to a short route to admin", filter: { search: "toxic_combination" } },
   { label: "External access", hint: "Trust and resource policies naming external principals", filter: { module: "external_access" } },
   { label: "Admin-like trust", hint: "Trusted roles with admin-like declared permissions", filter: { adminLike: true } },

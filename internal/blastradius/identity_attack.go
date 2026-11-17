@@ -42,10 +42,15 @@ type IdentityAttackRequest struct {
 	RequestContext   map[string]string
 	Assets           []models.AssetNode
 	Relationships    []models.Relationship
-	MaxStates        int
-	MaxAssumeDepth   int
-	MaxPaths         int
-	EvaluatedAt      time.Time
+	// AssumeNoSessionPolicy is passed to every permission evaluation; see PermissionBlastRequest.
+	AssumeNoSessionPolicy bool
+	// DirectOnly explores only the initial session. Escalations and role hops the session can make itself are found;
+	// what other roles could do after being assumed is not searched, and that is not reported as truncation.
+	DirectOnly     bool
+	MaxStates      int
+	MaxAssumeDepth int
+	MaxPaths       int
+	EvaluatedAt    time.Time
 }
 
 type attackSearchState struct {
@@ -140,17 +145,18 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 		blast, ok := evalCache[cacheKey]
 		if !ok {
 			blast = AnalyzePermissionBlast(PermissionBlastRequest{
-				ScanID:            req.ScanID,
-				RoleARN:           state.principal,
-				AssumedCompromise: true,
-				IncludeSelf:       true,
-				PrivescChains:     true,
-				MaxDecisions:      attackMaxDecisions,
-				SessionSource:     report.SessionContextSource,
-				RequestContext:    state.context,
-				Assets:            req.Assets,
-				Relationships:     req.Relationships,
-				EvaluatedAt:       when,
+				ScanID:                req.ScanID,
+				RoleARN:               state.principal,
+				AssumedCompromise:     true,
+				IncludeSelf:           true,
+				PrivescChains:         true,
+				MaxDecisions:          attackMaxDecisions,
+				SessionSource:         report.SessionContextSource,
+				AssumeNoSessionPolicy: req.AssumeNoSessionPolicy,
+				RequestContext:        state.context,
+				Assets:                req.Assets,
+				Relationships:         req.Relationships,
+				EvaluatedAt:           when,
 			})
 			evalCache[cacheKey] = blast
 			if blast.Truncated {
@@ -161,6 +167,9 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 		roleNode := findRole(req.Assets, state.principal)
 		sessionState := observedSessionState(roleNode)
 		sessionClass := sessionEvidenceClass(roleNode)
+		if req.AssumeNoSessionPolicy {
+			sessionState, sessionClass = "confirmed_absent", "scenario_assumption"
+		}
 		var next []nextHop
 		for _, ad := range attackDecisions(blast) {
 			decision, technique := ad.PermissionDecision, ad.technique
@@ -194,11 +203,13 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 			cycle := opensSession && containsRole(state.roles, decision.ResourceARN)
 			hop.Cycle = cycle
 			_, seen := seenTransition[key]
+			// The list is bounded, but a validated hop is never dropped for it: with many services modeled, unknown hops
+			// alone can fill the list, and the validated escalations that follow are the reason for the search.
+			if !seen && len(report.Transitions) >= maxAttackTransitions && hop.Feasibility != string(ValidityValidatedPossible) {
+				report.Truncated = true
+				seen = true // not listed, and not counted again below
+			}
 			if !seen {
-				if len(report.Transitions) >= maxAttackTransitions {
-					report.Truncated = true
-					break
-				}
 				seenTransition[key] = struct{}{}
 				report.Transitions = append(report.Transitions, hop)
 				switch hop.Feasibility {
@@ -255,7 +266,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 				}
 			}
 			if opensSession {
-				if !cycle && state.depth < depthLimit {
+				if !cycle && state.depth < depthLimit && !req.DirectOnly {
 					next = append(next, nextHop{target: decision.ResourceARN, origin: originFor(technique)})
 				}
 				if technique == techniqueAssumeRole && state.depth >= 1 {

@@ -34,6 +34,7 @@ export function HighRiskCombinationStrip({
   const idc = summary.identity_issue_counts;
   const identityItems = idc && onOpenIdentity
     ? [
+        { label: "Escalation paths", category: "privilege_escalation" },
         { label: "Weak credential → admin role", category: "weak_credential_reaches_administrative_role" },
         { label: "Admin users", category: "user_administrative_access" },
         { label: "Admin workloads", category: "workload_runs_as_administrative_role" },

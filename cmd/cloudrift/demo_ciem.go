@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -349,6 +350,8 @@ func attachCIEMFindings(scanPath, scenario string) error {
 	if strings.HasPrefix(scenario, "id-") || strings.HasPrefix(scenario, "wl-") || strings.HasPrefix(scenario, "ecs-") || strings.HasPrefix(scenario, "eks-") || strings.HasPrefix(scenario, "irsa-") || strings.HasPrefix(scenario, "ct-") || scenario == "share-ecs-lambda" {
 		findings = append(findings, scorers.ScoreEntitlements(assets, rels)...)
 		findings = append(findings, ciem.ScoreIdentityHygiene(assets, rels, time.Now().UTC())...)
+		esc, _ := ciem.ScoreEscalations(context.Background(), assets, rels, 30*time.Second)
+		findings = append(findings, esc...)
 	}
 	for i := range findings {
 		findings[i].ScanID = scanID

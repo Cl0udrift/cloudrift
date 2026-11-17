@@ -141,11 +141,12 @@ const IDENTITY_LABELS: Record<string, string> = {
   user_administrative_access: "Administrative access held by a user",
   weak_credential_reaches_administrative_role: "Weak credential reaches an administrative role",
   workload_runs_as_administrative_role: "Workload runs as an administrative role",
+  privilege_escalation: "Privilege escalation path",
   user_reads_iam_configuration: "User can read the whole IAM configuration"
 };
 
 function identityEvidenceRows(ev: Record<string, unknown>): [string, string][] {
-  const skip = new Set(["issue_category", "assessment_version", "principal_arn", "keys", "track", "path", "severity_factors", "remediation_options"]);
+  const skip = new Set(["issue_category", "assessment_version", "principal_arn", "keys", "track", "path", "severity_factors", "remediation_options", "family", "variants", "targets_shown"]);
   return Object.entries(ev)
     .filter(([k]) => !skip.has(k))
     .map(([k, v]) => [k.replace(/_/g, " "), Array.isArray(v) ? v.map(String).join(", ") : typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)]);
@@ -207,11 +208,13 @@ export function FindingDetailPanelContent({
             </p>
           </Section>
           {ev.track ? (
-            <Section title={ev.track === "toxic_combination" ? "Toxic combination" : "Posture issue"}>
+            <Section title={ev.track === "attack_path" ? "Escalation path" : ev.track === "toxic_combination" ? "Toxic combination" : "Posture issue"}>
               <p className="cr-helper">
-                {ev.track === "toxic_combination"
-                  ? "Several facts that are modest alone add up to a short route to administrative access. Fix any link in the chain."
-                  : "A weakness in how this identity is set up. It is not a route to anything by itself."}
+                {ev.track === "attack_path"
+                  ? "Found by the scan-time search from this principal's own session. Every call in the path is allowed by the evaluated policies. It assumes no session policy, and state Cloudrift cannot see is listed as not verified."
+                  : ev.track === "toxic_combination"
+                    ? "Several facts that are modest alone add up to a short route to administrative access. Fix any link in the chain."
+                    : "A weakness in how this identity is set up. It is not a route to anything by itself."}
               </p>
               <IdentityPath path={ev.path as never} />
             </Section>

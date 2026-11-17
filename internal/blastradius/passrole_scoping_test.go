@@ -64,3 +64,17 @@ func TestOmicsWorkflowObjectIsDecidedByIdentityPolicy(t *testing.T) {
 		t.Fatal("s3:GetObject scoped to another bucket must not match the probe object")
 	}
 }
+
+// Unknown hops can fill the transition list; a validated escalation that sorts after them must still be reported.
+func TestValidatedHopIsNotDroppedWhenUnknownHopsFillTheList(t *testing.T) {
+	caller, target := "arn:aws:iam::111111111111:role/A", "arn:aws:iam::111111111111:role/ZZ"
+	assets := []models.AssetNode{controlledRole(caller, passRoleDoc(target, allowOn("ecs:RunTask", "*")), ""), controlledRole(target, "", serviceTrust("ecs-tasks.amazonaws.com"))}
+	for i := 0; i < 100; i++ {
+		// Roles the caller may not pass: each gives unknown chains that crowd the list before ZZ.
+		assets = append(assets, controlledRole("arn:aws:iam::111111111111:role/Filler"+string(rune('A'+i%26))+string(rune('a'+i/26)), "", serviceTrust("ecs-tasks.amazonaws.com")))
+	}
+	r := analyzeAttack(caller, assets, nil)
+	if !hasEscalation(r, "PASS_ROLE_ECS_008", target) {
+		t.Fatalf("a validated escalation was dropped; transitions listed: %d, truncated: %v", len(r.Transitions), r.Truncated)
+	}
+}

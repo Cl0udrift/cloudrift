@@ -27,6 +27,10 @@ type PermissionBlastRequest struct {
 	AssumedCompromise bool
 	// IncludeSelf also evaluates policy-grant actions against the caller role. Only the attack search sets it.
 	IncludeSelf bool
+	// AssumeNoSessionPolicy models the session as one that carries no session policy, as for credentials taken from an
+	// instance profile or a function environment. It is a stated scenario assumption, not an observation; a session policy
+	// can only narrow access, so a result under it can overstate what a restricted session could do.
+	AssumeNoSessionPolicy bool
 	// PrivescChains also evaluates iam:PassRole plus Lambda create and invoke for each service-trusted role. Only the attack search sets it.
 	PrivescChains       bool
 	SessionSource       string
@@ -257,6 +261,9 @@ func sessionFromRoleProperty(req PermissionBlastRequest, role models.AssetNode) 
 }
 
 func sessionSlot(req PermissionBlastRequest, role models.AssetNode) iamauth.PolicySlot {
+	if req.AssumeNoSessionPolicy {
+		return iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "scenario assumption: the session carries no session policy; session policies only narrow access"}
+	}
 	if role.AssetType == models.AssetIAMUser {
 		return iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: userKeySessionNote}
 	}
