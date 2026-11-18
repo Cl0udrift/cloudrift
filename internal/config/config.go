@@ -49,6 +49,13 @@ type Config struct {
 		// Without the read actions in the audit role a region reports a failed collector and the resource type is not
 		// searched; see docs/audits/service-resource-collection.md.
 		ServiceResources bool `toml:"service_resources"`
+		// AssumeRoleActivity reads who assumed which role from the CloudTrail management event history (LookupEvents), so a
+		// path shows "was used" next to "can be used". Opt-in, default false: it is rate limited to 2 requests per second per
+		// Region. AssumeRoleActivityDays is the window (1 to 90, default 30). AssumeRoleActivitySeconds is the budget per
+		// account (default 120); a Region that hits the budget or 5,000 events is recorded as partial.
+		AssumeRoleActivity        bool `toml:"assume_role_activity"`
+		AssumeRoleActivityDays    int  `toml:"assume_role_activity_days"`
+		AssumeRoleActivitySeconds int  `toml:"assume_role_activity_seconds"`
 		// ServiceLastAccessed collects IAM access advisor service last-accessed data per role.
 		// Opt-in, default false. Needs two extra read IAM actions; see docs/audits/service-last-accessed.md.
 		ServiceLastAccessed bool `toml:"service_last_accessed"`

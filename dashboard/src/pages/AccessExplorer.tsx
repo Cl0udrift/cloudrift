@@ -6,7 +6,7 @@ import { formatQueryError } from "../api/httpError";
 import { queryKeys } from "../api/queryKeys";
 import { TargetPicker } from "../components/access/TargetPicker";
 import { ActionPicker } from "../components/access/ActionPicker";
-import { CallerCard, CountTile, UnknownCallersList } from "../components/access/CallerCard";
+import { CallerCard, CountTile, ObservedCallersList, UnknownCallersList } from "../components/access/CallerCard";
 import { whoCanCsv } from "../lib/accessExport";
 import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
@@ -120,6 +120,7 @@ export function AccessExplorerPage() {
                   </ul>
                 )}
                 <UnknownCallersList callers={result.data.unknown_callers} open={result.data.callers.length === 0} />
+                <ObservedCallersList callers={result.data.observed ?? []} historyRead={result.data.history_read ?? false} />
                 <div className="flex flex-wrap gap-3 text-xs">
                   <button type="button" className="hs-btn-default px-2 py-1" onClick={() => {
                     const blob = new Blob([whoCanCsv(result.data, targetItem?.name ?? arn)], { type: "text/csv" });

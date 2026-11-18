@@ -131,6 +131,12 @@ func GetRoleUsage(outputDir string) http.HandlerFunc {
 				"This shows what stored policies allow. It does not show who assumed the role. That needs CloudTrail.",
 			},
 		}
+		out.HistoryRead = blastradius.HasAssumeHistory(assets)
+		out.Observed = blastradius.ObservedAssumers(role, assets, rels)
+		blastradius.AttachObserved(out.Assumers, out.Observed)
+		if out.HistoryRead {
+			out.Notes[1] = "\"Seen\" comes from CloudTrail management event history inside the window, which shows a call was made; it is not an authorization decision, and no record does not show a call never happened."
+		}
 		if out.Assumers == nil {
 			out.Assumers = []schema.RoleAssumer{} // JSON null would crash the page
 		}
@@ -291,6 +297,12 @@ func GetWhoCan(outputDir string) http.HandlerFunc {
 				"Callers are users and roles in this scan, checked against their own policies, permissions boundary and any collected SCPs. Principals in accounts that were not scanned are not listed.",
 				"This shows what stored policies allow, not what anyone did.",
 			},
+		}
+		out.Observed = []schema.ObservedCaller{}
+		if action == iamauth.ActionAssumeRole {
+			out.HistoryRead = blastradius.HasAssumeHistory(assets)
+			out.Observed = blastradius.ObservedAssumers(target, assets, rels)
+			blastradius.AttachObserved(out.Callers, out.Observed)
 		}
 		if out.Callers == nil {
 			out.Callers = []schema.RoleAssumer{}

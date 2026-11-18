@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../../api/client";
 import { formatQueryError } from "../../api/httpError";
 import { queryKeys } from "../../api/queryKeys";
-import { CallerCard, CountTile, UnknownCallersList } from "../access/CallerCard";
+import { CallerCard, CountTile, ObservedCallersList, UnknownCallersList } from "../access/CallerCard";
 import { StateChip } from "../ui/StatusChip";
 
 /** Who (users and roles) can assume this role and which workloads run as it. Policy based, not CloudTrail. */
@@ -35,6 +35,7 @@ export function RoleUsage({ scanId, roleArn }: { scanId: string; roleArn: string
             </p>
           )}
           <UnknownCallersList callers={q.data.unknown_callers ?? []} open={(q.data.assumers ?? []).length === 0} />
+          <ObservedCallersList callers={q.data.observed ?? []} historyRead={q.data.history_read ?? false} />
           {(q.data.workloads ?? []).length > 0 ? (
             <div>
               <p className="cr-kpi-label mb-1">Workloads that run as this role</p>

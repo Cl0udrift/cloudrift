@@ -309,6 +309,28 @@ type RoleAssumer struct {
 	ReasonText string `json:"reason_text,omitempty"`
 	// Paths are the stored policy statements that allow the call, one path per source (at most three).
 	Paths []AccessPath `json:"paths,omitempty"`
+	// Observed is set when CloudTrail history shows this caller assuming the role.
+	Observed *ObservedUse `json:"observed,omitempty"`
+}
+
+// ObservedUse is how often a caller was seen assuming a role inside the history window.
+type ObservedUse struct {
+	Count      int    `json:"count"`
+	FirstSeen  string `json:"first_seen"`
+	LastSeen   string `json:"last_seen"`
+	WindowDays int    `json:"window_days"`
+}
+
+// ObservedCaller is a caller seen assuming a role, whether or not stored policy allows it today.
+type ObservedCaller struct {
+	Caller     string `json:"caller"`
+	Name       string `json:"name"`
+	CallerType string `json:"caller_type"`
+	InScan     bool   `json:"in_scan"`
+	Count      int    `json:"count"`
+	FirstSeen  string `json:"first_seen"`
+	LastSeen   string `json:"last_seen"`
+	WindowDays int    `json:"window_days"`
 }
 
 // AccessPath is how a caller gets an allow: through itself, a group, an attached or inline policy, or the
@@ -362,8 +384,10 @@ type WhoCanResponse struct {
 	Possible int `json:"possible"`
 	Unknown  int `json:"unknown"`
 	// UnknownCallers names the Unknown callers, with the reason each could not be decided.
-	UnknownCallers []UnknownCaller `json:"unknown_callers"`
-	Notes          []string        `json:"notes"`
+	UnknownCallers []UnknownCaller  `json:"unknown_callers"`
+	HistoryRead    bool             `json:"history_read"`
+	Observed       []ObservedCaller `json:"observed"`
+	Notes          []string         `json:"notes"`
 }
 
 // RoleUsageResponse answers "who and what can use this role".
@@ -378,5 +402,9 @@ type RoleUsageResponse struct {
 	// Unknown counts callers that could not be evaluated; UnknownCallers names them with the reason.
 	Unknown        int             `json:"unknown"`
 	UnknownCallers []UnknownCaller `json:"unknown_callers"`
-	Notes          []string        `json:"notes"`
+	// HistoryRead says the scan read CloudTrail assume-role history. Observed lists every caller seen, including callers
+	// that are not in Assumers because stored policy does not allow the call today.
+	HistoryRead bool             `json:"history_read"`
+	Observed    []ObservedCaller `json:"observed"`
+	Notes       []string         `json:"notes"`
 }

@@ -188,6 +188,16 @@ var relationshipRegistry = []RelationshipSemantics{
 		Limitations:         "Function configuration is not a version-specific role and is not proof the function is invokable or compromised.",
 	},
 	{
+		Type:                "OBSERVED_ASSUME_ROLE",
+		Class:               ClassStructural,
+		SourceSemantics:     "A caller seen in CloudTrail: an IAM user, a role (from a role session), an AWS service or an account.",
+		TargetSemantics:     "The role named in the AssumeRole request.",
+		Direction:           "Caller toward the role it assumed.",
+		TopologyTraversable: false,
+		RequiredEvidence:    []string{"cloudtrail:LookupEvents"},
+		Limitations:         "Management event history inside the window only (at most 90 days), bounded by an event cap and a time budget. It shows a call was made. It is not an authorization decision and not an attacker transition, and no edge does not show the call never happened.",
+	},
+	{
 		Type:                "WORKLOAD_RUNS_AS_ROLE",
 		Class:               ClassStructural,
 		SourceSemantics:     "An existing CloudFormation stack, CodeBuild project or Step Functions state machine.",

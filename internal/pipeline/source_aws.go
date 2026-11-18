@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -218,6 +219,17 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 		return Result{}, fmt.Errorf("collect activity: %w", err)
 	}
 	slog.Info("collector finished", "collector", "activity", "records", len(activity))
+
+	if cfg.Scan.AssumeRoleActivity {
+		progress("collecting", "reading CloudTrail AssumeRole history")
+		actAssets, actRels, err := collectors.CollectAssumeRoleActivity(ctx, cfg, accounts, time.Now())
+		if err != nil {
+			return Result{}, fmt.Errorf("collect assume-role activity: %w", err)
+		}
+		assets = append(assets, actAssets...)
+		rels = append(rels, actRels...)
+		slog.Info("collector finished", "collector", "assume-activity", "edges", len(actRels))
+	}
 
 	var serviceAccess []collectors.RoleServiceAccess
 	if cfg.Scan.ServiceLastAccessed {

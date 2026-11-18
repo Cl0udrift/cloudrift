@@ -27,6 +27,9 @@ const (
 	// RelRunsAsRole links an existing resource (a CloudFormation stack, a CodeBuild project, a state machine) to the role
 	// it runs as. The mechanism property says which. It is configuration, not an attacker transition.
 	RelRunsAsRole RelType = "WORKLOAD_RUNS_AS_ROLE"
+	// RelObservedAssumeRole links a caller to a role it was seen assuming in CloudTrail event history. It is evidence that
+	// the call happened, not an authorization decision and not an attacker transition.
+	RelObservedAssumeRole RelType = "OBSERVED_ASSUME_ROLE"
 	// Container identity edges are configuration. They are not attacker transitions.
 	RelECSTaskDefUsesTaskRole      RelType = "ECS_TASK_DEFINITION_USES_TASK_ROLE"
 	RelECSTaskDefUsesExecutionRole RelType = "ECS_TASK_DEFINITION_USES_EXECUTION_ROLE"

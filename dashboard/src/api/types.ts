@@ -1357,6 +1357,7 @@ export interface RoleAssumer {
   reason: string;
   reason_text?: string;
   paths?: AccessPath[];
+  observed?: ObservedUse;
 }
 export interface AccessStep {
   kind: "caller" | "group" | "policy" | "trust" | "target";
@@ -1365,6 +1366,18 @@ export interface AccessStep {
 }
 export interface AccessPath {
   steps: AccessStep[];
+}
+export interface ObservedUse {
+  count: number;
+  first_seen: string;
+  last_seen: string;
+  window_days: number;
+}
+export interface ObservedCaller extends ObservedUse {
+  caller: string;
+  name: string;
+  caller_type: string;
+  in_scan: boolean;
 }
 export interface UnknownCaller {
   arn: string;
@@ -1395,6 +1408,8 @@ export interface WhoCanResponse {
   possible: number;
   unknown: number;
   unknown_callers: UnknownCaller[];
+  history_read?: boolean;
+  observed?: ObservedCaller[];
   notes: string[];
 }
 
@@ -1408,5 +1423,7 @@ export interface RoleUsageResponse {
   allowed: number;
   possible: number;
   unknown: number;
+  history_read?: boolean;
+  observed?: ObservedCaller[];
   notes: string[];
 }

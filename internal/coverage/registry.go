@@ -104,6 +104,15 @@ func Modules() []Module {
 			ConfigKeys:  []string{"trust.stale_threshold_days", "trust.ghost_threshold_days"}, Page: "/identities",
 		},
 		{
+			ID: "assume-activity", Name: "Who assumed each role", Area: AreaCollect, Status: StatusOptIn,
+			Summary:     "Reads the CloudTrail event history to show which callers actually assumed a role, next to who is allowed to.",
+			Covers:      []string{"AssumeRole calls in the last 1 to 90 days (default 30): caller, role, count, first and last seen", "Callers outside the scan (other accounts, services) are listed too", "A caller seen assuming a role that stored policy does not allow today is not dropped"},
+			Limitations: []string{"Management event history only, at most 90 days, per Region; LookupEvents allows 2 requests per second, so the read is bounded by an event cap (5,000 per Region) and a time budget, and a Region that hits either is reported as partial", "It shows a call was made. It never changes an allow or deny decision, and no record does not show a call never happened", "A role session is matched to its role by name because the session ARN has no path"},
+			ConfigKeys:  []string{"scan.assume_role_activity", "scan.assume_role_activity_days", "scan.assume_role_activity_seconds"},
+			Permissions: []string{"cloudtrail:LookupEvents"},
+			Docs:        "docs/audits/service-resource-collection.md", Page: "/identities", Collectors: []string{"assume_activity"},
+		},
+		{
 			ID: "service-access", Name: "Service last-accessed", Area: AreaCollect, Status: StatusOptIn,
 			Summary:     "Reads IAM access advisor data to show which granted services a role actually used.",
 			Covers:      []string{"Per-role service last-accessed", "Action level for the few services AWS tracks that way"},

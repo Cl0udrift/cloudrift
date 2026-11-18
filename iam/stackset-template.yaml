@@ -80,6 +80,7 @@ Resources:
                   - codedeploy:ListApplications
                   - codedeploy:ListDeploymentGroups
                   - codedeploy:BatchGetDeploymentGroups
+                  - cloudtrail:LookupEvents
                   - eks:ListClusters
                   - eks:DescribeCluster
                   - eks:ListPodIdentityAssociations

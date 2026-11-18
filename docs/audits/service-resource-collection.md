@@ -32,3 +32,16 @@ What is not checked, and is stated as unverified on each result: stack policies 
 type, and what the state machine's role can do through its service integrations. A stack with no service role, and a project or
 state machine without a role, produce no edge. At most 500 resources of the per-resource collectors are read per region; more is reported as a failed
 collector with the reason "truncated".
+
+## Who assumed each role (CloudTrail)
+
+`scan.assume_role_activity` (opt-in, default false) reads `AssumeRole` events from the CloudTrail management event history with
+`cloudtrail:LookupEvents` and records one `OBSERVED_ASSUME_ROLE` edge per caller and role (count, first and last seen, the window).
+The Identities page shows "Seen N times, last <date>" next to a caller, and lists every caller seen, including callers outside the scan
+and callers that stored policy does not allow today.
+
+- Window: `scan.assume_role_activity_days`, 1 to 90 (0 means 30). The event history holds 90 days at most.
+- Cost control: LookupEvents allows 2 requests per second per Region and returns 50 events per page, so each Region stops at 5,000
+  events or `scan.assume_role_activity_seconds` (default 120 per account). A Region that stops early is `partial` and says so.
+- It shows a call was made. It never changes an allow or deny decision, and no edge does not show the call never happened.
+- Not read: data events, CloudTrail Lake and Athena. Those need customer-owned infrastructure or paid queries.
