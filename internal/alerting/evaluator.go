@@ -46,6 +46,8 @@ func (e *Evaluator) Evaluate(rule AlertRule, scanID string) (AlertEvaluationResu
 		res, err = e.evalScanCompletion(rule, scanID, scoped)
 	case RuleNewCriticalFindings:
 		res, err = e.evalNewCritical(rule, scanID, scoped)
+	case RuleNewEscalationPaths:
+		res, err = e.evalNewEscalation(rule, scanID, scoped)
 	case RuleReclaimableThreshold:
 		res, err = e.evalReclaimable(rule, scanID, scoped)
 	case RuleStaleExternalPrivilegedRoles:
@@ -245,6 +247,72 @@ func (e *Evaluator) evalNewCritical(rule AlertRule, scanID string, findings []mo
 		res.Context.BlastSummary = e.maybeEnrichAlertWithBlast(scanID, blastradius.ModeAttackPath, &top, &res.Context.Payload, res.Context.Metadata)
 	}
 	return res, nil
+}
+
+// isEscalation reports a finding that says a principal can reach more access than it holds.
+func isEscalation(f models.Finding) bool {
+	category, _ := f.Evidence["issue_category"].(string)
+	return category == "privilege_escalation"
+}
+
+// evalNewEscalation triggers on escalation paths the previous scan did not have. With no previous scan it
+// does not trigger: a first scan has no baseline, so nothing in it is new.
+func (e *Evaluator) evalNewEscalation(rule AlertRule, scanID string, findings []models.Finding) (AlertEvaluationResult, error) {
+	url := e.url("/findings", map[string]string{"scan_id": scanID, "search": "privilege_escalation"})
+	prev := e.previousScanID(scanID)
+	if prev == "" {
+		payload := AlertPayload{
+			Title:       "New privilege-escalation paths",
+			Severity:    SeverityInfo,
+			Summary:     "No baseline scan available yet for escalation-path delta detection.",
+			Bullets:     []string{"Run another scan to enable alerts on new escalation paths."},
+			ActionLabel: "Open escalation paths",
+			ActionURL:   url,
+		}
+		return makeResult(rule, scanID, false, payload, 0, map[string]any{"baseline_available": false}), nil
+	}
+	_, oldFindings, err := scans.LoadScanArtifacts(e.outputDir, prev)
+	if err != nil {
+		return AlertEvaluationResult{}, err
+	}
+	oldIdx := map[string]struct{}{}
+	for _, f := range FilterFindingsByAccountScope(rule, oldFindings) {
+		oldIdx[diffIdentity(f)] = struct{}{}
+	}
+	var fresh []models.Finding
+	severity := SeverityWarning
+	for _, f := range findings {
+		if !isEscalation(f) {
+			continue
+		}
+		if _, ok := oldIdx[diffIdentity(f)]; ok {
+			continue
+		}
+		fresh = append(fresh, f)
+		if s := strings.ToLower(string(f.Severity)); s == "high" || s == "critical" {
+			severity = SeverityCritical
+		}
+	}
+	bullets := []string{fmt.Sprintf("%d new escalation path(s) vs baseline %s.", len(fresh), prev)}
+	summary := fmt.Sprintf("%d new privilege-escalation path(s) since the last scan.", len(fresh))
+	if top, ok := topFindingByPriority(fresh); ok {
+		bullets = append(bullets, "Highest-signal item: "+shortenTitle(top.Title, 80)+".")
+		if len(fresh) == 1 {
+			summary = "New escalation path: " + shortenTitle(top.Title, 80) + "."
+		}
+	}
+	if len(fresh) > 0 {
+		bullets = append(bullets, topAccountBullet(fresh))
+	}
+	payload := AlertPayload{
+		Title:       "New privilege-escalation paths detected",
+		Severity:    severity,
+		Summary:     summary,
+		Bullets:     cleanBullets(bullets),
+		ActionLabel: "Review escalation paths",
+		ActionURL:   url,
+	}
+	return makeResult(rule, scanID, len(fresh) > 0, payload, len(fresh), map[string]any{"baseline_scan_id": prev}), nil
 }
 
 func (e *Evaluator) evalReclaimable(rule AlertRule, scanID string, findings []models.Finding) (AlertEvaluationResult, error) {

@@ -18,6 +18,12 @@ export const ALERT_RULE_TYPES_FALLBACK: AlertCatalogType[] = [
     supports_thresholds: false
   },
   {
+    type: "new_escalation_paths",
+    label: "New privilege-escalation paths",
+    description: "Triggers when a scan finds a privilege-escalation path (a principal that can reach more access) that the previous scan did not have.",
+    supports_thresholds: false
+  },
+  {
     type: "reclaimable_findings_threshold",
     label: "Reclaimable findings threshold",
     description: "Triggers when reclaimable findings exceed configured count/risk threshold.",

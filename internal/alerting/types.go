@@ -7,6 +7,7 @@ type RuleType string
 const (
 	RuleScanCompletion               RuleType = "scan_completion"
 	RuleNewCriticalFindings          RuleType = "new_critical_findings"
+	RuleNewEscalationPaths           RuleType = "new_escalation_paths"
 	RuleReclaimableThreshold         RuleType = "reclaimable_findings_threshold"
 	RuleStaleExternalPrivilegedRoles RuleType = "stale_external_privileged_roles"
 )

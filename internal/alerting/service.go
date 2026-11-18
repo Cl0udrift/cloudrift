@@ -154,6 +154,12 @@ func (s *Service) SupportedTypes() []SupportedAlertType {
 			SupportsThresholds: false,
 		},
 		{
+			Type:               RuleNewEscalationPaths,
+			Label:              "New privilege-escalation paths",
+			Description:        "Triggers when a scan finds a privilege-escalation path (a principal that can reach more access) that the previous scan did not have.",
+			SupportsThresholds: false,
+		},
+		{
 			Type:               RuleReclaimableThreshold,
 			Label:              "Reclaimable findings threshold",
 			Description:        "Triggers when reclaimable findings exceed configured count/risk threshold.",
@@ -417,7 +423,7 @@ func validateRule(rule AlertRule) error {
 		return err
 	}
 	switch rule.Type {
-	case RuleScanCompletion, RuleNewCriticalFindings, RuleReclaimableThreshold, RuleStaleExternalPrivilegedRoles:
+	case RuleScanCompletion, RuleNewCriticalFindings, RuleNewEscalationPaths, RuleReclaimableThreshold, RuleStaleExternalPrivilegedRoles:
 	default:
 		return fmt.Errorf("unsupported rule type %q", rule.Type)
 	}

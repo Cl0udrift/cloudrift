@@ -28,7 +28,7 @@ import {
 } from "../hooks/useAlertingQueries";
 import { useScanContext } from "../hooks/useScanContext";
 
-const RULE_TYPES_NO_THRESHOLD = new Set(["scan_completion", "new_critical_findings"]);
+const RULE_TYPES_NO_THRESHOLD = new Set(["scan_completion", "new_critical_findings", "new_escalation_paths"]);
 
 function formatTime(iso: string | undefined): string {
   if (!iso) {
