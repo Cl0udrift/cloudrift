@@ -5,6 +5,7 @@ import type {
   PrincipalListResponse,
   RoleUsageResponse,
   WhoCanResponse,
+  AccessTargetList,
   PrincipalPoliciesResponse,
   AccountsBreakdownResponse,
   DiffResponse,
@@ -104,6 +105,9 @@ export const apiClient = {
   },
   getWhoCan(scanId: string, action: string, arn: string): Promise<WhoCanResponse> {
     return fetchJSON<WhoCanResponse>(`/scans/${encodeURIComponent(scanId)}/identities/who-can${makeQueryString({ action, arn })}`);
+  },
+  accessTargets(scanId: string, params: { q?: string; arn?: string; kind?: string; limit?: number }): Promise<AccessTargetList> {
+    return fetchJSON<AccessTargetList>(`/scans/${encodeURIComponent(scanId)}/identities/targets${makeQueryString(params)}`);
   },
   getPrincipals(scanId: string): Promise<PrincipalListResponse> {
     return fetchJSON<PrincipalListResponse>(`/scans/${encodeURIComponent(scanId)}/principals`);

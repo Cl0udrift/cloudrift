@@ -1,9 +1,11 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { formatQueryError } from "../api/httpError";
 import { queryKeys } from "../api/queryKeys";
+import { TargetPicker } from "../components/access/TargetPicker";
+import { whoCanCsv } from "../lib/accessExport";
 import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
 import { StateChip, type Tone } from "../components/ui/StatusChip";
@@ -46,16 +48,14 @@ export function AccessExplorerPage() {
       return next;
     });
 
-  const roles = useQuery({ queryKey: ["access", "roles", selectedScanId], queryFn: () => apiClient.listIdentities(selectedScanId as string, { page: 1, page_size: 200 }), enabled: Boolean(selectedScanId), staleTime: 60_000 });
-  const principals = useQuery({ queryKey: queryKeys.principals(selectedScanId), queryFn: () => apiClient.getPrincipals(selectedScanId as string), enabled: Boolean(selectedScanId), staleTime: 60_000 });
-  const targets = useMemo(
-    () => [
-      ...(roles.data?.items ?? []).map((r) => ({ arn: r.role_arn, kind: "role" as TargetKind, label: `role ${r.name}` })),
-      ...(principals.data?.items ?? []).map((p) => ({ arn: p.arn, kind: kindOf(p.kind), label: `${p.kind} ${p.name}` }))
-    ],
-    [roles.data, principals.data]
-  );
-  const targetKind: TargetKind | "" = targets.find((t) => t.arn === arn)?.kind ?? "";
+  const selectedTarget = useQuery({
+    queryKey: ["access", "target", selectedScanId, arn],
+    queryFn: () => apiClient.accessTargets(selectedScanId as string, { arn, limit: 1 }),
+    enabled: Boolean(selectedScanId && arn),
+    staleTime: 60_000
+  });
+  const targetItem = selectedTarget.data?.items[0];
+  const targetKind: TargetKind | "" = targetItem ? kindOf(targetItem.kind) : "";
   const fits = actionFits(action, targetKind);
   const offered = actionsFor(targetKind);
 
@@ -84,21 +84,14 @@ export function AccessExplorerPage() {
       ) : (
         <>
           <div className="flex flex-wrap items-end gap-3">
-            <label className="w-full text-sm sm:w-auto">
+            <div className="w-full text-sm sm:w-auto">
               <span className="cr-kpi-label block">Target</span>
-              <select
-                className="hs-input w-full min-w-0 text-sm sm:min-w-[16rem]"
+              <TargetPicker
+                scanId={selectedScanId}
                 value={arn}
-                onChange={(e) => {
-                  const next = targets.find((t) => t.arn === e.target.value);
-                  set(next && !actionFits(action, next.kind) ? { arn: e.target.value, action: actionsFor(next.kind)[0] } : { arn: e.target.value });
-                }}
-                aria-label="Target identity"
-              >
-                <option value="">Choose a user, group or role…</option>
-                {targets.map((t) => <option key={t.arn} value={t.arn}>{t.label}</option>)}
-              </select>
-            </label>
+                onSelect={(t) => set(actionFits(action, kindOf(t.kind)) ? { arn: t.arn } : { arn: t.arn, action: actionsFor(kindOf(t.kind))[0] })}
+              />
+            </div>
             <label className="w-full text-sm sm:w-auto">
               <span className="cr-kpi-label block">Who can…</span>
               <select className="hs-input w-full min-w-0 text-sm" value={action} onChange={(e) => set({ action: e.target.value })} aria-label="Action">
@@ -174,6 +167,18 @@ export function AccessExplorerPage() {
                     </ul>
                   </details>
                 ) : null}
+                <div className="flex flex-wrap gap-3 text-xs">
+                  <button type="button" className="hs-btn-default px-2 py-1" onClick={() => {
+                    const blob = new Blob([whoCanCsv(result.data, targetItem?.name ?? arn)], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `who-can-${action.replace(/[^a-z0-9]+/gi, "-")}-${(targetItem?.name ?? "target").replace(/[^a-z0-9._-]+/gi, "-")}.csv`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                  }}>Download CSV</button>
+                  <button type="button" className="hs-btn-default px-2 py-1" onClick={() => void navigator.clipboard?.writeText(window.location.href)}>Copy link</button>
+                </div>
                 {result.data.notes.map((n) => <p key={n} className="cr-helper">{n}</p>)}
               </div>
             )}

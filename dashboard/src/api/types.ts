@@ -1349,6 +1349,17 @@ export interface UnknownCaller {
   reason: string;
   reason_text: string;
 }
+export interface AccessTarget {
+  arn: string;
+  name: string;
+  kind: "user" | "group" | "role";
+  account_id: string;
+}
+export interface AccessTargetList {
+  scan_id: string;
+  items: AccessTarget[];
+  total: number;
+}
 export interface WhoCanResponse {
   scan_id: string;
   action: string;

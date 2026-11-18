@@ -335,6 +335,21 @@ type UnknownCaller struct {
 	ReasonText string `json:"reason_text"`
 }
 
+// AccessTarget is a user, group or role the Access Explorer can be asked about.
+type AccessTarget struct {
+	ARN       string `json:"arn"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	AccountID string `json:"account_id"`
+}
+
+// AccessTargetList is one page of matching targets. Total counts every match, so a capped list says so.
+type AccessTargetList struct {
+	ScanID string         `json:"scan_id"`
+	Items  []AccessTarget `json:"items"`
+	Total  int            `json:"total"`
+}
+
 // WhoCanResponse answers "which users and roles can do this action on this target".
 type WhoCanResponse struct {
 	ScanID    string        `json:"scan_id"`

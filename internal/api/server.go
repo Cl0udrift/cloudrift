@@ -73,6 +73,7 @@ func apiRouter(outputDir, configPath string) http.Handler {
 	r.Get("/scans/{id}/identities/profile", handlers.GetIdentityProfile(outputDir))
 	r.Get("/scans/{id}/identities/usage", handlers.GetRoleUsage(outputDir))
 	r.Get("/scans/{id}/identities/who-can", handlers.GetWhoCan(outputDir))
+	r.Get("/scans/{id}/identities/targets", handlers.GetAccessTargets(outputDir))
 	r.Get("/scans/{id}/principals", handlers.ListPrincipals(outputDir))
 	r.Get("/scans/{id}/principals/policies", handlers.GetPrincipalPolicies(outputDir))
 	r.Get("/scans/{id}/workloads", handlers.ListWorkloads(outputDir))

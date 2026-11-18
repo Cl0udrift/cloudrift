@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -140,6 +141,60 @@ func GetRoleUsage(outputDir string) http.HandlerFunc {
 }
 
 // whoCanActions are the actions the explorer evaluates: role assumption and the identity-only IAM actions.
+// GetAccessTargets searches the users, groups and roles the Access Explorer can be asked about. It returns at
+// most `limit` matches (default 25, at most 100) and the total, so the picker works on large accounts.
+// With arn it returns that one target, so a link can show its name.
+func GetAccessTargets(outputDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		scanID, assets, _, ok := loadIdentityScan(w, r, outputDir)
+		if !ok {
+			return
+		}
+		q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+		arn := strings.TrimSpace(r.URL.Query().Get("arn"))
+		kind := strings.TrimSpace(r.URL.Query().Get("kind"))
+		limit := 25
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
+			limit = min(n, 100)
+		}
+		var all []schema.AccessTarget
+		for _, a := range assets {
+			var k string
+			switch a.AssetType {
+			case models.AssetIAMRole:
+				k = "role"
+			case models.AssetIAMUser:
+				k = "user"
+			case models.AssetIAMGroup:
+				k = "group"
+			default:
+				continue
+			}
+			if arn != "" && a.ARN != arn || kind != "" && k != kind {
+				continue
+			}
+			if q != "" && !strings.Contains(strings.ToLower(a.Name), q) && !strings.Contains(strings.ToLower(a.ARN), q) {
+				continue
+			}
+			all = append(all, schema.AccessTarget{ARN: a.ARN, Name: a.Name, Kind: k, AccountID: a.AccountID})
+		}
+		sort.Slice(all, func(i, j int) bool {
+			if all[i].Name != all[j].Name {
+				return all[i].Name < all[j].Name
+			}
+			return all[i].ARN < all[j].ARN
+		})
+		out := schema.AccessTargetList{ScanID: scanID, Total: len(all), Items: all}
+		if len(all) > limit {
+			out.Items = all[:limit]
+		}
+		if out.Items == nil {
+			out.Items = []schema.AccessTarget{}
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+
 // whoCanTargetType is the kind of identity an action is performed on. An action that is not listed
 // here is not checked against the target.
 func whoCanTargetType(action string) models.AssetType {

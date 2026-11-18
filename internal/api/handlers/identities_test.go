@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -168,5 +169,39 @@ func TestWhoCanNamesTheCallersItCouldNotDecide(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), `"unknown_callers":[`) {
 		t.Fatalf("unknown_callers must be a list, not null: %s", rr.Body.String())
+	}
+}
+
+func TestAccessTargetsSearchIsCappedAndReportsTheTotal(t *testing.T) {
+	dir := t.TempDir()
+	var assets []models.AssetNode
+	for i := 0; i < 30; i++ {
+		name := fmt.Sprintf("svc-%02d", i)
+		assets = append(assets, models.AssetNode{ARN: "arn:aws:iam::1:role/" + name, Name: name, AccountID: "1", AssetType: models.AssetIAMRole, ScanID: "wc2", Properties: map[string]any{}})
+	}
+	assets = append(assets, models.AssetNode{ARN: "arn:aws:iam::1:user/alice", Name: "alice", AccountID: "1", AssetType: models.AssetIAMUser, ScanID: "wc2", Properties: map[string]any{}},
+		models.AssetNode{ARN: "arn:aws:s3:::bucket", Name: "bucket", AssetType: models.AssetS3Bucket, ScanID: "wc2", Properties: map[string]any{}})
+	whoCanScan(t, dir, assets)
+	get := func(query string) schema.AccessTargetList {
+		rr := httptest.NewRecorder()
+		GetAccessTargets(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/wc2/identities/targets"+query, nil), "id", "wc2"))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%d %s", rr.Code, rr.Body.String())
+		}
+		var out schema.AccessTargetList
+		mustDecode(t, rr, &out)
+		return out
+	}
+	if all := get(""); all.Total != 31 || len(all.Items) != 25 {
+		t.Fatalf("a capped list must still report the total: %d total, %d items", all.Total, len(all.Items))
+	}
+	if one := get("?q=ALICE"); one.Total != 1 || one.Items[0].Kind != "user" {
+		t.Fatalf("search is case-insensitive and only lists users, groups and roles: %+v", one)
+	}
+	if by := get("?arn=arn:aws:iam::1:role/svc-07"); by.Total != 1 || by.Items[0].Name != "svc-07" {
+		t.Fatalf("lookup by ARN: %+v", by)
+	}
+	if none := get("?q=bucket"); none.Total != 0 || none.Items == nil {
+		t.Fatalf("a non-identity is not a target, and the list is [] not null: %+v", none)
 	}
 }
