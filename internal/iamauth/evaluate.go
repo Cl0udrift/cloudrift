@@ -29,6 +29,9 @@ import (
 // A trust Allow for the account root, a wildcard or another account still needs the identity Allow.
 // A permissions boundary on the caller is still required to allow the action here, which may
 // report UNKNOWN where AWS would allow; it never reports an allow AWS would refuse.
+// For s3:GetObject and secrets, a same-account resource policy that names an IAM user, a role session or a
+// federated user by its own ARN grants directly, and an implicit deny in the caller's permissions boundary or
+// session policy does not limit it (a role ARN, "*" and the account root are not exempt).
 //
 // Permissions boundaries and session policies intersect the request.
 // SCPs and RCPs require an Allow at every hierarchy node. Policies attached to
@@ -166,17 +169,25 @@ func evaluateBody(req AuthorizationRequest, decision AuthorizationDecision) Auth
 			return finish(decision, StatusUnknown, ReasonMissingKMS)
 		}
 	}
-	if block, conditional := gate(req.PermissionsBoundary, boundary, ReasonBoundaryNoAllow); block != "" {
-		decision.MissingEvidence = append(decision.MissingEvidence, block)
-		return finish(decision, StatusUnknown, block)
-	} else if conditional {
-		return finish(decision, StatusConditional, ReasonMissingContext)
-	}
-	if block, conditional := gate(req.SessionPolicies, session, ReasonSessionNoAllow); block != "" {
-		decision.MissingEvidence = append(decision.MissingEvidence, block)
-		return finish(decision, StatusUnknown, block)
-	} else if conditional {
-		return finish(decision, StatusConditional, ReasonMissingContext)
+	// Same account: a resource policy that names an IAM user, a role session or a federated user by its own ARN
+	// grants to that principal directly, and an implicit deny in its permissions boundary or session policy does
+	// not limit the grant. Explicit denies above, and SCPs and RCPs below, still apply. A role ARN, "*" and the
+	// account root are not exempt. https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html
+	directGrant := (cap.Evaluation == EvalS3Object || cap.Evaluation == EvalSecret) &&
+		decision.SameAccount && resource.exactAllow && grantsDirectlyToSession(req.PrincipalARN)
+	if !directGrant {
+		if block, conditional := gate(req.PermissionsBoundary, boundary, ReasonBoundaryNoAllow); block != "" {
+			decision.MissingEvidence = append(decision.MissingEvidence, block)
+			return finish(decision, StatusUnknown, block)
+		} else if conditional {
+			return finish(decision, StatusConditional, ReasonMissingContext)
+		}
+		if block, conditional := gate(req.SessionPolicies, session, ReasonSessionNoAllow); block != "" {
+			decision.MissingEvidence = append(decision.MissingEvidence, block)
+			return finish(decision, StatusUnknown, block)
+		} else if conditional {
+			return finish(decision, StatusConditional, ReasonMissingContext)
+		}
 	}
 	if block, conditional := gate(req.SCPs, scp, ReasonSCPNoAllow); block != "" {
 		decision.MissingEvidence = append(decision.MissingEvidence, block)
@@ -599,6 +610,7 @@ type groupResult struct {
 	definiteAllow     bool
 	tagGaps           []TagGap
 	namedAllow        bool // a trust or resource Allow named the caller directly (not through the account root)
+	exactAllow        bool // the Allow named the caller's own ARN exactly (not "*", not the account root)
 	conditional       bool
 	blocked           bool
 	undecidableDeny   bool
@@ -857,6 +869,9 @@ func classifyStatement(req AuthorizationRequest, result *groupResult, doc Policy
 			if item == req.PrincipalARN || (kind == "resource" && item == "*") {
 				result.namedAllow = true
 			}
+			if item == req.PrincipalARN {
+				result.exactAllow = true
+			}
 		}
 	}
 }
@@ -921,6 +936,13 @@ func isIAMIdentityARN(action, arn string) bool {
 		return strings.Contains(arn, ":user/")
 	}
 	return isIAMRoleARN(arn)
+}
+
+// grantsDirectlyToSession reports a principal ARN that a resource policy can grant to directly: an IAM user, an
+// assumed-role session, or an STS federated user. A role ARN is not one, because a role is not a session.
+func grantsDirectlyToSession(arn string) bool {
+	return strings.HasPrefix(arn, "arn:") && (strings.Contains(arn, ":iam::") && strings.Contains(arn, ":user/") ||
+		strings.Contains(arn, ":sts::") && (strings.Contains(arn, ":assumed-role/") || strings.Contains(arn, ":federated-user/")))
 }
 
 func isIAMRoleARN(arn string) bool {

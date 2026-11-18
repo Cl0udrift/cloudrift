@@ -58,6 +58,11 @@ func assumeReq(mut func(*AuthorizationRequest)) func() AuthorizationRequest {
 	}
 }
 
+const (
+	userARN    = "arn:aws:iam::111111111111:user/alice"
+	sessionARN = "arn:aws:sts::111111111111:assumed-role/App/session-1"
+)
+
 func goldenCases() []goldenCase {
 	const obj = "arn:aws:s3:::data/readme.txt"
 	idAllow := func(actions []string, res []string, cond map[string]any) func(*AuthorizationRequest) {
@@ -214,6 +219,51 @@ func goldenCases() []goldenCase {
 			r.Identity = statements("id", "A", "Allow", []string{"ec2:StopInstances"}, []string{"*"}, nil)
 			return r
 		}},
+		// AWS: within the same account, a resource-based policy that grants to an IAM user ARN, or to an IAM role
+		// session ARN, is not limited by an implicit deny in a permissions boundary (or session policy). One that
+		// grants to a role ARN is. Explicit denies and SCPs still apply. docBound, "Resource-based policies".
+		{"user named in a bucket policy is not limited by a boundary that does not allow", docBound, StatusAllowed, getReq(func(r *AuthorizationRequest) {
+			r.PrincipalARN = userARN
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "user has no policies"}
+			r.ResourcePolicy = bucketPolicy("Allow", userARN, "s3:GetObject")
+			r.PermissionsBoundary = statements("b", "B", "Allow", []string{"dynamodb:*"}, []string{"*"}, nil)
+		})},
+		{"role named in a bucket policy IS limited by a boundary that does not allow", docBound, StatusUnknown, getReq(func(r *AuthorizationRequest) {
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "role has no policies"}
+			r.ResourcePolicy = bucketPolicy("Allow", "arn:aws:iam::111111111111:role/App", "s3:GetObject")
+			r.PermissionsBoundary = statements("b", "B", "Allow", []string{"dynamodb:*"}, []string{"*"}, nil)
+		})},
+		{"role session named in a bucket policy is not limited by a boundary or a session policy", docBound, StatusAllowed, getReq(func(r *AuthorizationRequest) {
+			r.PrincipalARN = sessionARN
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "session has no identity policy of its own"}
+			r.ResourcePolicy = bucketPolicy("Allow", sessionARN, "s3:GetObject")
+			r.PermissionsBoundary = statements("b", "B", "Allow", []string{"dynamodb:*"}, []string{"*"}, nil)
+			r.SessionPolicies = statements("s", "S", "Allow", []string{"dynamodb:*"}, []string{"*"}, nil)
+		})},
+		{"everyone named in a bucket policy is still limited by a boundary that does not allow", docBound, StatusUnknown, getReq(func(r *AuthorizationRequest) {
+			r.PrincipalARN = userARN
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "user has no policies"}
+			r.ResourcePolicy = bucketPolicy("Allow", "*", "s3:GetObject")
+			r.PermissionsBoundary = statements("b", "B", "Allow", []string{"dynamodb:*"}, []string{"*"}, nil)
+		})},
+		{"user named in a bucket policy, but the boundary explicitly denies", docBound, StatusDenied, getReq(func(r *AuthorizationRequest) {
+			r.PrincipalARN = userARN
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "user has no policies"}
+			r.ResourcePolicy = bucketPolicy("Allow", userARN, "s3:GetObject")
+			r.PermissionsBoundary = slotOf(stmt("b", "B", "Allow", []string{"s3:*"}, []string{"*"}, nil), stmt("b", "D", "Deny", []string{"s3:GetObject"}, []string{"*"}, nil))
+		})},
+		{"user named in a bucket policy, but the boundary was not collected", docBound, StatusUnknown, getReq(func(r *AuthorizationRequest) {
+			r.PrincipalARN = userARN
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "user has no policies"}
+			r.ResourcePolicy = bucketPolicy("Allow", userARN, "s3:GetObject")
+			r.PermissionsBoundary = PolicySlot{State: EvidenceMissing}
+		})},
+		{"user named in a bucket policy, but an SCP does not allow", docSCP, StatusUnknown, getReq(func(r *AuthorizationRequest) {
+			r.PrincipalARN = userARN
+			r.Identity = PolicySlot{State: EvidenceAbsent, Evidence: "user has no policies"}
+			r.ResourcePolicy = bucketPolicy("Allow", userARN, "s3:GetObject")
+			r.SCPs = PolicySlot{State: EvidencePresent, HierarchyComplete: true, RequiredTargets: []string{"111111111111"}, Documents: []PolicyDocument{{ID: "scp", PolicyType: "scp", AttachmentLevel: "account", AttachmentTarget: "111111111111", Statements: []StatementView{stmt("scp", "S", "Allow", []string{"dynamodb:*"}, []string{"*"}, nil)}}}}
+		})},
 		{"malformed policy is never an allow", docEval, StatusUnknown, getReq(func(r *AuthorizationRequest) {
 			r.Identity = PolicySlot{State: EvidencePresent, Documents: []PolicyDocument{{ID: "bad", PolicyType: "inline", Raw: "{not json"}}}
 		})},
