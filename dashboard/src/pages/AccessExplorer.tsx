@@ -5,6 +5,7 @@ import { apiClient } from "../api/client";
 import { formatQueryError } from "../api/httpError";
 import { queryKeys } from "../api/queryKeys";
 import { TargetPicker } from "../components/access/TargetPicker";
+import { ActionPicker } from "../components/access/ActionPicker";
 import { AccessFlow } from "../components/access/AccessFlow";
 import { accessSentence } from "../lib/accessSentence";
 import { whoCanCsv } from "../lib/accessExport";
@@ -94,8 +95,8 @@ export function AccessExplorerPage() {
         <StatePanel>Select a scan first.</StatePanel>
       ) : (
         <>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="w-full text-sm sm:w-auto">
+          <div className="space-y-4">
+            <div className="w-full text-sm sm:max-w-md">
               <span className="cr-kpi-label block">Target</span>
               <TargetPicker
                 scanId={selectedScanId}
@@ -103,14 +104,8 @@ export function AccessExplorerPage() {
                 onSelect={(t) => set(actionFits(action, kindOf(t.kind)) ? { arn: t.arn } : { arn: t.arn, action: actionsFor(kindOf(t.kind))[0] })}
               />
             </div>
-            <label className="w-full text-sm sm:w-auto">
-              <span className="cr-kpi-label block">Who can…</span>
-              <select className="hs-input w-full min-w-0 text-sm" value={action} onChange={(e) => set({ action: e.target.value })} aria-label="Action">
-                {offered.map((a) => <option key={a} value={a}>{ACTION_HELP[a] ?? a} ({a})</option>)}
-              </select>
-            </label>
+            <ActionPicker value={action} kind={targetKind} help={ACTION_HELP} onChange={(a) => set({ action: a })} />
           </div>
-          {targetKind ? <p className="cr-helper">Showing actions that apply to a {targetKind}.</p> : null}
           <div aria-live="polite">
             {!arn ? (
               <StatePanel>Choose a target to see who can act on it.</StatePanel>
