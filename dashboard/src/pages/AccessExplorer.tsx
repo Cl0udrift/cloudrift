@@ -139,6 +139,16 @@ export function AccessExplorerPage() {
                             {c.kind === "user" ? <Link className="break-all font-mono text-xs underline" to={`/principals?principal=${encodeURIComponent(c.arn)}`}>{c.name}</Link> : <span className="break-all font-mono text-xs">{c.name}</span>}
                             <span className="text-xs text-slate-500">{c.account_id}</span>
                           </div>
+                          {(c.paths ?? []).map((path, i) => (
+                            <p key={i} className="mt-1 flex flex-wrap items-center gap-x-1 text-xs" aria-label={`Access path: ${path.steps.map((s) => s.label).join(", then ")}`}>
+                              {path.steps.map((s, j) => (
+                                <span key={j} className="inline-flex items-center gap-1">
+                                  {j > 0 ? <span aria-hidden="true" className="text-slate-400">→</span> : null}
+                                  <span className={s.kind === "caller" || s.kind === "target" ? "font-medium" : "rounded border border-slate-300 px-1 dark:border-slate-700"} title={s.detail}>{s.label}</span>
+                                </span>
+                              ))}
+                            </p>
+                          ))}
                           {c.reason_text || c.reason ? <p className="mt-0.5 text-xs text-slate-500">{c.reason_text || c.reason}</p> : null}
                         </li>
                       );

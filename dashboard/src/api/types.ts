@@ -1331,6 +1331,15 @@ export interface RoleAssumer {
   status: string;
   reason: string;
   reason_text?: string;
+  paths?: AccessPath[];
+}
+export interface AccessStep {
+  kind: "caller" | "group" | "policy" | "trust" | "target";
+  label: string;
+  detail?: string;
+}
+export interface AccessPath {
+  steps: AccessStep[];
 }
 export interface UnknownCaller {
   arn: string;

@@ -62,6 +62,7 @@ func WhoCanDetailed(scanID, action string, target models.AssetNode, assets []mod
 		decision := iamauth.Evaluate(req)
 		evaluated++
 		status, reason := decision.Status, decision.Reason
+		applicable := decision.ApplicableStatements
 		if status == iamauth.StatusUnknown && reason != iamauth.ReasonNoAllow {
 			// Organization controls are often not collected. Check whether the identity and
 			// trust policies alone allow the call, and say that the controls were not checked.
@@ -70,6 +71,7 @@ func WhoCanDetailed(scanID, action string, target models.AssetNode, assets []mod
 			probe.RCPs = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "not checked: RCPs were not collected"}
 			if again := iamauth.Evaluate(probe); again.Status == iamauth.StatusAllowed {
 				status, reason = StatusPendingControls, "identity and trust policies allow it; organization controls (SCP/RCP) were not checked"
+				applicable = again.ApplicableStatements
 				if action == iamauth.ActionAssumeRole && trustAloneAllows(probe) {
 					reason = "the trust policy names this caller, so no identity policy is needed; organization controls (SCP/RCP) were not checked"
 				}
@@ -88,7 +90,7 @@ func WhoCanDetailed(scanID, action string, target models.AssetNode, assets []mod
 		}
 		list = append(list, schema.RoleAssumer{
 			ARN: caller.ARN, Name: caller.Name, Kind: kind, AccountID: caller.AccountID,
-			Status: status, Reason: reason,
+			Status: status, Reason: reason, Paths: accessPaths(caller, target, applicable, assets, rels),
 		})
 	}
 	rank := map[string]int{iamauth.StatusAllowed: 0, StatusPendingControls: 1, iamauth.StatusConditional: 2}

@@ -307,6 +307,21 @@ type RoleAssumer struct {
 	Reason    string `json:"reason"`
 	// ReasonText is Reason in plain language, when the code is known.
 	ReasonText string `json:"reason_text,omitempty"`
+	// Paths are the stored policy statements that allow the call, one path per source (at most three).
+	Paths []AccessPath `json:"paths,omitempty"`
+}
+
+// AccessPath is how a caller gets an allow: through itself, a group, an attached or inline policy, or the
+// target's trust policy. It is a reading of stored statements, not an observed call.
+type AccessPath struct {
+	Steps []AccessStep `json:"steps"`
+}
+
+// AccessStep is one node on an AccessPath. Kind is caller, group, policy, trust or target.
+type AccessStep struct {
+	Kind   string `json:"kind"`
+	Label  string `json:"label"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // UnknownCaller is a user or role the check could not decide. It is listed so a reviewer can see
