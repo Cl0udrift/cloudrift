@@ -57,6 +57,11 @@ Resources:
                   - ecs:ListTasks
                   - ecs:DescribeTasks
                   - ecs:DescribeTaskDefinition
+                  - cloudformation:DescribeStacks
+                  - codebuild:ListProjects
+                  - codebuild:BatchGetProjects
+                  - states:ListStateMachines
+                  - states:DescribeStateMachine
                   - eks:ListClusters
                   - eks:DescribeCluster
                   - eks:ListPodIdentityAssociations

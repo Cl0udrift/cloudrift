@@ -32,6 +32,10 @@ const (
 	AssetKMSKey                   AssetType = "kms_key"
 	AssetVPCEndpoint              AssetType = "vpc_endpoint"
 	AssetIRSATrust                AssetType = "irsa_trust"
+	// Existing resources that run as an IAM role (the role is on a WORKLOAD_RUNS_AS_ROLE edge).
+	AssetCloudFormationStack AssetType = "cloudformation_stack"
+	AssetCodeBuildProject    AssetType = "codebuild_project"
+	AssetStateMachine        AssetType = "state_machine"
 )
 
 type AssetNode struct {

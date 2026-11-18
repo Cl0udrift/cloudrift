@@ -70,7 +70,8 @@ func pfLabel(perm string, passrole bool) string {
 		return "user_takeover"
 	case "lambda:UpdateFunctionCode":
 		return "edit_function_code"
-	case "ssm:StartSession", "ssm:SendCommand", "ec2-instance-connect:SendSSHPublicKey", "ecs:ExecuteCommand", "ec2:ModifyInstanceAttribute":
+	case "ssm:StartSession", "ssm:SendCommand", "ec2-instance-connect:SendSSHPublicKey", "ecs:ExecuteCommand", "ec2:ModifyInstanceAttribute",
+		"cloudformation:UpdateStack", "cloudformation:CreateChangeSet", "codebuild:StartBuild", "codebuild:StartBuildBatch", "states:UpdateStateMachine":
 		return "workload_exec" // runs commands or code on a workload that runs as a role
 	case "iam:DeleteAccessKey":
 		return "" // enabler only
@@ -251,7 +252,10 @@ func pfRun(p pfPath, granted []string, deny string, mode ...string) (fired, tech
 	prof := models.AssetNode{ARN: "arn:aws:iam::" + pfAcct + ":instance-profile/P", AssetType: models.AssetInstanceProfile, AccountID: pfAcct, Properties: map[string]any{}}
 	taskDef := models.AssetNode{ARN: "arn:aws:ecs:us-east-1:" + pfAcct + ":task-definition/app:1", AssetType: models.AssetECSTaskDefinition, AccountID: pfAcct, Properties: map[string]any{}}
 	task := models.AssetNode{ARN: "arn:aws:ecs:us-east-1:" + pfAcct + ":task/cluster/0123456789abcdef", AssetType: models.AssetECSTask, AccountID: pfAcct, Properties: map[string]any{}}
-	assets = append(assets, fn, inst, prof, taskDef, task)
+	stack := models.AssetNode{ARN: "arn:aws:cloudformation:us-east-1:" + pfAcct + ":stack/existing/0123", AssetType: models.AssetCloudFormationStack, AccountID: pfAcct, Properties: map[string]any{}}
+	project := models.AssetNode{ARN: "arn:aws:codebuild:us-east-1:" + pfAcct + ":project/existing", AssetType: models.AssetCodeBuildProject, AccountID: pfAcct, Properties: map[string]any{}}
+	machine := models.AssetNode{ARN: "arn:aws:states:us-east-1:" + pfAcct + ":stateMachine:existing", AssetType: models.AssetStateMachine, AccountID: pfAcct, Properties: map[string]any{}}
+	assets = append(assets, fn, inst, prof, taskDef, task, stack, project, machine)
 	if m == "norole" {
 		rels = append(rels, models.Relationship{SourceARN: fn.ARN, TargetARN: adminRole.ARN, RelType: models.RelLambdaUsesExecutionRole})
 	} else {
@@ -262,6 +266,9 @@ func pfRun(p pfPath, granted []string, deny string, mode ...string) (fired, tech
 	rels = append(rels,
 		models.Relationship{SourceARN: inst.ARN, TargetARN: prof.ARN, RelType: models.RelEC2UsesInstanceProfile})
 	if m != "norole" {
+		for _, w := range []models.AssetNode{stack, project, machine} {
+			rels = append(rels, models.Relationship{SourceARN: w.ARN, TargetARN: adminRole.ARN, RelType: models.RelRunsAsRole})
+		}
 		rels = append(rels,
 			models.Relationship{SourceARN: fn.ARN, TargetARN: adminRole.ARN, RelType: models.RelLambdaUsesExecutionRole},
 			models.Relationship{SourceARN: prof.ARN, TargetARN: adminRole.ARN, RelType: models.RelInstanceProfileContains})
@@ -410,10 +417,21 @@ func TestPathfindingBenchmark(t *testing.T) {
 				out = append(out, c)
 			}
 		}
+		// A smaller path inside this one's permissions (StartBuild on an existing project, inside CreateProject plus
+		// StartBuild) legitimately fires when this path's own mechanism is broken, so those controls cannot judge it.
+		inner := false
+		for _, q := range paths {
+			if q.ID != p.ID && len(q.Required) > 0 && subset(q.Required, p.Required) {
+				inner = true
+			}
+		}
 		if workloadPerm(p.Required) {
 			// The permissions are held but no collected workload runs as a role, so there is nothing to reach.
 			nf, _ := pfRun(p, p.Required, "", "norole")
 			nc := pfCase{ID: p.ID, Variant: "norole", Expect: "not_exploitable", Fired: nf, Outcome: "not_detected"}
+			if inner {
+				nc.Expect = "ambiguous"
+			}
 			if len(nf) > 0 {
 				nc.Outcome = "detected"
 			}
@@ -429,12 +447,18 @@ func TestPathfindingBenchmark(t *testing.T) {
 			out = append(out, cc)
 			xf, _ := pfRun(p, p.Required, "", "condtrust_wrong")
 			xc := pfCase{ID: p.ID, Variant: "condtrust_wrong", Expect: "not_exploitable", Fired: xf, Outcome: "not_detected"}
+			if inner {
+				xc.Expect = "ambiguous"
+			}
 			if len(xf) > 0 {
 				xc.Outcome = "detected"
 			}
 			out = append(out, xc)
 			wf, _ := pfRun(p, p.Required, "", "wrongtrust")
 			wc := pfCase{ID: p.ID, Variant: "wrongtrust", Expect: "not_exploitable", Fired: wf, Outcome: "not_detected"}
+			if inner {
+				wc.Expect = "ambiguous"
+			}
 			if len(wf) > 0 {
 				wc.Outcome = "detected"
 			}
@@ -456,8 +480,8 @@ func TestPathfindingBenchmark(t *testing.T) {
 // A path leaving this list is a regression. A path joining it should be added in the same change.
 var pfFloor = []string{
 	"apprunner-001", "batch-001", "batch-003", "bedrock-001", "bedrock-003", "bedrock-005", "bedrock-006",
-	"braket-001", "cloudformation-001", "cloudformation-003", "cloudformation-004", "codebuild-001",
-	"codebuild-004", "cognitoidentity-001", "datapipeline-001", "ec2-001", "ec2-002", "ec2-003",
+	"braket-001", "cloudformation-001", "cloudformation-002", "cloudformation-003", "cloudformation-004", "cloudformation-005", "codebuild-001",
+	"codebuild-002", "codebuild-003", "codebuild-004", "cognitoidentity-001", "datapipeline-001", "ec2-001", "ec2-002", "ec2-003",
 	"ec2instanceconnect-003", "ecs-001", "ecs-002", "ecs-003", "ecs-004", "ecs-005", "ecs-006", "ecs-007",
 	"ecs-008", "ecs-009", "emr-001", "emrserverless-001", "gamelift-001", "glue-001", "glue-003", "glue-004",
 	"glue-005", "glue-006", "glue-007", "iam-001", "iam-002", "iam-003", "iam-004", "iam-005", "iam-006",
@@ -465,7 +489,7 @@ var pfFloor = []string{
 	"iam-017", "iam-018", "iam-019", "iam-020", "iam-021", "imagebuilder-001", "kinesisanalytics-001",
 	"lambda-001", "lambda-002", "lambda-003", "lambda-004", "lambda-005", "lambda-006", "omics-001",
 	"sagemaker-001", "sagemaker-002", "sagemaker-003", "scheduler-001", "ssm-001", "ssm-002", "ssm-003",
-	"stepfunctions-001", "sts-001",
+	"stepfunctions-001", "stepfunctions-002", "sts-001",
 }
 
 func pfAssert(t *testing.T, out []pfCase, paths []pfPath) {

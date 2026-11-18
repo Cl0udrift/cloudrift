@@ -37,6 +37,9 @@ var catalog = []serviceDef{
 	{ID: "iam", Name: "IAM", Types: []string{"iam_role", "iam_user", "iam_group", "iam_policy", "instance_profile"}},
 	{ID: "ecs", Name: "ECS", Types: []string{"ecs_cluster", "ecs_service", "ecs_task", "ecs_task_definition"}},
 	{ID: "eks", Name: "EKS", Types: []string{"eks_cluster", "eks_pod_identity_association"}},
+	{ID: "cloudformation", Name: "CloudFormation", Types: []string{"cloudformation_stack"}},
+	{ID: "codebuild", Name: "CodeBuild", Types: []string{"codebuild_project"}},
+	{ID: "stepfunctions", Name: "Step Functions", Types: []string{"state_machine"}},
 	{ID: "route53", Name: "Route 53", Types: []string{"dns_record"}},
 	{ID: "cloudfront", Name: "CloudFront", Types: []string{"cloudfront_dist"}},
 	{ID: "apigateway", Name: "API Gateway", Types: []string{"apigateway_domain"}},
@@ -49,6 +52,7 @@ var typeName = map[string]string{
 	"s3_bucket": "S3 bucket", "s3_object": "S3 object",
 	"iam_role": "IAM role", "iam_user": "IAM user", "iam_group": "IAM group", "iam_policy": "IAM managed policy", "instance_profile": "IAM instance profile",
 	"ecs_cluster": "ECS cluster", "ecs_service": "ECS service", "ecs_task": "ECS task", "ecs_task_definition": "ECS task definition",
+	"cloudformation_stack": "CloudFormation stack", "codebuild_project": "CodeBuild project", "state_machine": "Step Functions state machine",
 	"eks_cluster": "EKS cluster", "eks_pod_identity_association": "EKS Pod Identity association",
 	"dns_record": "DNS record", "cloudfront_dist": "CloudFront distribution",
 	"apigateway_domain": "API Gateway domain", "acm_cert": "ACM certificate",
@@ -68,6 +72,7 @@ var excludedAssetTypes = map[models.AssetType]bool{
 
 var typeCategory = map[string]string{
 	"ec2_instance": categoryCompute, "lambda_function": categoryCompute,
+	"cloudformation_stack": categoryConfiguration, "codebuild_project": categoryCompute, "state_machine": categoryCompute,
 	"ecs_cluster": categoryCompute, "ecs_service": categoryCompute, "ecs_task": categoryCompute, "eks_cluster": categoryCompute,
 	"s3_bucket": categoryStorage, "s3_object": categoryStorage,
 	"iam_role": categoryIdentity, "iam_user": categoryIdentity, "iam_group": categoryIdentity, "iam_policy": categoryIdentity, "instance_profile": categoryIdentity,

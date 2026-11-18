@@ -10,6 +10,8 @@ import (
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
+	"github.com/aws/aws-sdk-go-v2/service/codebuild"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
@@ -17,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
+	"github.com/aws/aws-sdk-go-v2/service/sfn"
 
 	"github.com/Zero0x00/cloudrift/internal/config"
 	"github.com/Zero0x00/cloudrift/internal/models"
@@ -44,6 +47,10 @@ type WorkloadClients struct {
 	Lambda LambdaAPI
 	ECS    ECSAPI
 	EKS    EKSAPI
+	// Existing resources that run as a role. Nil skips the collector (scan.service_resources off).
+	CloudFormation CloudFormationAPI
+	CodeBuild      CodeBuildAPI
+	StepFunctions  StepFunctionsAPI
 }
 
 // OrganizationAccountNodes records discovered organization membership.
@@ -82,6 +89,7 @@ var regionalWorkloadClients = func(cfg awsv2.Config) WorkloadClients {
 	return WorkloadClients{
 		EC2: ec2.NewFromConfig(cfg), IAM: iam.NewFromConfig(cfg), Lambda: lambda.NewFromConfig(cfg),
 		ECS: ecs.NewFromConfig(cfg), EKS: eks.NewFromConfig(cfg),
+		CloudFormation: cloudformation.NewFromConfig(cfg), CodeBuild: codebuild.NewFromConfig(cfg), StepFunctions: sfn.NewFromConfig(cfg),
 	}
 }
 
@@ -148,7 +156,11 @@ func CollectWorkloads(ctx context.Context, cfg *config.Config, accounts []Accoun
 			}
 			regional := job.account.Session.Copy()
 			regional.Region = job.region
-			nodes, edges, err := CollectRegionalWorkloads(ctx, job.account.ID, job.region, regionalWorkloadClients(regional), time.Now().UTC())
+			clients := regionalWorkloadClients(regional)
+			if cfg != nil && !cfg.Scan.ServiceResources {
+				clients.CloudFormation, clients.CodeBuild, clients.StepFunctions = nil, nil, nil
+			}
+			nodes, edges, err := CollectRegionalWorkloads(ctx, job.account.ID, job.region, clients, time.Now().UTC())
 			mu.Lock()
 			defer mu.Unlock()
 			assets = append(assets, nodes...)
@@ -211,6 +223,9 @@ func CollectRegionalWorkloads(ctx context.Context, accountID, region string, cli
 			rels = append(rels, edges...)
 		}
 	}
+	svcAssets, svcRels := collectServiceResources(ctx, accountID, region, clients, collectedAt)
+	assets = append(assets, svcAssets...)
+	rels = append(rels, svcRels...)
 	return assets, rels, nil
 }
 
@@ -430,7 +445,7 @@ func MarkUnresolvedRoleReferences(assets []models.AssetNode, rels []models.Relat
 
 func roleAttachment(relType models.RelType) bool {
 	switch relType {
-	case models.RelECSTaskDefUsesTaskRole, models.RelECSTaskDefUsesExecutionRole, models.RelEKSPodIdentityUsesRole, models.RelIRSATrustConfiguration:
+	case models.RelRunsAsRole, models.RelECSTaskDefUsesTaskRole, models.RelECSTaskDefUsesExecutionRole, models.RelEKSPodIdentityUsesRole, models.RelIRSATrustConfiguration:
 		return true
 	default:
 		return false

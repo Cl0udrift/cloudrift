@@ -202,7 +202,7 @@ func strProp(asset models.AssetNode, key string) string {
 
 func roleEdge(rel models.RelType) bool {
 	switch rel {
-	case models.RelEC2UsesInstanceProfile, models.RelInstanceProfileContains, models.RelLambdaUsesExecutionRole,
+	case models.RelEC2UsesInstanceProfile, models.RelInstanceProfileContains, models.RelLambdaUsesExecutionRole, models.RelRunsAsRole,
 		models.RelECSTaskDefUsesTaskRole, models.RelECSTaskDefUsesExecutionRole,
 		models.RelEKSPodIdentityUsesRole, models.RelIRSATrustConfiguration:
 		return true

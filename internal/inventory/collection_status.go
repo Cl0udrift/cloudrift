@@ -1,6 +1,8 @@
 package inventory
 
 import (
+	"strings"
+
 	"github.com/Zero0x00/cloudrift/internal/api/schema"
 	"github.com/Zero0x00/cloudrift/internal/models"
 )
@@ -17,8 +19,8 @@ func CollectionStatus(scan models.ScanSnapshot, assets []models.AssetNode, filte
 		}
 	}
 	discovery := rollupCollectors(assets, filter, []string{"region_discovery"})
-	regional := rollupCollectors(assets, filter, []string{"ec2", "lambda", "ecs", "eks"})
-	service := rollupCollectors(assets, filter, []string{"ec2", "lambda", "ecs", "eks", "iam", "s3", "route53", "cloudfront"})
+	regional := rollupCollectors(assets, filter, []string{"ec2", "lambda", "ecs", "eks", "?cloudformation", "?codebuild", "?stepfunctions"})
+	service := rollupCollectors(assets, filter, []string{"ec2", "lambda", "ecs", "eks", "?cloudformation", "?codebuild", "?stepfunctions", "iam", "s3", "route53", "cloudfront"})
 	supported := "not_recorded"
 	switch {
 	case discovery == "completed" && regional == "completed" && service == "completed":
@@ -39,8 +41,15 @@ func CollectionStatus(scan models.ScanSnapshot, assets []models.AssetNode, filte
 }
 
 func rollupCollectors(assets []models.AssetNode, filter Filter, want []string) string {
+	// A name starting with "?" is optional: scans made before it existed, or with scan.service_resources off, do not
+	// have it and are not partial for that. When it is present its status counts.
 	required := map[string]bool{}
+	optional := map[string]bool{}
 	for _, name := range want {
+		if strings.HasPrefix(name, "?") {
+			optional[name[1:]] = true
+			continue
+		}
 		required[name] = false
 	}
 	saw := false
@@ -53,14 +62,16 @@ func rollupCollectors(assets []models.AssetNode, filter Filter, want []string) s
 			continue
 		}
 		collector, _ := asset.Properties["collector"].(string)
-		if _, ok := required[collector]; !ok {
+		if _, ok := required[collector]; !ok && !optional[collector] {
 			continue
 		}
 		saw = true
-		required[collector] = true
+		if !optional[collector] {
+			required[collector] = true
+		}
 		status, _ := asset.Properties["status"].(string)
 		switch status {
-		case "succeeded":
+		case "succeeded", "unsupported":
 		case "partial":
 			partial = true
 		default:

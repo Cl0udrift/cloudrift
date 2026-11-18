@@ -24,6 +24,9 @@ const (
 	RelEC2UsesInstanceProfile  RelType = "EC2_INSTANCE_USES_INSTANCE_PROFILE"
 	RelInstanceProfileContains RelType = "INSTANCE_PROFILE_CONTAINS_ROLE"
 	RelLambdaUsesExecutionRole RelType = "LAMBDA_USES_EXECUTION_ROLE"
+	// RelRunsAsRole links an existing resource (a CloudFormation stack, a CodeBuild project, a state machine) to the role
+	// it runs as. The mechanism property says which. It is configuration, not an attacker transition.
+	RelRunsAsRole RelType = "WORKLOAD_RUNS_AS_ROLE"
 	// Container identity edges are configuration. They are not attacker transitions.
 	RelECSTaskDefUsesTaskRole      RelType = "ECS_TASK_DEFINITION_USES_TASK_ROLE"
 	RelECSTaskDefUsesExecutionRole RelType = "ECS_TASK_DEFINITION_USES_EXECUTION_ROLE"

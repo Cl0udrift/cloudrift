@@ -247,6 +247,12 @@ func workloadRole(w models.AssetNode, rels []models.Relationship) string {
 			}
 		}
 	}
+	// A stack, a build project or a state machine records its role directly.
+	for _, r := range rels {
+		if r.RelType == models.RelRunsAsRole && r.SourceARN == w.ARN {
+			return r.TargetARN
+		}
+	}
 	return ""
 }
 

@@ -266,7 +266,7 @@ func AnalyzePermissionBlast(req PermissionBlastRequest) schema.PermissionBlastRe
 	})
 	report.Decisions = decisions
 	if req.PrivescChains {
-		report.PrivescChains = privescChains(req, role, roles, functions, append(append([]models.AssetNode{}, instances...), assetsOfType(req.Assets, models.AssetECSTask)...), eval)
+		report.PrivescChains = privescChains(req, role, roles, functions, append(append([]models.AssetNode{}, instances...), assetsOfType(req.Assets, models.AssetECSTask, models.AssetCloudFormationStack, models.AssetCodeBuildProject, models.AssetStateMachine)...), eval)
 	}
 	fillCounts(&report)
 	report.AnalysisComplete = !report.Truncated && identity.State == iamauth.EvidencePresent && !hasMissingControl(decisions)
@@ -1105,15 +1105,24 @@ func PermissionExplorerPayload(sum schema.BlastRadiusSummary) schema.BlastExplor
 	return resp
 }
 
-func assetsOfType(assets []models.AssetNode, kind models.AssetType) []models.AssetNode {
+func assetsOfType(assets []models.AssetNode, kinds ...models.AssetType) []models.AssetNode {
 	var out []models.AssetNode
 	for _, asset := range assets {
-		if asset.AssetType == kind && !assetUnresolved(asset) {
+		if !assetUnresolved(asset) && containsType(kinds, asset.AssetType) {
 			out = append(out, asset)
 		}
 	}
 	sortAssets(out)
 	return out
+}
+
+func containsType(kinds []models.AssetType, t models.AssetType) bool {
+	for _, k := range kinds {
+		if k == t {
+			return true
+		}
+	}
+	return false
 }
 
 func policySlotFromProps(target models.AssetNode, prefix, missingNote string) iamauth.PolicySlot {

@@ -188,6 +188,16 @@ var relationshipRegistry = []RelationshipSemantics{
 		Limitations:         "Function configuration is not a version-specific role and is not proof the function is invokable or compromised.",
 	},
 	{
+		Type:                "WORKLOAD_RUNS_AS_ROLE",
+		Class:               ClassStructural,
+		SourceSemantics:     "An existing CloudFormation stack, CodeBuild project or Step Functions state machine.",
+		TargetSemantics:     "The IAM role the resource's service configuration names.",
+		Direction:           "Resource toward the role it runs as.",
+		TopologyTraversable: true,
+		RequiredEvidence:    []string{"cloudformation:DescribeStacks", "codebuild:ListProjects", "codebuild:BatchGetProjects", "states:ListStateMachines", "states:DescribeStateMachine"},
+		Limitations:         "Configuration only. It is not an attacker transition: the search follows it when a caller may change or run the resource.",
+	},
+	{
 		Type:                "ECS_TASK_DEFINITION_USES_TASK_ROLE",
 		Class:               ClassStructural,
 		SourceSemantics:     "ECS task definition revision.",

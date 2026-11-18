@@ -182,6 +182,11 @@ func identityLinks(id string, rel models.Relationship, rels []models.Relationshi
 		if rel.SourceARN == id {
 			return []schema.InventoryIdentityLink{{RoleARN: rel.TargetARN, Mechanism: "lambda_execution_role", Label: "Lambda execution role"}}
 		}
+	case models.RelRunsAsRole:
+		if rel.SourceARN == id {
+			mechanism, _ := rel.Properties["mechanism"].(string)
+			return []schema.InventoryIdentityLink{{RoleARN: rel.TargetARN, Mechanism: mechanism, Label: runsAsLabel(mechanism)}}
+		}
 	case models.RelECSTaskDefUsesTaskRole:
 		if rel.SourceARN == id {
 			return []schema.InventoryIdentityLink{{RoleARN: rel.TargetARN, Mechanism: "ecs_task_role", Label: "ECS task role"}}
@@ -258,4 +263,16 @@ func redact(props map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+func runsAsLabel(mechanism string) string {
+	switch mechanism {
+	case "cfn_service_role":
+		return "CloudFormation stack service role"
+	case "codebuild_service_role":
+		return "CodeBuild project service role"
+	case "stepfunctions_execution_role":
+		return "Step Functions state machine role"
+	}
+	return "Role this resource runs as"
 }

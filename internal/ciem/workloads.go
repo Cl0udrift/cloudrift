@@ -33,6 +33,16 @@ func WorkloadsForRole(roleARN string, assets []models.AssetNode, rels []models.R
 				item.Mechanism = "lambda_execution_role"
 			}
 			out = append(out, item)
+		case models.RelRunsAsRole:
+			if rel.TargetARN != roleARN {
+				continue
+			}
+			item := attachmentFrom(byARN[rel.SourceARN], rel)
+			item.RoleARN = roleARN
+			if item.Mechanism == "" {
+				item.Mechanism, _ = rel.Properties["mechanism"].(string)
+			}
+			out = append(out, item)
 		case models.RelECSTaskDefUsesTaskRole, models.RelECSTaskDefUsesExecutionRole:
 			if rel.TargetARN != roleARN {
 				continue
@@ -152,7 +162,7 @@ func allWorkloadAttachments(assets []models.AssetNode, rels []models.Relationshi
 		}
 	}
 	for _, rel := range rels {
-		if rel.RelType != models.RelLambdaUsesExecutionRole && rel.RelType != models.RelEC2UsesInstanceProfile && rel.RelType != models.RelECSTaskDefUsesTaskRole && rel.RelType != models.RelECSTaskDefUsesExecutionRole && rel.RelType != models.RelEKSPodIdentityUsesRole && rel.RelType != models.RelIRSATrustConfiguration {
+		if rel.RelType != models.RelLambdaUsesExecutionRole && rel.RelType != models.RelRunsAsRole && rel.RelType != models.RelEC2UsesInstanceProfile && rel.RelType != models.RelECSTaskDefUsesTaskRole && rel.RelType != models.RelECSTaskDefUsesExecutionRole && rel.RelType != models.RelEKSPodIdentityUsesRole && rel.RelType != models.RelIRSATrustConfiguration {
 			continue
 		}
 		if _, ok := roles[rel.TargetARN]; ok && rel.RelType != models.RelEC2UsesInstanceProfile {

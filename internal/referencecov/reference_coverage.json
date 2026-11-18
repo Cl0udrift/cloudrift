@@ -11,30 +11,30 @@
   },
   "totals": {
     "paths": 91,
-    "detected": 76,
+    "detected": 81,
     "partial": 0,
-    "not_detected": 15,
+    "not_detected": 10,
     "false_positives": 0,
-    "true_negatives": 516,
+    "true_negatives": 495,
     "precision": 1,
-    "recall": 0.84
+    "recall": 0.89
   },
   "categories": [
     {
       "key": "existing-passrole",
       "name": "Use a resource that already exists",
       "total": 22,
-      "detected": 8,
+      "detected": 12,
       "partial": 0,
-      "not_detected": 14
+      "not_detected": 10
     },
     {
       "key": "new-passrole",
       "name": "Pass a role to a new resource",
       "total": 47,
-      "detected": 46,
+      "detected": 47,
       "partial": 0,
-      "not_detected": 1
+      "not_detected": 0
     },
     {
       "key": "principal-access",
@@ -90,17 +90,17 @@
       "key": "cloudformation",
       "name": "cloudformation",
       "total": 5,
-      "detected": 3,
+      "detected": 5,
       "partial": 0,
-      "not_detected": 2
+      "not_detected": 0
     },
     {
       "key": "codebuild",
       "name": "codebuild",
       "total": 4,
-      "detected": 2,
+      "detected": 4,
       "partial": 0,
-      "not_detected": 2
+      "not_detected": 0
     },
     {
       "key": "codedeploy",
@@ -250,9 +250,9 @@
       "key": "stepfunctions",
       "name": "stepfunctions",
       "total": 2,
-      "detected": 1,
+      "detected": 2,
       "partial": 0,
-      "not_detected": 1
+      "not_detected": 0
     },
     {
       "key": "sts",
@@ -441,11 +441,10 @@
       "id": "cloudformation-002",
       "category": "existing-passrole",
       "service": "cloudformation",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "cloudformation:UpdateStack"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/cloudformation-002"
     },
     {
@@ -475,12 +474,11 @@
       "id": "cloudformation-005",
       "category": "new-passrole",
       "service": "cloudformation",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "cloudformation:CreateChangeSet",
         "cloudformation:ExecuteChangeSet"
       ],
-      "reason": "No technique models this path yet.",
       "url": "https://pathfinding.cloud/paths/cloudformation-005"
     },
     {
@@ -499,22 +497,20 @@
       "id": "codebuild-002",
       "category": "existing-passrole",
       "service": "codebuild",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "codebuild:StartBuild"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/codebuild-002"
     },
     {
       "id": "codebuild-003",
       "category": "existing-passrole",
       "service": "codebuild",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "codebuild:StartBuildBatch"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/codebuild-003"
     },
     {
@@ -1291,12 +1287,11 @@
       "id": "stepfunctions-002",
       "category": "existing-passrole",
       "service": "stepfunctions",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "states:UpdateStateMachine",
         "states:StartExecution"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/stepfunctions-002"
     },
     {

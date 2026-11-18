@@ -44,6 +44,11 @@ type Config struct {
 		// be evaluated. Opt-in, default false. Needs extra read actions; see docs/audits/resource-policy-collection.md.
 		// Secret values are never read.
 		ResourcePolicies bool `toml:"resource_policies"`
+		// ServiceResources collects existing CloudFormation stacks, CodeBuild projects and Step Functions state machines
+		// that run as an IAM role, so the attack search can follow "change or run the resource, get its role". Default true.
+		// Without the read actions in the audit role a region reports a failed collector and the resource type is not
+		// searched; see docs/audits/service-resource-collection.md.
+		ServiceResources bool `toml:"service_resources"`
 		// ServiceLastAccessed collects IAM access advisor service last-accessed data per role.
 		// Opt-in, default false. Needs two extra read IAM actions; see docs/audits/service-last-accessed.md.
 		ServiceLastAccessed bool `toml:"service_last_accessed"`
@@ -122,6 +127,7 @@ func Default() *Config {
 	c.Scan.HTTPTimeoutSeconds = 10
 	c.Scan.UserAgent = "github.com/Zero0x00/cloudrift/0.1"
 	c.Scan.IAMPolicyInventory = true
+	c.Scan.ServiceResources = true
 	c.Scan.EscalationSearchSeconds = 120
 	c.Cost.Currency = "USD"
 	c.Cost.RiskMultiplierReclaimable = 5.0

@@ -10,7 +10,7 @@ import "strings"
 // state the call also depends on that Cloudrift does not collect; the result states it as unverified and never as met.
 type WorkloadEscalation struct {
 	Kind         string
-	Resource     string // "ec2_instance" or "ecs_task"
+	Resource     string // "ec2_instance", "ecs_task", "cloudformation_stack", "codebuild_project" or "state_machine"
 	Required     []string
 	Precondition string
 	Reference    string
@@ -25,6 +25,16 @@ var WorkloadEscalations = []WorkloadEscalation{
 		Precondition: "the instance can be stopped and its user data replaced (instance state and termination protection are not checked)"},
 	{Kind: "WORKLOAD_EC2INSTANCECONNECT_003", Resource: "ec2_instance", Required: []string{"ec2-instance-connect:SendSSHPublicKey", "ec2:DescribeInstances"}, Reference: "ec2instanceconnect-003",
 		Precondition: "the instance is reachable over SSH and runs EC2 Instance Connect; this is not collected"},
+	{Kind: "WORKLOAD_CLOUDFORMATION_002", Resource: "cloudformation_stack", Required: []string{"cloudformation:UpdateStack"}, Reference: "cloudformation-002",
+		Precondition: "the stack is not being updated or deleted and no stack policy blocks the change; the stack policy is not collected"},
+	{Kind: "WORKLOAD_CLOUDFORMATION_005", Resource: "cloudformation_stack", Required: []string{"cloudformation:CreateChangeSet", "cloudformation:ExecuteChangeSet"}, Reference: "cloudformation-005",
+		Precondition: "the stack is not being updated or deleted and no stack policy blocks the change; the stack policy is not collected"},
+	{Kind: "WORKLOAD_CODEBUILD_002", Resource: "codebuild_project", Required: []string{"codebuild:StartBuild"}, Reference: "codebuild-002",
+		Precondition: "the build may use a buildspec the caller supplies; restrictions on the project's source type are not checked"},
+	{Kind: "WORKLOAD_CODEBUILD_003", Resource: "codebuild_project", Required: []string{"codebuild:StartBuildBatch"}, Reference: "codebuild-003",
+		Precondition: "the project has a batch build configuration and accepts a buildspec the caller supplies"},
+	{Kind: "WORKLOAD_STATES_002", Resource: "state_machine", Required: []string{"states:UpdateStateMachine", "states:StartExecution"}, Reference: "stepfunctions-002",
+		Precondition: "the new definition can call something with the state machine's role; what the role can do through service integrations is not checked here"},
 	{Kind: "WORKLOAD_ECS_006", Resource: "ecs_task", Required: []string{"ecs:DescribeTasks", "ecs:ExecuteCommand"}, Reference: "ecs-006",
 		Precondition: "ECS Exec is enabled on the task and the task is running; this is not collected"},
 }
@@ -49,8 +59,15 @@ func workloadRows(existing []Capability) []Capability {
 	var out []Capability
 	for _, w := range WorkloadEscalations {
 		eval, shape := EvalEC2Instance, "EC2 instance ARN"
-		if w.Resource == "ecs_task" {
+		switch w.Resource {
+		case "ecs_task":
 			eval, shape = EvalIdentityResource, "ECS task ARN"
+		case "cloudformation_stack":
+			eval, shape = EvalIdentityResource, "CloudFormation stack ARN"
+		case "codebuild_project":
+			eval, shape = EvalIdentityResource, "CodeBuild project ARN"
+		case "state_machine":
+			eval, shape = EvalIdentityResource, "Step Functions state machine ARN"
 		}
 		for _, action := range w.Required {
 			if have[strings.ToLower(action)] {
