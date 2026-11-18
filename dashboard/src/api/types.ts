@@ -575,6 +575,8 @@ export interface AccountsBreakdownResponse {
 export interface DiffChangedFinding extends FindingListItem {
   old_severity: string;
   new_severity: string;
+  /** What moved in the evidence while the ID stayed the same: new callers, techniques, how direct it is. */
+  changes?: string[];
 }
 
 export interface DiffResponse {

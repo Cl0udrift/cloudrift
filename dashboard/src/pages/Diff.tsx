@@ -199,8 +199,8 @@ function DiffMetric({ label, value }: { label: string; value: number }) {
 function ChangedSection({ items }: { items: DiffChangedFinding[] }) {
   return (
     <div>
-      <h2 className="hs-section-title !text-sm">Changed severity</h2>
-      <p className="mt-1 cr-helper">Same finding in both scans (matched by stable ID), severity differs.</p>
+      <h2 className="hs-section-title !text-sm">Changed</h2>
+      <p className="mt-1 cr-helper">Same finding in both scans (matched by stable ID), but its severity or who can reach it changed.</p>
       <div className="mt-3 space-y-2">
         {items.map((item) => (
           <div
@@ -210,11 +210,22 @@ function ChangedSection({ items }: { items: DiffChangedFinding[] }) {
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.title}</p>
               <p className="truncate cr-helper">{item.affected_arn}</p>
+              {(item.changes ?? []).length > 0 ? (
+                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-slate-700 dark:text-slate-300">
+                  {(item.changes ?? []).map((c) => <li key={c}>{c}</li>)}
+                </ul>
+              ) : null}
             </div>
             <p className="flex items-center gap-2 text-xs font-semibold uppercase tabular-nums">
-              <span className="text-slate-500 dark:text-slate-400">{item.old_severity}</span>
-              <span className="text-slate-400 dark:text-slate-600">→</span>
-              <span className="text-sky-800 dark:text-sky-300">{item.new_severity}</span>
+              {item.old_severity === item.new_severity ? (
+                <span className="text-sky-800 dark:text-sky-300">{item.new_severity} (unchanged)</span>
+              ) : (
+                <>
+                  <span className="text-slate-500 dark:text-slate-400">{item.old_severity}</span>
+                  <span className="text-slate-400 dark:text-slate-600">→</span>
+                  <span className="text-sky-800 dark:text-sky-300">{item.new_severity}</span>
+                </>
+              )}
             </p>
           </div>
         ))}

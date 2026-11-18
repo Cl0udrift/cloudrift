@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"sort"
@@ -365,13 +366,17 @@ func diffFindings(oldFindings, newFindings []models.Finding) ([]schema.FindingLi
 			newItems = append(newItems, toFindingListItem(finding))
 			continue
 		}
-		// Present in both (same stable identity): a severity change is the actionable signal.
-		if !strings.EqualFold(string(old.Severity), string(finding.Severity)) {
+		// Present in both (same stable identity): a severity change is the actionable signal, and so is a change in who can
+		// reach the finding or how it is used, which would otherwise be hidden behind the same ID and the same severity.
+		sevChanged := !strings.EqualFold(string(old.Severity), string(finding.Severity))
+		changes := evidenceChanges(old, finding)
+		if sevChanged || len(changes) > 0 {
 			item := toFindingListItem(finding)
 			changed = append(changed, schema.DiffChangedFinding{
 				FindingListItem: item,
 				OldSeverity:     strings.ToLower(strings.TrimSpace(string(old.Severity))),
 				NewSeverity:     strings.ToLower(strings.TrimSpace(string(finding.Severity))),
+				Changes:         changes,
 			})
 			continue
 		}
@@ -447,4 +452,126 @@ func severityRank(s models.Severity) int {
 	default:
 		return 1
 	}
+}
+
+// evidenceChanges names what moved in an escalation finding's evidence between two scans while its ID stayed the same:
+// callers that can now (or no longer) assume the role, techniques that now (or no longer) reach the target, and a change in
+// how directly the path can be used. A caller list that one scan did not compute (the time budget ended) is not compared.
+func evidenceChanges(old, cur models.Finding) []string {
+	var out []string
+	oldCallers, oldOK := reachCallers(old.Evidence)
+	newCallers, newOK := reachCallers(cur.Evidence)
+	switch {
+	case oldOK && newOK:
+		for arn, c := range newCallers {
+			if _, had := oldCallers[arn]; !had {
+				out = append(out, "New caller can assume this role: "+c)
+			}
+		}
+		for arn, c := range oldCallers {
+			if _, has := newCallers[arn]; !has {
+				out = append(out, "Caller can no longer assume this role: "+c)
+			}
+		}
+	case oldOK != newOK && (hasReach(old.Evidence) && hasReach(cur.Evidence)):
+		out = append(out, "Who can assume this role was not computed in one of the scans, so callers were not compared")
+	}
+	// The caller list is capped, so callers past the cap show only in the total.
+	if ot, nt := reachTotal(old.Evidence), reachTotal(cur.Evidence); oldOK && newOK && ot >= 0 && nt >= 0 && ot != nt && !hasCallerChange(out) {
+		out = append(out, fmt.Sprintf("The number of callers that can assume this role changed from %d to %d", ot, nt))
+	}
+	oldV, newV := stringSet(old.Evidence["variants"]), stringSet(cur.Evidence["variants"])
+	for v := range newV {
+		if !oldV[v] {
+			out = append(out, "Another technique now reaches it: "+v)
+		}
+	}
+	for v := range oldV {
+		if !newV[v] {
+			out = append(out, "No longer reached by: "+v)
+		}
+	}
+	if o, n := exploitLabel(old.Evidence), exploitLabel(cur.Evidence); o != "" && n != "" && o != n {
+		out = append(out, "How directly it can be used changed: "+o+" to "+n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func hasReach(ev map[string]any) bool {
+	_, ok := ev["reachable_by"].(map[string]any)
+	return ok
+}
+
+// reachCallers returns the callers named in reachable_by, keyed by ARN with a readable label. ok is false when the
+// evidence has no caller list or the scan skipped computing it.
+func reachCallers(ev map[string]any) (map[string]string, bool) {
+	rb, ok := ev["reachable_by"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	if skipped, _ := rb["skipped"].(bool); skipped {
+		return nil, false
+	}
+	out := map[string]string{}
+	list, _ := rb["callers"].([]any)
+	for _, raw := range list {
+		c, _ := raw.(map[string]any)
+		arn, _ := c["arn"].(string)
+		if arn == "" {
+			continue
+		}
+		name, _ := c["name"].(string)
+		if name == "" {
+			name = arn
+		}
+		if weak, _ := c["weak_credential"].(bool); weak {
+			name += " (weak credential)"
+		}
+		out[arn] = name
+	}
+	return out, true
+}
+
+func stringSet(v any) map[string]bool {
+	out := map[string]bool{}
+	switch t := v.(type) {
+	case []string:
+		for _, s := range t {
+			out[s] = true
+		}
+	case []any:
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				out[s] = true
+			}
+		}
+	}
+	return out
+}
+
+func exploitLabel(ev map[string]any) string {
+	e, _ := ev["exploitability"].(map[string]any)
+	s, _ := e["label"].(string)
+	return s
+}
+
+func reachTotal(ev map[string]any) int {
+	rb, _ := ev["reachable_by"].(map[string]any)
+	if f, ok := rb["total"].(float64); ok {
+		return int(f)
+	}
+	if n, ok := rb["total"].(int); ok {
+		return n
+	}
+	return -1
+}
+
+func hasCallerChange(changes []string) bool {
+	for _, c := range changes {
+		if strings.Contains(c, "can assume this role:") || strings.Contains(c, "can no longer assume") {
+			return true
+		}
+	}
+	return false
 }

@@ -274,11 +274,14 @@ type DiffResponse struct {
 }
 
 // DiffChangedFinding is a finding present in both scans (matched by stable ID) whose
-// severity changed between them — surfaced instead of being hidden in unchanged_count.
+// severity or evidence (callers, techniques, exploitability) changed between them — surfaced instead of being hidden in unchanged_count.
 type DiffChangedFinding struct {
 	FindingListItem
 	OldSeverity string `json:"old_severity"`
 	NewSeverity string `json:"new_severity"`
+	// Changes says what moved in the evidence while the finding kept its ID: a caller that can now assume the role, a
+	// technique that now reaches it, a change in how directly it can be used. Empty for a severity-only change.
+	Changes []string `json:"changes"`
 }
 
 // ScanProgressEvent is the websocket payload for /api/scan/progress.
