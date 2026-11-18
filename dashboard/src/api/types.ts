@@ -329,6 +329,9 @@ export interface InventorySummary {
   services: InventoryServiceCard[];
   categories: InventoryCategory[];
   distribution: { service: string; name: string; count: number }[];
+  not_inventoried: string[];
+  accounts: string[];
+  regions: string[];
 }
 
 export interface InventoryCollectionStatus {
@@ -386,6 +389,10 @@ export interface InventoryResource {
   collection_status?: string;
   finding_count: number;
   max_severity?: string;
+  new_finding_count?: number;
+  related_finding_count?: number;
+  related_max_severity?: string;
+  related_to?: string[];
   relationship_count: number;
   identity_associated: boolean;
 }
@@ -398,6 +405,7 @@ export interface InventoryListResponse {
   total_items: number;
   total_pages: number;
   coverage_note: string;
+  previous_scan_id?: string;
 }
 
 export interface InventoryDetail {

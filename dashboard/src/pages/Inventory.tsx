@@ -31,6 +31,9 @@ const sortColumns: { key: string; label: string; asc: string; desc?: string }[] 
   { key: "findings", label: "Findings", asc: "severity", desc: "-severity" }
 ];
 
+/** Last path segment of an ARN, which is the resource name for IAM identities and policies. */
+const shortName = (arn: string) => arn.split("/").pop() || arn;
+
 export function InventoryPage() {
   const { selectedScanId, currentScan } = useScanContext();
   const [params, setParams] = useSearchParams();
@@ -41,6 +44,8 @@ export function InventoryPage() {
   const resourceType = params.get("resource_type") ?? "";
   const q = params.get("q") ?? "";
   const hasFindings = params.get("has_findings") === "true";
+  const severities = (params.get("severity") ?? "").split(",").filter(Boolean);
+  const newOnly = params.get("new_only") === "true";
   const sort = params.get("sort") ?? "-severity";
   const resource = params.get("resource") ?? "";
   const page = Number(params.get("page") || "1");
@@ -48,8 +53,8 @@ export function InventoryPage() {
 
   const summaryParams = useMemo(() => ({ account_id: accountID, region }), [accountID, region]);
   const listParams = useMemo(
-    () => ({ account_id: accountID, region, service, resource_type: resourceType, category, q, has_findings: hasFindings ? "true" : "", sort, page, page_size: 25 }),
-    [accountID, region, service, resourceType, category, q, hasFindings, sort, page]
+    () => ({ account_id: accountID, region, service, resource_type: resourceType, category, q, has_findings: hasFindings ? "true" : "", severity: severities.join(","), new_only: newOnly ? "true" : "", sort, page, page_size: 25 }),
+    [accountID, region, service, resourceType, category, q, hasFindings, severities.join(","), newOnly, sort, page]
   );
   const summary = useQuery({
     queryKey: ["inventory-summary", selectedScanId, summaryParams],
@@ -66,6 +71,12 @@ export function InventoryPage() {
     queryKey: ["inventory-risky", selectedScanId, summaryParams],
     queryFn: () => apiClient.inventoryResources(selectedScanId!, { ...summaryParams, has_findings: "true", page: 1, page_size: 1 }),
     enabled: Boolean(selectedScanId)
+  });
+  const previousScan = list.data?.previous_scan_id ?? "";
+  const fresh = useQuery({
+    queryKey: ["inventory-new", selectedScanId, summaryParams, previousScan],
+    queryFn: () => apiClient.inventoryResources(selectedScanId!, { ...summaryParams, new_only: "true", page: 1, page_size: 1 }),
+    enabled: Boolean(selectedScanId && previousScan)
   });
   const detail = useQuery({
     queryKey: ["inventory-resource", selectedScanId, resource],
@@ -86,13 +97,13 @@ export function InventoryPage() {
   };
 
   const items = list.data?.items ?? [];
-  // A column is hidden when every row on the page has the same value, so it carries no information.
-  const varies = (pick: (item: (typeof items)[number]) => string) => new Set(items.map(pick)).size > 1;
-  const showAccount = varies((i) => i.account_id ?? "");
-  const showRegion = varies((i) => i.region || "global");
+  // State and Identity are hidden when no row on the page has a value. Account, Region and Category follow the whole scan.
+  // Account and Region come from the scan summary, not the current page, so the layout does not jump between pages.
+  const showAccount = (summary.data?.accounts.length ?? 0) > 1;
+  const showRegion = (summary.data?.regions.length ?? 0) > 1;
   const showState = items.some((i) => i.state);
   const showIdentity = items.some((i) => i.identity_associated);
-  const showCategory = varies((i) => i.category_name);
+  const showCategory = (summary.data?.categories.filter((c) => c.count > 0).length ?? 0) > 1;
 
   const serviceCards = summary.data?.services ?? [];
   const attention = serviceCards.filter((c) => c.count > 0 || cov(c) !== "collected");
@@ -100,10 +111,13 @@ export function InventoryPage() {
   const regionProblem = (summary.data?.region_coverage?.accounts ?? []).some((a) => a.partial > 0 || a.failed > 0 || a.unknown > 0);
   const col = summary.data?.collection;
   const collectionProblem = Boolean(col && [col.account_scope, col.region_discovery, col.regional_collectors, col.service_collection, col.supported_inventory].some((v) => v !== "completed" && v !== "not_recorded"));
-  const notRecorded = serviceCards.filter((c) => cov(c) === "not_recorded").length;
-  const maxBar = Math.max(...(summary.data?.distribution ?? []).map((item) => item.count), 1);
-  const multiAccount = (summary.data?.account_count ?? 0) > 1;
-  const multiRegion = (summary.data?.region_count ?? 0) > 1;
+  const notRecordedNames = serviceCards.filter((c) => cov(c) === "not_recorded").map((c) => c.name);
+  const notRecorded = notRecordedNames.length;
+  const collectedCount = serviceCards.filter((c) => cov(c) === "collected").length;
+  const notInventoried = summary.data?.not_inventoried ?? [];
+  const totalFindings = serviceCards.reduce((n, c) => n + c.finding_count, 0);
+  const shownBars = (summary.data?.distribution ?? []).filter((item) => item.count > 0);
+  const maxBar = Math.max(...shownBars.map((item) => item.count), 1);
 
   const filters: { key: string; label: string; clear: Record<string, string> }[] = [];
   if (service) filters.push({ key: "service", label: `Service: ${serviceCards.find((c) => c.service === service)?.name ?? service}`, clear: { service: "" } });
@@ -111,15 +125,17 @@ export function InventoryPage() {
   if (resourceType) filters.push({ key: "type", label: `Type: ${resourceType}`, clear: { resource_type: "" } });
   if (accountID) filters.push({ key: "account", label: `Account: ${accountID}`, clear: { account_id: "" } });
   if (region) filters.push({ key: "region", label: `Region: ${region}`, clear: { region: "" } });
+  for (const sev of severities) filters.push({ key: `sev-${sev}`, label: `Severity: ${sev}`, clear: { severity: severities.filter((s) => s !== sev).join(",") } });
+  if (newOnly) filters.push({ key: "new", label: "New since previous scan", clear: { new_only: "" } });
   if (hasFindings) filters.push({ key: "findings", label: "Has findings", clear: { has_findings: "" } });
   if (q) filters.push({ key: "q", label: `Search: ${q}`, clear: { q: "" } });
-  const clearAll = { service: "", category: "", resource_type: "", account_id: "", region: "", has_findings: "", q: "" };
+  const clearAll = { service: "", category: "", resource_type: "", account_id: "", region: "", has_findings: "", severity: "", new_only: "", q: "" };
 
   const sortHeader = (c: (typeof sortColumns)[number]) => {
     const desc = c.desc ?? "-" + c.asc;
     const active = sort === c.asc ? "ascending" : sort === desc ? "descending" : "none";
     return (
-      <th key={c.key} scope="col" aria-sort={active} className="sticky top-0 z-10 bg-white py-2 pr-3 dark:bg-slate-950">
+      <th key={c.key} scope="col" aria-sort={active} className={`sticky top-0 z-10 bg-white py-2 pr-3 dark:bg-slate-950 ${c.key === "findings" || c.key === "name" ? "" : "hidden sm:table-cell"}`}>
         <button
           type="button"
           className="hs-focus-ring inline-flex items-center gap-1 rounded uppercase"
@@ -142,19 +158,19 @@ export function InventoryPage() {
           {summary.isLoading ? <StatePanel>Loading inventory summary…</StatePanel> : null}
           {summary.isError ? <StatePanel intent="error" title="Failed to load inventory"><pre className="whitespace-pre-wrap font-sans text-xs">{formatQueryError(summary.error)}</pre></StatePanel> : null}
           {summary.data ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
               <MetricCard label="Resources" value={summary.data.total_assets} context={`${plural(summary.data.service_count, "service")} · ${plural(summary.data.region_count, "region")} · ${plural(summary.data.account_count, "account")}`} />
               <button type="button" aria-pressed={hasFindings} className={`text-left ${hasFindings ? "rounded ring-1 ring-cyan-500" : ""}`} onClick={() => patch({ has_findings: hasFindings ? "" : "true" })}>
-                <MetricCard label="With findings" value={risky.data?.total_items ?? "…"} context="Click to show only these" />
+                <MetricCard label="With findings" value={risky.data?.total_items ?? "…"} context={`${plural(totalFindings, "finding")} on these · click to filter`} />
               </button>
-              <div className="hs-card p-4">
-                <p className="cr-kpi-label">Collection</p>
+              <div className="hs-card col-span-2 p-4 lg:col-span-1">
+                <p className="cr-kpi-label">Collection of supported services</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {col ? <CollectionChip status={collectionProblem || regionProblem ? "partial" : "completed"} /> : null}
-                  <span className="text-xs text-slate-600 dark:text-slate-400">
-                    {collectionProblem || regionProblem ? "Needs attention" : "Complete"}{notRecorded > 0 ? ` · ${plural(notRecorded, "service")} not recorded` : ""}
-                  </span>
+                  {col ? <CollectionChip status={collectionProblem || regionProblem || notRecorded > 0 ? "partial" : "completed"} /> : null}
+                  <span className="text-xs text-slate-600 dark:text-slate-400">{collectedCount} of {serviceCards.length} services collected</span>
                 </div>
+                {notRecorded > 0 ? <p className="mt-2 hidden text-xs text-slate-600 dark:text-slate-400 sm:block"><span className="font-medium">Not recorded:</span> {notRecordedNames.join(", ")}. A missing asset is not evidence the service is empty.</p> : null}
+                {notInventoried.length > 0 ? <p className="mt-1 hidden text-xs text-slate-600 dark:text-slate-400 sm:block"><span className="font-medium">Not inventoried:</span> {notInventoried.join(", ")}.</p> : null}
                 <a href="#inventory-coverage" className="mt-2 block text-xs text-cyan-800 underline dark:text-cyan-300">Collection coverage ↓</a>
               </div>
             </div>
@@ -174,9 +190,32 @@ export function InventoryPage() {
                 ))}
               </select>
               <input className="hs-input !w-40" placeholder="Type, e.g. iam_role" value={resourceType} aria-label="Resource type" onChange={(e) => patch({ resource_type: e.target.value }, true)} />
-              {multiAccount || accountID ? <input className="hs-input !w-40" placeholder="Account ID" value={accountID} aria-label="Account ID" onChange={(e) => patch({ account_id: e.target.value })} /> : null}
-              {multiRegion || region ? <input className="hs-input !w-36" placeholder="Region" value={region} aria-label="Region" onChange={(e) => patch({ region: e.target.value })} /> : null}
+              {showAccount || accountID ? (
+                <select className="hs-input !w-auto" aria-label="Account" value={accountID} onChange={(e) => patch({ account_id: e.target.value })}>
+                  <option value="">All accounts</option>
+                  {(summary.data?.accounts ?? []).map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+              ) : null}
+              {showRegion || region ? (
+                <select className="hs-input !w-auto" aria-label="Region" value={region} onChange={(e) => patch({ region: e.target.value })}>
+                  <option value="">All regions</option>
+                  {(summary.data?.regions ?? []).map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto sm:flex-wrap sm:overflow-visible [&>button]:shrink-0" role="group" aria-label="Risk filters">
               <button type="button" aria-pressed={hasFindings} className={`hs-btn-default px-3 py-1 text-sm ${hasFindings ? "ring-1 ring-cyan-500" : ""}`} onClick={() => patch({ has_findings: hasFindings ? "" : "true" }, true)}>Has findings</button>
+              {["critical", "high", "medium", "low"].map((sev) => {
+                const on = severities.includes(sev);
+                return (
+                  <button key={sev} type="button" aria-pressed={on} className={`hs-btn-default px-3 py-1 text-sm capitalize ${on ? "ring-1 ring-cyan-500" : ""}`} onClick={() => patch({ severity: (on ? severities.filter((s) => s !== sev) : [...severities, sev]).join(",") }, true)}>{sev}</button>
+                );
+              })}
+              {previousScan ? (
+                <button type="button" aria-pressed={newOnly} title={`Findings that scan ${previousScan} did not have`} className={`hs-btn-default px-3 py-1 text-sm ${newOnly ? "ring-1 ring-cyan-500" : ""}`} onClick={() => patch({ new_only: newOnly ? "" : "true" }, true)}>
+                  New since previous scan{fresh.data ? ` (${plural(fresh.data.total_items, "resource")})` : ""}
+                </button>
+              ) : null}
             </div>
             {filters.length > 0 ? (
               <ul className="flex flex-wrap items-center gap-2" aria-label="Active filters">
@@ -205,35 +244,41 @@ export function InventoryPage() {
                   <thead className="text-xs text-slate-500">
                     <tr>
                       {sortColumns.filter((c) => (c.key === "account" ? showAccount : c.key === "region" ? showRegion : true)).map(sortHeader)}
-                      {showState ? <th scope="col" className="sticky top-0 z-10 bg-white py-2 pr-3 uppercase dark:bg-slate-950">State</th> : null}
-                      {showIdentity ? <th scope="col" className="sticky top-0 z-10 bg-white py-2 uppercase dark:bg-slate-950">Identity</th> : null}
+                      {showState ? <th scope="col" className="sticky top-0 z-10 hidden bg-white py-2 pr-3 uppercase dark:bg-slate-950 sm:table-cell">State</th> : null}
+                      {showIdentity ? <th scope="col" className="sticky top-0 z-10 hidden bg-white py-2 uppercase dark:bg-slate-950 sm:table-cell">Identity</th> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {items.map((item) => (
                       <tr key={item.id} className={`border-t border-slate-200 dark:border-slate-800 ${resource === item.id ? "bg-cyan-500/10" : ""}`}>
-                        <td className="max-w-[22rem] py-2 pr-3">
+                        <td className="max-w-[11rem] py-2 pr-3 sm:max-w-[22rem]">
                           <button type="button" title={item.arn} aria-current={resource === item.id} className="hs-focus-ring block max-w-full truncate text-left font-medium text-cyan-800 underline dark:text-cyan-200" onClick={() => patch({ resource: item.id }, true)}>
                             {item.name}
                           </button>
+                          <span className="block truncate text-xs text-slate-500 sm:hidden">{item.resource_type_name}</span>
                         </td>
-                        <td className="py-2 pr-3">
+                        <td className="hidden py-2 pr-3 sm:table-cell">
                           {item.resource_type_name}
                           {showCategory ? <span className="block text-xs text-slate-500">{item.category_name}</span> : null}
                           {item.record_kind === "configuration" ? <span className="ml-1 text-xs text-slate-500">(configuration)</span> : null}
                         </td>
-                        {showAccount ? <td className="py-2 pr-3 font-mono text-xs">{item.account_id || "—"}</td> : null}
-                        {showRegion ? <td className="py-2 pr-3">{item.region || "global"}</td> : null}
+                        {showAccount ? <td className="hidden py-2 pr-3 font-mono text-xs sm:table-cell">{item.account_id || "—"}</td> : null}
+                        {showRegion ? <td className="hidden py-2 pr-3 sm:table-cell">{item.region || "global"}</td> : null}
                         <td className="py-2 pr-3">
                           {item.finding_count > 0 ? (
-                            <span className="inline-flex items-center gap-1">
+                            <span className="inline-flex flex-wrap items-center gap-1">
                               <SeverityBadge severity={item.max_severity ?? "info"} />
                               <span className="text-xs tabular-nums text-slate-600 dark:text-slate-400">{item.finding_count}</span>
+                              {item.new_finding_count ? <span className="rounded bg-cyan-500/15 px-1.5 text-xs text-cyan-800 dark:text-cyan-300" title="Not in the previous scan">New</span> : null}
                             </span>
-                          ) : <span className="text-slate-400" aria-label="No findings">—</span>}
+                          ) : item.related_finding_count ? (
+                            <span className="text-xs text-slate-600 dark:text-slate-400" title={`Findings on ${(item.related_to ?? []).join(", ")} name this resource as how they hold access. It has no finding of its own.`}>
+                              Named in <span className="capitalize">{item.related_max_severity}</span> ×{item.related_finding_count}
+                            </span>
+                          ) : <span className="text-xs text-slate-500" title="No finding in this scan names this resource. This does not mean it was assessed as safe.">none</span>}
                         </td>
-                        {showState ? <td className="py-2 pr-3">{item.state || "—"}</td> : null}
-                        {showIdentity ? <td className="py-2">{item.identity_associated ? "Configured" : "—"}</td> : null}
+                        {showState ? <td className="hidden py-2 pr-3 sm:table-cell">{item.state || "—"}</td> : null}
+                        {showIdentity ? <td className="hidden py-2 sm:table-cell">{item.identity_associated ? "Configured" : "—"}</td> : null}
                       </tr>
                     ))}
                   </tbody>
@@ -263,6 +308,8 @@ export function InventoryPage() {
                 </span>
               </summary>
               <div className="mt-4 space-y-4">
+                {notRecorded > 0 ? <p className="text-sm"><span className="font-medium">Not recorded:</span> {notRecordedNames.join(", ")}. A missing asset is not evidence the service is empty.</p> : null}
+                {notInventoried.length > 0 ? <p className="text-sm"><span className="font-medium">Not inventoried:</span> {notInventoried.join(", ")}.</p> : null}
                 <p className="cr-helper">{summary.data.accounts_note} {summary.data.coverage_note} {col?.note}</p>
                 {col ? (
                   <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
@@ -309,10 +356,10 @@ export function InventoryPage() {
                 ) : null}
                 <section>
                   <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Resources by service</h3>
-                  <p className="mt-1 text-xs text-slate-500">Same counts as the service cards. Services whose collection was not recorded are omitted rather than drawn as zero.</p>
-                  {summary.data.distribution.length === 0 ? <p className="mt-3 text-sm text-slate-500">No discovered resources in this filter.</p> : (
+                  <p className="mt-1 text-xs text-slate-500">Same counts as the service cards. Services with nothing found or no collection record are left out rather than drawn as zero.</p>
+                  {shownBars.length === 0 ? <p className="mt-3 text-sm text-slate-500">No discovered resources in this filter.</p> : (
                     <ul className="mt-3 space-y-3" aria-label="Resource distribution by AWS service">
-                      {summary.data.distribution.map((bar) => (
+                      {shownBars.map((bar) => (
                         <li key={bar.service}>
                           <div className="mb-1 flex justify-between gap-3 text-xs text-slate-700 dark:text-slate-300">
                             <span>{bar.name}</span>
@@ -339,8 +386,23 @@ export function InventoryPage() {
                   <>
                     <header>
                       <h3 className="break-all font-mono text-sm text-slate-900 dark:text-slate-100">{detail.data.resource.arn}</h3>
-                      <p className="mt-2 text-sm">{detail.data.resource.service_name} · {detail.data.resource.resource_type_name} · {detail.data.resource.category_name} · {detail.data.resource.record_kind === "configuration" ? "configuration record" : "deployed infrastructure"} · {detail.data.resource.account_id || "no account"} · {detail.data.resource.region || "global"}</p>
-                      <p className="text-sm">State {detail.data.resource.state || "not collected"} · collection {detail.data.resource.collection_status} · {detail.data.resource.collected_at || "timestamp not recorded"}</p>
+                      <dl className="mt-3 grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1 text-sm">
+                        {([
+                          ["Service", detail.data.resource.service_name],
+                          ["Type", detail.data.resource.resource_type_name],
+                          ["Category", `${detail.data.resource.category_name} · ${detail.data.resource.record_kind === "configuration" ? "configuration record" : "deployed infrastructure"}`],
+                          ["Account", detail.data.resource.account_id || "none recorded"],
+                          ["Region", detail.data.resource.region || "global"],
+                          ["State", detail.data.resource.state || "not collected"],
+                          ["Collection", detail.data.resource.collection_status || "not recorded"],
+                          ["Collected at", detail.data.resource.collected_at || "not recorded"]
+                        ] as [string, string][]).map(([k, v]) => (
+                          <div key={k} className="contents"><dt className="text-slate-500">{k}</dt><dd className="break-words">{v}</dd></div>
+                        ))}
+                      </dl>
+                      {detail.data.resource.related_finding_count ? (
+                        <p className="mt-2 text-sm">Named in {detail.data.resource.related_finding_count} finding(s) on {(detail.data.resource.related_to ?? []).join(", ")} as how they hold access.</p>
+                      ) : null}
                       <p className="mt-2 flex flex-wrap gap-3 text-xs">
                         <button type="button" className="text-cyan-800 underline dark:text-cyan-300" onClick={() => void navigator.clipboard?.writeText(detail.data.resource.arn)}>Copy ARN</button>
                         {detail.data.resource.resource_type === "iam_user" ? (
@@ -356,7 +418,7 @@ export function InventoryPage() {
                     </header>
                     <section>
                       <h4 className="text-sm font-semibold">Security findings</h4>
-                      {detail.data.findings.length === 0 ? <p className="text-sm">No finding in this scan names this resource.</p> : (
+                      {detail.data.findings.length === 0 ? <p className="text-sm">No finding is attached to this resource itself.</p> : (
                         <ul className="space-y-2">
                           {detail.data.findings.map((finding) => (
                             <li key={finding.id} className="text-sm">
@@ -384,15 +446,28 @@ export function InventoryPage() {
                     <section>
                       <h4 className="text-sm font-semibold">Related resources</h4>
                       {detail.data.relationships.length === 0 ? <p className="text-sm">No directly evidenced relationship.</p> : (
-                        <ul className="space-y-2">
-                          {detail.data.relationships.map((rel) => (
-                            <li key={`${rel.direction}-${rel.rel_type}-${rel.other_id}`} className="text-sm">
-                              <span className="font-medium">{semanticLabel[rel.semantic] || rel.semantic}</span> · {rel.rel_type} · {rel.direction}
-                              <span className="block break-all font-mono text-xs">{rel.other_id}</span>
-                              {rel.note ? <span className="text-xs text-slate-500">{rel.note}</span> : null}
-                            </li>
-                          ))}
-                        </ul>
+                        <>
+                          <ul className="space-y-2">
+                            {detail.data.relationships.filter((rel) => !rel.other_id.startsWith("arn:cloudrift:")).map((rel) => (
+                              <li key={`${rel.direction}-${rel.rel_type}-${rel.other_id}`} className="text-sm">
+                                <span className="font-medium">{shortName(rel.other_id)}</span>
+                                <span className="text-xs text-slate-500"> · {semanticLabel[rel.semantic] || rel.semantic} · {rel.rel_type.toLowerCase().replace(/_/g, " ")} · {rel.direction}</span>
+                                <span className="block break-all font-mono text-xs text-slate-500">{rel.other_id}</span>
+                                {rel.note ? <span className="text-xs text-slate-500">{rel.note}</span> : null}
+                              </li>
+                            ))}
+                          </ul>
+                          {detail.data.relationships.some((rel) => rel.other_id.startsWith("arn:cloudrift:")) ? (
+                            <details className="mt-2 text-xs">
+                              <summary className="cursor-pointer text-slate-600 dark:text-slate-300">Policy statement evidence ({detail.data.relationships.filter((rel) => rel.other_id.startsWith("arn:cloudrift:")).length}). Internal records with no readable name.</summary>
+                              <ul className="mt-1 space-y-1">
+                                {detail.data.relationships.filter((rel) => rel.other_id.startsWith("arn:cloudrift:")).map((rel) => (
+                                  <li key={`${rel.rel_type}-${rel.other_id}`} className="break-all font-mono">{rel.rel_type} · {rel.other_id}</li>
+                                ))}
+                              </ul>
+                            </details>
+                          ) : null}
+                        </>
                       )}
                     </section>
                     <section>

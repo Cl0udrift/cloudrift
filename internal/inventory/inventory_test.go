@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Zero0x00/cloudrift/internal/api/schema"
 	"github.com/Zero0x00/cloudrift/internal/models"
 )
 
@@ -275,5 +276,104 @@ func TestSeverityIsWorstFindingAndHasFindingsFilters(t *testing.T) {
 	}
 	if p := Page(all, "-severity", 1, 25); p.Items[0].Name != "a" {
 		t.Fatalf("severity sort: %+v", p.Items)
+	}
+}
+
+func rollupWorld() ([]models.AssetNode, []models.Relationship, []models.Finding) {
+	user := models.AssetNode{ScanID: "s", ARN: "arn:aws:iam::1:user/alice", AssetType: models.AssetIAMUser, Name: "alice", AccountID: "1"}
+	group := models.AssetNode{ScanID: "s", ARN: "arn:aws:iam::1:group/Admins", AssetType: models.AssetIAMGroup, Name: "Admins", AccountID: "1"}
+	admin := models.AssetNode{ScanID: "s", ARN: "arn:aws:iam::aws:policy/AdministratorAccess", AssetType: models.AssetIAMPolicy, Name: "AdministratorAccess",
+		Properties: map[string]any{"policy_document": `{"Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}`}}
+	pw := models.AssetNode{ScanID: "s", ARN: "arn:aws:iam::aws:policy/IAMUserChangePassword", AssetType: models.AssetIAMPolicy, Name: "IAMUserChangePassword",
+		Properties: map[string]any{"policy_document": `{"Statement":[{"Effect":"Allow","Action":"iam:ChangePassword","Resource":"*"}]}`}}
+	rels := []models.Relationship{
+		{SourceARN: user.ARN, TargetARN: group.ARN, RelType: models.RelMemberOf},
+		{SourceARN: group.ARN, TargetARN: admin.ARN, RelType: models.RelPolicyAttachedTo},
+		{SourceARN: user.ARN, TargetARN: pw.ARN, RelType: models.RelPolicyAttachedTo},
+	}
+	findings := []models.Finding{
+		{ID: "f-admin", AffectedARN: user.ARN, Severity: models.SeverityHigh, Evidence: map[string]any{
+			"issue_category": "user_administrative_access", "sources": []any{"group Admins"}}},
+		{ID: "f-mfa", AffectedARN: user.ARN, Severity: models.SeverityHigh, Evidence: map[string]any{"issue_category": "user_console_without_mfa"}},
+	}
+	return []models.AssetNode{user, group, admin, pw}, rels, findings
+}
+
+func TestFindingsRollUpToWhatTheEvidenceNames(t *testing.T) {
+	assets, rels, findings := rollupWorld()
+	got := map[string]schema.InventoryResource{}
+	for _, r := range Build(assets, rels, findings, Filter{}) {
+		got[r.Name] = r
+	}
+	if g := got["Admins"]; g.RelatedFindingCount != 1 || g.RelatedMaxSeverity != "high" || g.FindingCount != 0 || len(g.RelatedTo) != 1 || g.RelatedTo[0] != "alice" {
+		t.Fatalf("group named in the evidence: %+v", g)
+	}
+	if g := got["AdministratorAccess"]; g.RelatedFindingCount != 1 {
+		t.Fatalf("an administrator policy attached to the named group: %+v", g)
+	}
+	if g := got["IAMUserChangePassword"]; g.RelatedFindingCount != 0 {
+		t.Fatalf("a policy only attached to the user must not inherit its findings: %+v", g)
+	}
+	if got["alice"].RelatedFindingCount != 0 {
+		t.Fatalf("a finding is not related to its own resource: %+v", got["alice"])
+	}
+}
+
+func TestSeverityFilterAndNewSincePreviousScan(t *testing.T) {
+	assets, rels, findings := rollupWorld()
+	findings = append(findings, models.Finding{ID: "f-low", AffectedARN: "arn:aws:iam::1:group/Admins", Severity: models.SeverityLow})
+	if got := Build(assets, rels, findings, Filter{Severities: []string{"low"}}); len(got) != 1 || got[0].Name != "Admins" {
+		t.Fatalf("severity filter: %+v", got)
+	}
+	if got := Build(assets, rels, findings, Filter{Severities: []string{"high", "low"}}); len(got) != 2 {
+		t.Fatalf("two severities: %+v", got)
+	}
+	fresh := Filter{PreviousKnown: true, NewFindingIDs: map[string]bool{"f-low": true}}
+	for _, r := range Build(assets, rels, findings, fresh) {
+		if (r.Name == "Admins") != (r.NewFindingCount == 1) {
+			t.Fatalf("%s: new %d", r.Name, r.NewFindingCount)
+		}
+	}
+	fresh.NewOnly = true
+	if got := Build(assets, rels, findings, fresh); len(got) != 1 || got[0].Name != "Admins" {
+		t.Fatalf("new only: %+v", got)
+	}
+	// Without a previous scan nothing is new, so a first scan does not call everything new.
+	for _, r := range Build(assets, rels, findings, Filter{NewFindingIDs: map[string]bool{"f-low": true}}) {
+		if r.NewFindingCount != 0 {
+			t.Fatalf("no previous scan, yet %s is new", r.Name)
+		}
+	}
+}
+
+func TestSummaryListsAccountsAndRegions(t *testing.T) {
+	assets := []models.AssetNode{
+		{ScanID: "s", ARN: "arn:a", AssetType: models.AssetS3Bucket, Name: "a", AccountID: "2", Region: "us-east-1"},
+		{ScanID: "s", ARN: "arn:b", AssetType: models.AssetS3Bucket, Name: "b", AccountID: "1", Region: "eu-west-1"},
+		{ScanID: "s", ARN: "arn:c", AssetType: models.AssetIAMUser, Name: "c", AccountID: "1"},
+	}
+	s := Summarize(models.ScanSnapshot{}, assets, nil, nil, Filter{})
+	if strings.Join(s.Accounts, ",") != "1,2" || strings.Join(s.Regions, ",") != "eu-west-1,us-east-1" {
+		t.Fatalf("accounts %v regions %v", s.Accounts, s.Regions)
+	}
+}
+
+func TestNotInventoriedListMatchesTheCoverageNote(t *testing.T) {
+	for _, name := range notInventoried {
+		if !strings.Contains(coverageNote, name) {
+			t.Fatalf("%q is listed as not inventoried but the coverage note does not say so", name)
+		}
+	}
+}
+
+func TestSeveritySortPutsNamedResourcesBetweenOwnFindingsAndNone(t *testing.T) {
+	assets, rels, findings := rollupWorld()
+	p := Page(Build(assets, rels, findings, Filter{}), "-severity", 1, 25)
+	var order []string
+	for _, r := range p.Items {
+		order = append(order, r.Name)
+	}
+	if order[0] != "alice" || order[len(order)-1] != "IAMUserChangePassword" {
+		t.Fatalf("order: %v", order)
 	}
 }

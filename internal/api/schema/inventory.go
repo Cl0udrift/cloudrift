@@ -18,6 +18,10 @@ type InventorySummary struct {
 	Services       []InventoryServiceCard    `json:"services"`
 	Categories     []InventoryCategory       `json:"categories"`
 	Distribution   []InventoryBar            `json:"distribution"`
+	// NotInventoried names AWS services this product does not collect at all.
+	NotInventoried []string `json:"not_inventoried"`
+	Accounts       []string `json:"accounts"`
+	Regions        []string `json:"regions"`
 }
 
 // InventoryCollectionStatus separates account reach from collector completion.
@@ -103,29 +107,38 @@ type InventoryListResponse struct {
 	TotalItems   int                 `json:"total_items"`
 	TotalPages   int                 `json:"total_pages"`
 	CoverageNote string              `json:"coverage_note"`
+	// PreviousScanID is the scan new findings were compared against; empty when there is none.
+	PreviousScanID string `json:"previous_scan_id,omitempty"`
 }
 
 // InventoryResource is a list or detail identity. Properties stay off the list payload.
 type InventoryResource struct {
-	ID                 string `json:"id"`
-	ARN                string `json:"arn"`
-	Service            string `json:"service"`
-	ServiceName        string `json:"service_name"`
-	Category           string `json:"category"`
-	CategoryName       string `json:"category_name"`
-	RecordKind         string `json:"record_kind"`
-	ResourceType       string `json:"resource_type"`
-	ResourceTypeName   string `json:"resource_type_name"`
-	Name               string `json:"name"`
-	AccountID          string `json:"account_id,omitempty"`
-	Region             string `json:"region,omitempty"`
-	State              string `json:"state,omitempty"`
-	CollectedAt        string `json:"collected_at,omitempty"`
-	CollectionStatus   string `json:"collection_status,omitempty"`
-	FindingCount       int    `json:"finding_count"`
-	MaxSeverity        string `json:"max_severity,omitempty"`
-	RelationshipCount  int    `json:"relationship_count"`
-	IdentityAssociated bool   `json:"identity_associated"`
+	ID               string `json:"id"`
+	ARN              string `json:"arn"`
+	Service          string `json:"service"`
+	ServiceName      string `json:"service_name"`
+	Category         string `json:"category"`
+	CategoryName     string `json:"category_name"`
+	RecordKind       string `json:"record_kind"`
+	ResourceType     string `json:"resource_type"`
+	ResourceTypeName string `json:"resource_type_name"`
+	Name             string `json:"name"`
+	AccountID        string `json:"account_id,omitempty"`
+	Region           string `json:"region,omitempty"`
+	State            string `json:"state,omitempty"`
+	CollectedAt      string `json:"collected_at,omitempty"`
+	CollectionStatus string `json:"collection_status,omitempty"`
+	FindingCount     int    `json:"finding_count"`
+	MaxSeverity      string `json:"max_severity,omitempty"`
+	// NewFindingCount is findings on this resource that the previous scan did not have.
+	NewFindingCount int `json:"new_finding_count,omitempty"`
+	// Related* count findings on other resources whose evidence names this one (a group, policy or role
+	// a user holds access through). They are not findings on this resource.
+	RelatedFindingCount int      `json:"related_finding_count,omitempty"`
+	RelatedMaxSeverity  string   `json:"related_max_severity,omitempty"`
+	RelatedTo           []string `json:"related_to,omitempty"`
+	RelationshipCount   int      `json:"relationship_count"`
+	IdentityAssociated  bool     `json:"identity_associated"`
 }
 
 // InventoryDetail is one resource plus directly evidenced relationships and findings.

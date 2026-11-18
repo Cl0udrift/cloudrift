@@ -74,6 +74,13 @@ func compare(a, b schema.InventoryResource, key string) bool {
 		if a.FindingCount != b.FindingCount {
 			return a.FindingCount < b.FindingCount
 		}
+		// Resources only named in findings come after resources with their own, before those with none.
+		if ra, rb := severityRank(a.RelatedMaxSeverity), severityRank(b.RelatedMaxSeverity); ra != rb {
+			return ra < rb
+		}
+		if a.RelatedFindingCount != b.RelatedFindingCount {
+			return a.RelatedFindingCount < b.RelatedFindingCount
+		}
 		if a.Name != b.Name {
 			return a.Name > b.Name // so a descending sort lists names A to Z
 		}

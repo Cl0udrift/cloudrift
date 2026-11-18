@@ -17,6 +17,13 @@ type Filter struct {
 	Category     string
 	Query        string
 	HasFindings  bool
+	// Severities keeps resources whose worst finding is one of these (critical, high, medium, low, info).
+	Severities []string
+	// NewOnly keeps resources with a finding the previous scan did not have. PreviousKnown says a
+	// previous scan was compared, and NewFindingIDs are the current scan's findings it lacked.
+	NewOnly       bool
+	PreviousKnown bool
+	NewFindingIDs map[string]bool
 }
 
 type indexed struct {
@@ -24,6 +31,8 @@ type indexed struct {
 	service  string
 	findings int
 	severity string
+	new      int
+	related  related
 	rels     int
 	identity bool
 }
@@ -32,9 +41,14 @@ type indexed struct {
 func Build(assets []models.AssetNode, rels []models.Relationship, findings []models.Finding, filter Filter) []schema.InventoryResource {
 	findingCount := map[string]int{}
 	worst := map[string]string{}
+	newCount := map[string]int{}
+	rollup := relatedFindings(assets, rels, findings)
 	for _, finding := range findings {
 		if finding.AffectedARN != "" {
 			findingCount[finding.AffectedARN]++
+			if filter.PreviousKnown && filter.NewFindingIDs[finding.ID] {
+				newCount[finding.AffectedARN]++
+			}
 			if severityRank(string(finding.Severity)) > severityRank(worst[finding.AffectedARN]) {
 				worst[finding.AffectedARN] = string(finding.Severity)
 			}
@@ -59,8 +73,14 @@ func Build(assets []models.AssetNode, rels []models.Relationship, findings []mod
 		if !match(asset, svc, filter) || (filter.HasFindings && findingCount[asset.ARN] == 0) {
 			continue
 		}
+		if len(filter.Severities) > 0 && !contains(filter.Severities, worst[asset.ARN]) {
+			continue
+		}
+		if filter.NewOnly && newCount[asset.ARN] == 0 {
+			continue
+		}
 		id := publicID(asset)
-		items = append(items, indexed{asset: asset, service: svc, findings: findingCount[asset.ARN], severity: worst[asset.ARN], rels: relCount[asset.ARN], identity: identity[id]})
+		items = append(items, indexed{asset: asset, service: svc, findings: findingCount[asset.ARN], severity: worst[asset.ARN], new: newCount[asset.ARN], related: rollup[asset.ARN], rels: relCount[asset.ARN], identity: identity[id]})
 	}
 	return resources(items)
 }
@@ -126,7 +146,8 @@ func toResource(item indexed) schema.InventoryResource {
 		ResourceType: typ, ResourceTypeName: typeLabel(typ), Name: name,
 		AccountID: asset.AccountID, Region: asset.Region,
 		State: stateOf(asset), CollectedAt: strProp(asset, "collected_at"),
-		CollectionStatus: collectionStatus(asset), FindingCount: item.findings, MaxSeverity: item.severity,
+		CollectionStatus: collectionStatus(asset), FindingCount: item.findings, MaxSeverity: item.severity, NewFindingCount: item.new,
+		RelatedFindingCount: item.related.count, RelatedMaxSeverity: item.related.severity, RelatedTo: item.related.names,
 		RelationshipCount: item.rels, IdentityAssociated: item.identity,
 	}
 }

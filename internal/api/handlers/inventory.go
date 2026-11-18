@@ -9,6 +9,7 @@ import (
 
 	"github.com/Zero0x00/cloudrift/internal/inventory"
 	"github.com/Zero0x00/cloudrift/internal/models"
+	"github.com/Zero0x00/cloudrift/internal/scans"
 )
 
 func InventorySummary(outputDir string) http.HandlerFunc {
@@ -28,26 +29,32 @@ func InventorySummary(outputDir string) http.HandlerFunc {
 
 func InventoryResources(outputDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scanID, _, assets, rels, findings, ok := loadInventoryScan(w, r, outputDir)
+		scanID, meta, assets, rels, findings, ok := loadInventoryScan(w, r, outputDir)
 		if !ok {
 			return
 		}
+		previousID, newIDs, previousKnown := newFindingsSince(outputDir, scanID, meta, findings)
 		page, pageSize, err := parsePagination(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_pagination", err.Error(), nil)
 			return
 		}
 		items := inventory.Build(assets, rels, findings, inventory.Filter{
-			AccountID:    strings.TrimSpace(r.URL.Query().Get("account_id")),
-			Region:       strings.TrimSpace(r.URL.Query().Get("region")),
-			Service:      strings.TrimSpace(r.URL.Query().Get("service")),
-			ResourceType: strings.TrimSpace(r.URL.Query().Get("resource_type")),
-			Category:     strings.TrimSpace(r.URL.Query().Get("category")),
-			Query:        strings.TrimSpace(r.URL.Query().Get("q")),
-			HasFindings:  r.URL.Query().Get("has_findings") == "true",
+			AccountID:     strings.TrimSpace(r.URL.Query().Get("account_id")),
+			Region:        strings.TrimSpace(r.URL.Query().Get("region")),
+			Service:       strings.TrimSpace(r.URL.Query().Get("service")),
+			ResourceType:  strings.TrimSpace(r.URL.Query().Get("resource_type")),
+			Category:      strings.TrimSpace(r.URL.Query().Get("category")),
+			Query:         strings.TrimSpace(r.URL.Query().Get("q")),
+			HasFindings:   r.URL.Query().Get("has_findings") == "true",
+			Severities:    splitList(r.URL.Query().Get("severity")),
+			NewOnly:       r.URL.Query().Get("new_only") == "true" && previousKnown,
+			PreviousKnown: previousKnown,
+			NewFindingIDs: newIDs,
 		})
 		list := inventory.Page(items, strings.TrimSpace(r.URL.Query().Get("sort")), page, pageSize)
 		list.ScanID = scanID
+		list.PreviousScanID = previousID
 		writeJSON(w, http.StatusOK, list)
 	}
 }
@@ -82,4 +89,50 @@ func loadInventoryScan(w http.ResponseWriter, r *http.Request, outputDir string)
 		_ = json.Unmarshal(raw, &findings)
 	}
 	return scanID, meta, assets, rels, findings, true
+}
+
+func splitList(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.ToLower(strings.TrimSpace(part)); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// newFindingsSince compares this scan's findings with the next older scan of the same kind (real or
+// synthetic) and returns that scan's ID and the IDs of findings it did not have. With no older scan,
+// known is false and nothing is marked new, so a first scan does not call everything new.
+func newFindingsSince(outputDir, scanID string, meta models.ScanSnapshot, findings []models.Finding) (string, map[string]bool, bool) {
+	items, err := buildSortedScanListItems(outputDir)
+	if err != nil {
+		return "", nil, false
+	}
+	previous := ""
+	found := false
+	for _, item := range items {
+		if found && item.Synthetic == meta.Synthetic {
+			previous = item.ScanID
+			break
+		}
+		if item.ScanID == scanID {
+			found = true
+		}
+	}
+	if previous == "" {
+		return "", nil, false
+	}
+	_, old, err := scans.LoadScanArtifacts(outputDir, previous)
+	if err != nil {
+		return "", nil, false
+	}
+	oldIndex := indexFindings(old)
+	fresh := map[string]bool{}
+	for _, f := range findings {
+		if _, ok := oldIndex[diffIdentity(f)]; !ok {
+			fresh[f.ID] = true
+		}
+	}
+	return previous, fresh, true
 }

@@ -22,7 +22,7 @@ export function EntityDrawer({ title, onClose, children }: { title: string; onCl
       className="fixed inset-y-0 right-0 z-30 flex w-full max-w-xl flex-col border-l border-slate-200 bg-white shadow-xl outline-none dark:border-slate-700 dark:bg-slate-900"
     >
       <header className="flex h-[var(--cr-topbar-h)] shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4 dark:border-slate-700">
-        <h2 className="cr-section-title truncate">{title}</h2>
+        <h2 className="cr-section-title truncate normal-case">{title}</h2>
         <button type="button" className="hs-btn-default px-2 py-1 text-xs" onClick={onClose} aria-label="Close detail">
           Close ✕
         </button>

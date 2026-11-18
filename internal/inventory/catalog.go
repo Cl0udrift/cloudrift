@@ -123,4 +123,7 @@ func init() {
 	}
 }
 
+// notInventoried are services the collectors do not cover. The coverage note below names the same ones.
+var notInventoried = []string{"RDS", "VPC", "IAM Identity Center"}
+
 const coverageNote = "Accounts and regions are those present on discovered inventory assets. They are not the full organization and they are not proof that every intended account or region was scanned. COLLECTED is used only when collection-status evidence says the recorded scope succeeded. Assets without that evidence stay UNKNOWN: the count is real, and completeness is not. NOT_RECORDED means the scan has no assets and no collection record. A region filter does not make a global collector regional. IAM policy statements, authorization decisions, external principal references, organization membership records, IRSA trust derivations, Kubernetes service-account references, and collection-status records are not inventory assets. RDS, VPC, and IAM Identity Center are not inventoried."
