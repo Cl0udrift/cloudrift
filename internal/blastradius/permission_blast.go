@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Zero0x00/cloudrift/internal/api/schema"
@@ -1262,19 +1263,9 @@ func trustsServiceAction(role models.AssetNode, service, action string, ctx map[
 		action = "sts:AssumeRole"
 	}
 	doc, _ := permStringProp(role.Properties, "trust_policy_document")
-	var parsed struct {
-		Statement json.RawMessage
-	}
-	if json.Unmarshal([]byte(doc), &parsed) != nil || len(parsed.Statement) == 0 {
+	list, ok := trustStatements(doc)
+	if !ok {
 		return false
-	}
-	var list []map[string]any
-	if json.Unmarshal(parsed.Statement, &list) != nil {
-		var one map[string]any
-		if json.Unmarshal(parsed.Statement, &one) != nil {
-			return false
-		}
-		list = []map[string]any{one}
 	}
 	for _, st := range list {
 		if st["Effect"] != "Allow" {
@@ -1292,6 +1283,51 @@ func trustsServiceAction(role models.AssetNode, service, action string, ctx map[
 		}
 	}
 	return false
+}
+
+// trustStatements parses a trust policy's statements. The same document is read once per service and per technique for every
+// searched principal, so the parse is kept (read-only) and the cache is emptied when it grows past a few thousand documents.
+var (
+	trustCacheMu sync.Mutex
+	trustCache   = map[string][]map[string]any{}
+)
+
+func trustStatements(doc string) ([]map[string]any, bool) {
+	trustCacheMu.Lock()
+	list, hit := trustCache[doc]
+	trustCacheMu.Unlock()
+	if hit {
+		return list, list != nil
+	}
+	list = parseTrustStatements(doc)
+	trustCacheMu.Lock()
+	if len(trustCache) > 4096 {
+		trustCache = map[string][]map[string]any{}
+	}
+	trustCache[doc] = list
+	trustCacheMu.Unlock()
+	return list, list != nil
+}
+
+func parseTrustStatements(doc string) []map[string]any {
+	var parsed struct {
+		Statement json.RawMessage
+	}
+	if json.Unmarshal([]byte(doc), &parsed) != nil || len(parsed.Statement) == 0 {
+		return nil
+	}
+	var list []map[string]any
+	if json.Unmarshal(parsed.Statement, &list) != nil {
+		var one map[string]any
+		if json.Unmarshal(parsed.Statement, &one) != nil {
+			return nil
+		}
+		list = []map[string]any{one}
+	}
+	if list == nil {
+		list = []map[string]any{}
+	}
+	return list
 }
 
 func containsString(v any, want string) bool {

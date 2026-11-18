@@ -603,3 +603,21 @@ func TestExploitabilityNamesUncheckedOrganizationControlsOnlyWhenTheyWereNotColl
 		t.Fatalf("SCPs were recorded, so there is nothing unchecked to name: %s", d)
 	}
 }
+
+func TestReachIsSkippedAndSaidSoWhenTheBudgetEnds(t *testing.T) {
+	role := escRole("Dev", adminDoc, "")
+	rc := newReacher([]models.AssetNode{role}, nil, time.Now())
+	rc.deadline = time.Now().Add(-time.Second) // the budget is already over
+	info := rc.reach(role)
+	if !info.Skipped || rc.skipped != 1 || info.Total != 0 {
+		t.Fatalf("a reach computed after the deadline must be skipped and counted: %+v skipped=%d", info, rc.skipped)
+	}
+	ev := map[string]any{"severity_factors": []string{}}
+	if got := attachReach(role, rc, models.SeverityMedium, ev); got != models.SeverityMedium {
+		t.Fatalf("severity must not be raised on a caller list that was not computed: %s", got)
+	}
+	factors := ev["severity_factors"].([]string)
+	if len(factors) == 0 || !strings.Contains(factors[0], "not computed") {
+		t.Fatalf("the finding must say the callers were not computed: %v", factors)
+	}
+}

@@ -62,6 +62,11 @@ var (
 // Catalog is the authoritative capability registry. A row is not an authorization result.
 // It is built once; each call returns a copy of the slice.
 func Catalog() []Capability {
+	initCatalog()
+	return append([]Capability(nil), catalogRows...)
+}
+
+func initCatalog() {
 	catalogOnce.Do(func() {
 		catalogRows = buildCatalog()
 		catalogIndex = make(map[string]Capability, len(catalogRows))
@@ -69,7 +74,6 @@ func Catalog() []Capability {
 			catalogIndex[strings.ToLower(r.Action)] = r
 		}
 	})
-	return append([]Capability(nil), catalogRows...)
 }
 
 func buildCatalog() []Capability {
@@ -516,7 +520,7 @@ var registryDetail = map[string]registryFacts{
 
 // CapabilityFor returns the catalog row for an action.
 func CapabilityFor(action string) (Capability, bool) {
-	Catalog() // builds the index on first use
+	initCatalog() // the index is read-only after this; Catalog() would copy every row on each lookup
 	entry, ok := catalogIndex[strings.ToLower(strings.TrimSpace(action))]
 	return entry, ok
 }

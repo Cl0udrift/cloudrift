@@ -77,7 +77,7 @@ func SimulatorProbes(scanID string, assets []models.AssetNode, rels []models.Rel
 				if len(probes) >= limit {
 					return probes, skipped
 				}
-				req := whoCanRequest(scanID, action, caller, target, assets, rels, when, iamauth.PolicySlot{}, "this action does not use a resource policy")
+				req := whoCanRequest(scanID, action, caller, target, assets, rels, when, iamauth.PolicySlot{}, "this action does not use a resource policy", nil)
 				label := caller.Name + " " + action + " " + target.Name
 				if req.SCPs.State == iamauth.EvidencePresent || req.RCPs.State == iamauth.EvidencePresent {
 					skipped = append(skipped, SimSkipped{Label: label, Reason: "organization controls (SCP/RCP) are in the scan and the simulator ignores them"})

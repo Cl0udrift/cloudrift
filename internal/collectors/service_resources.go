@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
@@ -68,21 +69,20 @@ func serviceStatus(err error) (status, detail string) {
 // collectServiceResources runs the three collectors. A partial read keeps the assets already read and marks the collector
 // failed with the reason, so a half-read list is never reported as complete.
 func collectServiceResources(ctx context.Context, accountID, region string, clients WorkloadClients, collectedAt time.Time, haveAssets []models.AssetNode, haveRels []models.Relationship) ([]models.AssetNode, []models.Relationship) {
-	var assets []models.AssetNode
-	var rels []models.Relationship
+	type task struct {
+		name string
+		f    func() ([]models.AssetNode, []models.Relationship, error)
+	}
+	type result struct {
+		assets []models.AssetNode
+		rels   []models.Relationship
+		err    error
+	}
+	var tasks []task
 	run := func(name string, api bool, f func() ([]models.AssetNode, []models.Relationship, error)) {
-		if !api {
-			return
+		if api {
+			tasks = append(tasks, task{name, f})
 		}
-		nodes, edges, err := f()
-		assets = append(assets, nodes...)
-		rels = append(rels, edges...)
-		if err != nil {
-			status, detail := serviceStatus(err)
-			assets = append(assets, CollectionStatus(accountID, region, name, "regional", status, detail))
-			return
-		}
-		assets = append(assets, CollectionStatus(accountID, region, name, "regional", "succeeded", ""))
 	}
 	run("cloudformation", clients.CloudFormation != nil, func() ([]models.AssetNode, []models.Relationship, error) {
 		return collectStacks(ctx, accountID, region, clients.CloudFormation, collectedAt)
@@ -114,6 +114,35 @@ func collectServiceResources(ctx context.Context, accountID, region string, clie
 	run("codedeploy", clients.CodeDeploy != nil, func() ([]models.AssetNode, []models.Relationship, error) {
 		return collectCodeDeploy(ctx, accountID, region, clients.CodeDeploy, haveAssets, haveRels, collectedAt)
 	})
+	// The collectors read different services, so they run side by side (at most four at once per Region job) instead of one after
+	// another. Results are put back in task order, so the output does not depend on which finished first.
+	results := make([]result, len(tasks))
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for i, t := range tasks {
+		wg.Add(1)
+		go func(i int, t task) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			a, r, err := t.f()
+			results[i] = result{a, r, err}
+		}(i, t)
+	}
+	wg.Wait()
+	var assets []models.AssetNode
+	var rels []models.Relationship
+	for i, t := range tasks {
+		res := results[i]
+		assets = append(assets, res.assets...)
+		rels = append(rels, res.rels...)
+		if res.err != nil {
+			status, detail := serviceStatus(res.err)
+			assets = append(assets, CollectionStatus(accountID, region, t.name, "regional", status, detail))
+			continue
+		}
+		assets = append(assets, CollectionStatus(accountID, region, t.name, "regional", "succeeded", ""))
+	}
 	return assets, rels
 }
 

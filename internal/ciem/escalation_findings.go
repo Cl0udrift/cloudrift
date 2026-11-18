@@ -32,8 +32,10 @@ type EscalationStats struct {
 	UnknownOnly int // principals with hops that stayed UNKNOWN for missing evidence and no validated escalation
 	Capped      int // principal and technique pairs rolled up past escalationCap
 	Findings    int
-	Budget      time.Duration
-	BudgetHit   bool
+	// ReachSkipped counts findings on a role whose callers were not computed because the budget ended.
+	ReachSkipped int
+	Budget       time.Duration
+	BudgetHit    bool
 }
 
 // ScoreEscalations runs the attack search from every user and role and raises one finding per validated direct escalation:
@@ -114,6 +116,13 @@ func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []mod
 	close(jobs)
 	wg.Wait()
 	stats.BudgetHit = ctx.Err() != nil
+	// Building the findings asks "who can assume this role" for each role that holds one, which is the same size of work as a
+	// search. It gets a quarter of the budget more (at least ten seconds), then is skipped and counted.
+	extra := budget / 4
+	if extra < 10*time.Second {
+		extra = 10 * time.Second
+	}
+	rc.deadline = time.Now().Add(extra)
 
 	var out []models.Finding
 	for i, p := range principals {
@@ -177,6 +186,7 @@ func ScoreEscalations(ctx context.Context, assets []models.AssetNode, rels []mod
 		}
 	}
 	stats.Findings = len(out)
+	stats.ReachSkipped = rc.skipped
 	return out, stats
 }
 
@@ -350,6 +360,8 @@ func attachReach(p models.AssetNode, rc *reacher, sev models.Severity, ev map[st
 	ev["reachable_by"] = info
 	factors, _ := ev["severity_factors"].([]string)
 	switch {
+	case info.Skipped:
+		factors = append(factors, "who can assume it was not computed (the time budget ended), so the severity is not raised for a weak caller")
 	case info.Total == 0:
 		factors = append(factors, "no user or role in this scan can assume it, so only a principal that already holds it (an instance, function or federated login) can use the path")
 	default:

@@ -282,7 +282,7 @@ func TestRunProducesAllSevenIssueTypes(t *testing.T) {
 
 	// Per-ARN validation results that drive the orphaned-edge classifier.
 	validations := map[string]validators.ValidationResult{
-		dnsARN("takeover.example.com"): {DNSStatus: "resolved", ErrorFingerprint: "s3_bucket_deleted"},     // #1 reclaimable
+		dnsARN("takeover.example.com"): {DNSStatus: "resolved", ErrorFingerprint: "s3_bucket_deleted"},       // #1 reclaimable
 		dnsARN("dangling.example.com"): {DNSStatus: "resolved", ErrorFingerprint: "cloudfront_origin_error"}, // #2 dangling
 		dnsARN("cdn.example.com"):      {DNSStatus: "resolved"},                                              // #3 edge_obscured (via alias join)
 		dnsARN("broken.example.com"):   {DNSStatus: "nxdomain"},                                              // #4 broken
@@ -342,10 +342,10 @@ func TestRunProducesAllSevenIssueTypes(t *testing.T) {
 			{ARN: dnsARN("broken.example.com"), AssetType: models.AssetDNSRecord, Name: "broken.example.com", AccountID: "111111111111",
 				Properties: map[string]any{"value": "missing.example.net"}},
 			// External trust.
-			role("Admin", adminPolicy), principal("p5", "222222222222"),   // #5 ghost_admin (approved acct isolates admin signal)
-			role("Vendor", readPolicy), principal("p6", "333333333333"),   // #6 unknown_vendor (unapproved acct)
-			role("Stale", readPolicy), principal("p7", "222222222222"),    // #7 stale (never used)
-			role("Active", readPolicy), principal("p8", "222222222222"),   // #7 active
+			role("Admin", adminPolicy), principal("p5", "222222222222"), // #5 ghost_admin (approved acct isolates admin signal)
+			role("Vendor", readPolicy), principal("p6", "333333333333"), // #6 unknown_vendor (unapproved acct)
+			role("Stale", readPolicy), principal("p7", "222222222222"), // #7 stale (never used)
+			role("Active", readPolicy), principal("p8", "222222222222"), // #7 active
 		},
 		Rels: []models.Relationship{
 			trust("Admin", "p5"), trust("Vendor", "p6"), trust("Stale", "p7"), trust("Active", "p8"),

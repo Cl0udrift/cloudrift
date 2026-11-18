@@ -2,7 +2,6 @@ package iamauth
 
 import (
 	"net/netip"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -105,32 +104,34 @@ func literalWild(v string, escape bool) string {
 	return strings.NewReplacer("*", string(litStar), "?", string(litQuestion)).Replace(v)
 }
 
+// wildcardMatch is IAM wildcard matching: "*" matches any run of characters and "?" one character. The sentinel runes litStar
+// and litQuestion stand for a literal "*" and "?". It was a compiled regular expression per call, which dominated the cost of the
+// scan-time search; this walks the strings once and compiles nothing.
 func wildcardMatch(pattern, value string) bool {
 	if pattern == "*" {
 		return true
 	}
-	var b strings.Builder
-	b.WriteString("^")
-	for _, r := range pattern {
-		switch r {
-		case '*':
-			b.WriteString(".*")
-		case '?':
-			b.WriteString(".")
-		case litStar:
-			b.WriteString(`\*`)
-		case litQuestion:
-			b.WriteString(`\?`)
+	p, v := []rune(pattern), []rune(value)
+	pi, vi, star, mark := 0, 0, -1, 0
+	for vi < len(v) {
+		switch {
+		case pi < len(p) && p[pi] == '*':
+			star, mark = pi, vi
+			pi++
+		case pi < len(p) && (p[pi] == '?' || p[pi] == v[vi] || (p[pi] == litStar && v[vi] == '*') || (p[pi] == litQuestion && v[vi] == '?')):
+			pi++
+			vi++
+		case star >= 0:
+			mark++
+			vi, pi = mark, star+1
 		default:
-			b.WriteString(regexp.QuoteMeta(string(r)))
+			return false
 		}
 	}
-	b.WriteString("$")
-	re, err := regexp.Compile(b.String())
-	if err != nil {
-		return false
+	for pi < len(p) && p[pi] == '*' {
+		pi++
 	}
-	return re.MatchString(value)
+	return pi == len(p)
 }
 
 func accountFromARN(arn string) string {

@@ -41,11 +41,16 @@ func WhoCanDetailed(scanID, action string, target models.AssetNode, assets []mod
 		trust = trustSlot(target)
 		resourceEvidence = "role assumption is governed by the trust policy"
 	}
+	rcpBase := rcpForResource(assets, models.AssetNode{}, target, action, iamauth.PolicySlot{})
 	for _, caller := range assets {
 		if caller.ARN == target.ARN || (caller.AssetType != models.AssetIAMRole && caller.AssetType != models.AssetIAMUser) {
 			continue
 		}
-		req := whoCanRequest(scanID, action, caller, target, assets, rels, when, trust, resourceEvidence)
+		var rcp *iamauth.PolicySlot
+		if !serviceLinked(caller) {
+			rcp = &rcpBase // the same for every caller but a service-linked role, so it is looked up once
+		}
+		req := whoCanRequest(scanID, action, caller, target, assets, rels, when, trust, resourceEvidence, rcp)
 		decision := iamauth.Evaluate(req)
 		evaluated++
 		status, reason := decision.Status, decision.Reason
@@ -99,8 +104,12 @@ func trustAloneAllows(req iamauth.AuthorizationRequest) bool {
 }
 
 // whoCanRequest is the evaluation request for one caller doing one action on target, as the who-can question builds it.
-func whoCanRequest(scanID, action string, caller, target models.AssetNode, assets []models.AssetNode, rels []models.Relationship, when time.Time, trust iamauth.PolicySlot, resourceEvidence string) iamauth.AuthorizationRequest {
+func whoCanRequest(scanID, action string, caller, target models.AssetNode, assets []models.AssetNode, rels []models.Relationship, when time.Time, trust iamauth.PolicySlot, resourceEvidence string, rcp *iamauth.PolicySlot) iamauth.AuthorizationRequest {
 	identity, _ := identitySlot(caller, assets, rels)
+	if rcp == nil {
+		slot := rcpForResource(assets, caller, target, action, iamauth.PolicySlot{})
+		rcp = &slot
+	}
 	tagCtx, resourceTagsKnown, principalTagsKnown := tagContext(caller, target, nil)
 	return iamauth.AuthorizationRequest{
 		ScanID: scanID, PrincipalARN: caller.ARN, Action: action,
@@ -111,7 +120,7 @@ func whoCanRequest(scanID, action string, caller, target models.AssetNode, asset
 		// A session policy can only narrow access, so none is assumed for this question.
 		SessionPolicies: iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "no session policy assumed; session policies only narrow access"},
 		SCPs:            orgControlSlot(caller, "scp"),
-		RCPs:            rcpForResource(assets, caller, target, action, iamauth.PolicySlot{}),
+		RCPs:            *rcp,
 		ResourcePolicy:  iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: resourceEvidence},
 	}
 }

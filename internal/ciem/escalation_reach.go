@@ -21,6 +21,10 @@ type reacher struct {
 	byARN  map[string]models.AssetNode
 	now    time.Time
 	cache  map[string]reachInfo
+	// deadline, when set, stops new reach computations: each one evaluates every user and role in the scan, so on a large
+	// account they must not run past the escalation budget. skipped counts the ones that were not computed.
+	deadline time.Time
+	skipped  int
 }
 
 type reachCaller struct {
@@ -42,6 +46,8 @@ type reachInfo struct {
 	Evaluated int           `json:"evaluated"`
 	Unknown   int           `json:"unknown"`
 	Note      string        `json:"note"`
+	// Skipped says the callers were not computed because the time budget ended; Total is then not a count.
+	Skipped bool `json:"skipped,omitempty"`
 	// weakValidated and weakPending say how sure the weakest route is: assumed under every evaluated control, or only
 	// by the policies because organization controls were not collected.
 	weakValidated, weakPending bool
@@ -53,6 +59,12 @@ func newReacher(assets []models.AssetNode, rels []models.Relationship, now time.
 
 func (r *reacher) reach(role models.AssetNode) reachInfo {
 	if info, ok := r.cache[role.ARN]; ok {
+		return info
+	}
+	if !r.deadline.IsZero() && time.Now().After(r.deadline) {
+		r.skipped++
+		info := reachInfo{Skipped: true, Callers: []reachCaller{}, Note: "Who can assume this role was not computed: the time budget for the escalation work ended first."}
+		r.cache[role.ARN] = info
 		return info
 	}
 	list, evaluated, unknown := blastradius.WhoCan(scoringScan, "sts:AssumeRole", role, r.assets, r.rels, r.now)

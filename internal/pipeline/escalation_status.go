@@ -12,12 +12,15 @@ import (
 // records, so the Coverage page and a reader of the scan can tell a clean result from an unfinished one.
 func escalationStatus(s ciem.EscalationStats) models.AssetNode {
 	status := "succeeded"
-	if s.BudgetHit || s.NotSearched > 0 || s.Truncated > 0 {
+	if s.BudgetHit || s.NotSearched > 0 || s.Truncated > 0 || s.ReachSkipped > 0 {
 		status = "partial"
 	}
 	detail := fmt.Sprintf("%d principals considered, %d searched, %d findings", s.Principals, s.Searched, s.Findings)
 	if s.NotSearched > 0 {
 		detail += fmt.Sprintf("; %d not reached within the %s budget", s.NotSearched, s.Budget)
+	}
+	if s.ReachSkipped > 0 {
+		detail += fmt.Sprintf("; who can assume the role was not computed for %d findings (time budget)", s.ReachSkipped)
 	}
 	if s.Truncated > 0 {
 		detail += fmt.Sprintf("; %d searches hit a bound", s.Truncated)
