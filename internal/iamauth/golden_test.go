@@ -291,7 +291,7 @@ func TestGoldenCorpus(t *testing.T) {
 	}
 	t.Logf("golden corpus: %d cases, expected allows %d, evaluator allows %d, false allows %d", len(cases), expectedAllow, gotAllow, falseAllow)
 	// The Coverage page prints this count. Run with UPDATE_VERIFIED_COUNTS=1 to rewrite the file after adding a case.
-	want := fmt.Sprintf("{\n  \"golden_cases\": %d\n}\n", len(cases))
+	want := fmt.Sprintf("{\n  \"golden_cases\": %d,\n  \"flow_cases\": %d\n}\n", len(cases), len(flowCases()))
 	const countsFile = "../verified/counts.json"
 	if os.Getenv("UPDATE_VERIFIED_COUNTS") == "1" {
 		if err := os.WriteFile(countsFile, []byte(want), 0o644); err != nil {

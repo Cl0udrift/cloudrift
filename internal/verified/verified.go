@@ -15,6 +15,9 @@ var raw []byte
 type Counts struct {
 	// GoldenCases is the number of hand-written evaluator cases tied to AWS documentation.
 	GoldenCases int `json:"golden_cases"`
+	// FlowCases is the number of generated combinations (principal, account, policies, boundary, SCP) checked against
+	// the rules in the AWS evaluation-logic pages.
+	FlowCases int `json:"flow_cases"`
 }
 
 var (
