@@ -19,8 +19,8 @@ func CollectionStatus(scan models.ScanSnapshot, assets []models.AssetNode, filte
 		}
 	}
 	discovery := rollupCollectors(assets, filter, []string{"region_discovery"})
-	regional := rollupCollectors(assets, filter, []string{"ec2", "lambda", "ecs", "eks", "?cloudformation", "?codebuild", "?stepfunctions"})
-	service := rollupCollectors(assets, filter, []string{"ec2", "lambda", "ecs", "eks", "?cloudformation", "?codebuild", "?stepfunctions", "iam", "s3", "route53", "cloudfront"})
+	regional := rollupCollectors(assets, filter, []string{"ec2", "lambda", "ecs", "eks", "?cloudformation", "?codebuild", "?stepfunctions", "?glue", "?batch", "?apprunner", "?sagemaker", "?agentcore", "?launch_templates", "?codedeploy"})
+	service := rollupCollectors(assets, filter, []string{"ec2", "lambda", "ecs", "eks", "?cloudformation", "?codebuild", "?stepfunctions", "?glue", "?batch", "?apprunner", "?sagemaker", "?agentcore", "?launch_templates", "?codedeploy", "iam", "s3", "route53", "cloudfront"})
 	supported := "not_recorded"
 	switch {
 	case discovery == "completed" && regional == "completed" && service == "completed":

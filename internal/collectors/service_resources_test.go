@@ -93,7 +93,7 @@ func TestServiceResourcesRecordRoleEdges(t *testing.T) {
 			{Name: awsv2.String("q"), Arn: awsv2.String("arn:aws:codebuild:us-east-1:111111111111:project/q")}}},
 		StepFunctions: fakeSFN{roles: map[string]string{"arn:aws:states:us-east-1:111111111111:stateMachine:m": role}},
 	}
-	assets, rels := collectServiceResources(context.Background(), "111111111111", "us-east-1", clients, time.Now())
+	assets, rels := collectServiceResources(context.Background(), "111111111111", "us-east-1", clients, time.Now(), nil, nil)
 	if len(rels) != 3 {
 		t.Fatalf("want one edge each for the stack, project and state machine with a role, got %d: %+v", len(rels), rels)
 	}
@@ -118,7 +118,7 @@ func TestServiceResourcesNeverReportDeniedAsEmpty(t *testing.T) {
 	stack := cfntypes.Stack{StackId: awsv2.String("arn:aws:cloudformation:us-east-1:111111111111:stack/a/1"), RoleARN: awsv2.String("arn:aws:iam::111111111111:role/Admin")}
 	// The first page is read, the second is denied: the assets read are kept and the collector is failed with the reason.
 	clients := WorkloadClients{CloudFormation: &fakeCFN{pages: [][]cfntypes.Stack{{stack}, {}}, err: denied{}}}
-	assets, rels := collectServiceResources(context.Background(), "111111111111", "us-east-1", clients, time.Now())
+	assets, rels := collectServiceResources(context.Background(), "111111111111", "us-east-1", clients, time.Now(), nil, nil)
 	if len(rels) != 1 {
 		t.Fatalf("assets read before the failure must be kept: %d", len(rels))
 	}

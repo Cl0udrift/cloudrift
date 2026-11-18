@@ -58,7 +58,7 @@ func serviceStatus(err error) (status, detail string) {
 
 // collectServiceResources runs the three collectors. A partial read keeps the assets already read and marks the collector
 // failed with the reason, so a half-read list is never reported as complete.
-func collectServiceResources(ctx context.Context, accountID, region string, clients WorkloadClients, collectedAt time.Time) ([]models.AssetNode, []models.Relationship) {
+func collectServiceResources(ctx context.Context, accountID, region string, clients WorkloadClients, collectedAt time.Time, haveAssets []models.AssetNode, haveRels []models.Relationship) ([]models.AssetNode, []models.Relationship) {
 	var assets []models.AssetNode
 	var rels []models.Relationship
 	run := func(name string, api bool, f func() ([]models.AssetNode, []models.Relationship, error)) {
@@ -83,6 +83,27 @@ func collectServiceResources(ctx context.Context, accountID, region string, clie
 	})
 	run("stepfunctions", clients.StepFunctions != nil, func() ([]models.AssetNode, []models.Relationship, error) {
 		return collectStateMachines(ctx, accountID, region, clients.StepFunctions, collectedAt)
+	})
+	run("glue", clients.Glue != nil, func() ([]models.AssetNode, []models.Relationship, error) {
+		return collectGlueEndpoints(ctx, accountID, region, clients.Glue, collectedAt)
+	})
+	run("batch", clients.Batch != nil, func() ([]models.AssetNode, []models.Relationship, error) {
+		return collectBatchJobDefinitions(ctx, accountID, region, clients.Batch, collectedAt)
+	})
+	run("apprunner", clients.AppRunner != nil, func() ([]models.AssetNode, []models.Relationship, error) {
+		return collectAppRunner(ctx, accountID, region, clients.AppRunner, collectedAt)
+	})
+	run("sagemaker", clients.SageMaker != nil, func() ([]models.AssetNode, []models.Relationship, error) {
+		return collectNotebooks(ctx, accountID, region, clients.SageMaker, collectedAt)
+	})
+	run("agentcore", clients.AgentCore != nil, func() ([]models.AssetNode, []models.Relationship, error) {
+		return collectAgentCore(ctx, accountID, region, clients.AgentCore, collectedAt)
+	})
+	run("launch_templates", clients.LaunchTemplate != nil && clients.AutoScaling != nil && clients.IAM != nil, func() ([]models.AssetNode, []models.Relationship, error) {
+		return collectLaunchTemplates(ctx, accountID, region, clients.LaunchTemplate, clients.AutoScaling, clients.IAM, collectedAt)
+	})
+	run("codedeploy", clients.CodeDeploy != nil, func() ([]models.AssetNode, []models.Relationship, error) {
+		return collectCodeDeploy(ctx, accountID, region, clients.CodeDeploy, haveAssets, haveRels, collectedAt)
 	})
 	return assets, rels
 }

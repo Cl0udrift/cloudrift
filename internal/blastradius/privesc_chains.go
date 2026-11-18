@@ -184,28 +184,29 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 	// instances cheap.
 	reached := map[string]bool{}
 	for _, w := range workloads {
-		role := workloadRole(w, req.Relationships)
-		if role == "" || role == caller.ARN || !containsARN(roles, role) {
-			continue
-		}
-		for _, esc := range iamauth.WorkloadEscalations {
-			if esc.Resource != string(w.AssetType) || reached[esc.Kind+"|"+role] {
+		for _, role := range workloadRoles(w, req.Relationships) {
+			if role == "" || role == caller.ARN || !containsARN(roles, role) {
 				continue
 			}
-			var steps []schema.PermissionDecision
-			for _, a := range esc.Required {
-				d := eval(capOf(a), w, req.RequestContext)
-				steps = append(steps, d)
-				// A conditional step (a tag condition) does not stop the chain: the later steps still decide it.
-				if d.Status != iamauth.StatusAllowed && d.Status != iamauth.StatusConditional {
-					break
+			for _, esc := range iamauth.WorkloadEscalations {
+				if esc.Resource != string(w.AssetType) || reached[esc.Kind+"|"+role] {
+					continue
 				}
+				var steps []schema.PermissionDecision
+				for _, a := range esc.Required {
+					d := eval(capOf(a), w, req.RequestContext)
+					steps = append(steps, d)
+					// A conditional step (a tag condition) does not stop the chain: the later steps still decide it.
+					if d.Status != iamauth.StatusAllowed && d.Status != iamauth.StatusConditional {
+						break
+					}
+				}
+				status := combineSteps(steps)
+				if status == iamauth.StatusAllowed {
+					reached[esc.Kind+"|"+role] = true
+				}
+				chains = append(chains, schema.PrivescChain{Kind: esc.Kind, Service: string(w.AssetType), RoleARN: role, Status: status, Steps: steps, WorkloadARN: w.ARN, Precondition: esc.Precondition})
 			}
-			status := combineSteps(steps)
-			if status == iamauth.StatusAllowed {
-				reached[esc.Kind+"|"+role] = true
-			}
-			chains = append(chains, schema.PrivescChain{Kind: esc.Kind, Service: string(w.AssetType), RoleARN: role, Status: status, Steps: steps, WorkloadARN: w.ARN, Precondition: esc.Precondition})
 		}
 	}
 	// Several workloads can run as one role. List an allowed chain before an unknown one for the same kind and role, so
@@ -224,6 +225,23 @@ func privescChains(req PermissionBlastRequest, caller models.AssetNode, roles, f
 }
 
 // workloadRole is the role an EC2 instance or ECS task runs as: the instance's profile role, or the task definition's task role.
+func workloadRoles(w models.AssetNode, rels []models.Relationship) []string {
+	if w.AssetType != models.AssetEC2Instance && w.AssetType != models.AssetECSTask {
+		// A stack, a project, a deployment group and the like record their roles directly; a deployment group can have several.
+		var out []string
+		for _, r := range rels {
+			if r.RelType == models.RelRunsAsRole && r.SourceARN == w.ARN {
+				out = append(out, r.TargetARN)
+			}
+		}
+		return out
+	}
+	if role := workloadRole(w, rels); role != "" {
+		return []string{role}
+	}
+	return nil
+}
+
 func workloadRole(w models.AssetNode, rels []models.Relationship) string {
 	switch w.AssetType {
 	case models.AssetEC2Instance:

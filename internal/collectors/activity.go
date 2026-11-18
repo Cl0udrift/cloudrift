@@ -237,4 +237,3 @@ func setActivityNow(now time.Time) func() {
 		activityNowUTC = prev
 	}
 }
-

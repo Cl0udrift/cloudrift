@@ -11,22 +11,22 @@
   },
   "totals": {
     "paths": 91,
-    "detected": 81,
+    "detected": 91,
     "partial": 0,
-    "not_detected": 10,
+    "not_detected": 0,
     "false_positives": 0,
-    "true_negatives": 495,
+    "true_negatives": 505,
     "precision": 1,
-    "recall": 0.89
+    "recall": 1
   },
   "categories": [
     {
       "key": "existing-passrole",
       "name": "Use a resource that already exists",
       "total": 22,
-      "detected": 12,
+      "detected": 22,
       "partial": 0,
-      "not_detected": 10
+      "not_detected": 0
     },
     {
       "key": "new-passrole",
@@ -58,25 +58,25 @@
       "key": "apprunner",
       "name": "apprunner",
       "total": 2,
-      "detected": 1,
+      "detected": 2,
       "partial": 0,
-      "not_detected": 1
+      "not_detected": 0
     },
     {
       "key": "batch",
       "name": "batch",
       "total": 3,
-      "detected": 2,
+      "detected": 3,
       "partial": 0,
-      "not_detected": 1
+      "not_detected": 0
     },
     {
       "key": "bedrock",
       "name": "bedrock",
       "total": 7,
-      "detected": 4,
+      "detected": 7,
       "partial": 0,
-      "not_detected": 3
+      "not_detected": 0
     },
     {
       "key": "braket",
@@ -106,9 +106,9 @@
       "key": "codedeploy",
       "name": "codedeploy",
       "total": 1,
-      "detected": 0,
+      "detected": 1,
       "partial": 0,
-      "not_detected": 1
+      "not_detected": 0
     },
     {
       "key": "cognitoidentity",
@@ -130,9 +130,9 @@
       "key": "ec2",
       "name": "ec2",
       "total": 4,
-      "detected": 3,
+      "detected": 4,
       "partial": 0,
-      "not_detected": 1
+      "not_detected": 0
     },
     {
       "key": "ec2instanceconnect",
@@ -178,9 +178,9 @@
       "key": "glue",
       "name": "glue",
       "total": 7,
-      "detected": 6,
+      "detected": 7,
       "partial": 0,
-      "not_detected": 1
+      "not_detected": 0
     },
     {
       "key": "iam",
@@ -226,9 +226,9 @@
       "key": "sagemaker",
       "name": "sagemaker",
       "total": 5,
-      "detected": 3,
+      "detected": 5,
       "partial": 0,
-      "not_detected": 2
+      "not_detected": 0
     },
     {
       "key": "scheduler",
@@ -279,11 +279,10 @@
       "id": "apprunner-002",
       "category": "existing-passrole",
       "service": "apprunner",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "apprunner:UpdateService"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/apprunner-002"
     },
     {
@@ -302,11 +301,10 @@
       "id": "batch-002",
       "category": "existing-passrole",
       "service": "batch",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "batch:SubmitJob"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/batch-002"
     },
     {
@@ -340,12 +338,11 @@
       "id": "bedrock-002",
       "category": "existing-passrole",
       "service": "bedrock",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "bedrock-agentcore:StartCodeInterpreterSession",
         "bedrock-agentcore:InvokeCodeInterpreter"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/bedrock-002"
     },
     {
@@ -366,11 +363,10 @@
       "id": "bedrock-004",
       "category": "existing-passrole",
       "service": "bedrock",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "bedrock-agentcore:InvokeAgentRuntimeCommand"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/bedrock-004"
     },
     {
@@ -407,12 +403,11 @@
       "id": "bedrock-007",
       "category": "existing-passrole",
       "service": "bedrock",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "bedrock-agentcore:StartBrowserSession",
         "bedrock-agentcore:ConnectBrowserAutomationStream"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/bedrock-007"
     },
     {
@@ -529,13 +524,12 @@
       "id": "codedeploy-001",
       "category": "existing-passrole",
       "service": "codedeploy",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "codedeploy:CreateDeployment",
         "codedeploy:RegisterApplicationRevision",
         "codedeploy:GetDeploymentConfig"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/codedeploy-001"
     },
     {
@@ -600,12 +594,11 @@
       "id": "ec2-005",
       "category": "existing-passrole",
       "service": "ec2",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "ec2:CreateLaunchTemplateVersion",
         "ec2:ModifyLaunchTemplate"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/ec2-005"
     },
     {
@@ -777,11 +770,10 @@
       "id": "glue-002",
       "category": "existing-passrole",
       "service": "glue",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "glue:UpdateDevEndpoint"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/glue-002"
     },
     {
@@ -1207,25 +1199,23 @@
       "id": "sagemaker-004",
       "category": "existing-passrole",
       "service": "sagemaker",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "sagemaker:CreatePresignedNotebookInstanceUrl"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/sagemaker-004"
     },
     {
       "id": "sagemaker-005",
       "category": "existing-passrole",
       "service": "sagemaker",
-      "status": "not_detected",
+      "status": "detected",
       "required": [
         "sagemaker:CreateNotebookInstanceLifecycleConfig",
         "sagemaker:StopNotebookInstance",
         "sagemaker:UpdateNotebookInstance",
         "sagemaker:StartNotebookInstance"
       ],
-      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
       "url": "https://pathfinding.cloud/paths/sagemaker-005"
     },
     {

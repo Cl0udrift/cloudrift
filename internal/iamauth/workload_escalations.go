@@ -16,6 +16,15 @@ type WorkloadEscalation struct {
 	Reference    string
 }
 
+// workloadShapes names the ARN each resource type is evaluated against. An EC2 instance is the one type with its own evaluator.
+var workloadShapes = map[string]string{
+	"ecs_task": "ECS task ARN", "cloudformation_stack": "CloudFormation stack ARN", "codebuild_project": "CodeBuild project ARN",
+	"state_machine": "Step Functions state machine ARN", "glue_dev_endpoint": "Glue development endpoint ARN", "batch_job_definition": "Batch job definition ARN",
+	"apprunner_service": "App Runner service ARN", "sagemaker_notebook": "SageMaker notebook instance ARN", "agentcore_code_interpreter": "AgentCore code interpreter ARN",
+	"agentcore_runtime": "AgentCore agent runtime ARN", "agentcore_browser": "AgentCore browser ARN", "ec2_launch_template": "EC2 launch template ARN",
+	"codedeploy_deployment_group": "CodeDeploy deployment group ARN",
+}
+
 var WorkloadEscalations = []WorkloadEscalation{
 	{Kind: "WORKLOAD_SSM_001", Resource: "ec2_instance", Required: []string{"ssm:StartSession"}, Reference: "ssm-001",
 		Precondition: "the SSM agent is running on the instance and the instance is registered with Systems Manager; this is not collected"},
@@ -35,6 +44,26 @@ var WorkloadEscalations = []WorkloadEscalation{
 		Precondition: "the project has a batch build configuration and accepts a buildspec the caller supplies"},
 	{Kind: "WORKLOAD_STATES_002", Resource: "state_machine", Required: []string{"states:UpdateStateMachine", "states:StartExecution"}, Reference: "stepfunctions-002",
 		Precondition: "the new definition can call something with the state machine's role; what the role can do through service integrations is not checked here"},
+	{Kind: "WORKLOAD_GLUE_002", Resource: "glue_dev_endpoint", Required: []string{"glue:UpdateDevEndpoint"}, Reference: "glue-002",
+		Precondition: "the development endpoint is ready and the caller can reach it over SSH; neither is collected"},
+	{Kind: "WORKLOAD_BATCH_002", Resource: "batch_job_definition", Required: []string{"batch:SubmitJob"}, Reference: "batch-002",
+		Precondition: "a job queue and a compute environment that can run the job exist and the caller may use them (SubmitJob also names a queue); neither is collected"},
+	{Kind: "WORKLOAD_APPRUNNER_002", Resource: "apprunner_service", Required: []string{"apprunner:UpdateService"}, Reference: "apprunner-002",
+		Precondition: "the service is running and its source can be changed to code the caller controls; the source is not checked"},
+	{Kind: "WORKLOAD_SAGEMAKER_004", Resource: "sagemaker_notebook", Required: []string{"sagemaker:CreatePresignedNotebookInstanceUrl"}, Reference: "sagemaker-004",
+		Precondition: "the notebook instance is in service; its state is collected but not checked here"},
+	{Kind: "WORKLOAD_SAGEMAKER_005", Resource: "sagemaker_notebook", Required: []string{"sagemaker:CreateNotebookInstanceLifecycleConfig", "sagemaker:StopNotebookInstance", "sagemaker:UpdateNotebookInstance", "sagemaker:StartNotebookInstance"}, Reference: "sagemaker-005",
+		Precondition: "the notebook can be stopped and restarted; CreateNotebookInstanceLifecycleConfig acts on a lifecycle configuration, which is judged here against the notebook's ARN, so a policy that names only lifecycle configurations is not matched"},
+	{Kind: "WORKLOAD_AGENTCORE_002", Resource: "agentcore_code_interpreter", Required: []string{"bedrock-agentcore:StartCodeInterpreterSession", "bedrock-agentcore:InvokeCodeInterpreter"}, Reference: "bedrock-002",
+		Precondition: "the code interpreter is ready; its state is not checked"},
+	{Kind: "WORKLOAD_AGENTCORE_004", Resource: "agentcore_runtime", Required: []string{"bedrock-agentcore:InvokeAgentRuntimeCommand"}, Reference: "bedrock-004",
+		Precondition: "the agent runtime is ready; its state is not checked"},
+	{Kind: "WORKLOAD_AGENTCORE_007", Resource: "agentcore_browser", Required: []string{"bedrock-agentcore:StartBrowserSession", "bedrock-agentcore:ConnectBrowserAutomationStream"}, Reference: "bedrock-007",
+		Precondition: "the browser is ready; its state is not checked"},
+	{Kind: "WORKLOAD_EC2_005", Resource: "ec2_launch_template", Required: []string{"ec2:CreateLaunchTemplateVersion", "ec2:ModifyLaunchTemplate"}, Reference: "ec2-005",
+		Precondition: "the Auto Scaling group launches new instances (its desired capacity or a scaling event creates one); this is not checked"},
+	{Kind: "WORKLOAD_CODEDEPLOY_001", Resource: "codedeploy_deployment_group", Required: []string{"codedeploy:CreateDeployment", "codedeploy:RegisterApplicationRevision", "codedeploy:GetDeploymentConfig"}, Reference: "codedeploy-001",
+		Precondition: "the CodeDeploy agent runs on the targeted instances and the deployment group's tag filters still select them; neither is checked. Groups that target Auto Scaling groups are not followed"},
 	{Kind: "WORKLOAD_ECS_006", Resource: "ecs_task", Required: []string{"ecs:DescribeTasks", "ecs:ExecuteCommand"}, Reference: "ecs-006",
 		Precondition: "ECS Exec is enabled on the task and the task is running; this is not collected"},
 }
@@ -59,15 +88,8 @@ func workloadRows(existing []Capability) []Capability {
 	var out []Capability
 	for _, w := range WorkloadEscalations {
 		eval, shape := EvalEC2Instance, "EC2 instance ARN"
-		switch w.Resource {
-		case "ecs_task":
-			eval, shape = EvalIdentityResource, "ECS task ARN"
-		case "cloudformation_stack":
-			eval, shape = EvalIdentityResource, "CloudFormation stack ARN"
-		case "codebuild_project":
-			eval, shape = EvalIdentityResource, "CodeBuild project ARN"
-		case "state_machine":
-			eval, shape = EvalIdentityResource, "Step Functions state machine ARN"
+		if s, ok := workloadShapes[w.Resource]; ok {
+			eval, shape = EvalIdentityResource, s
 		}
 		for _, action := range w.Required {
 			if have[strings.ToLower(action)] {

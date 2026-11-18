@@ -62,6 +62,24 @@ Resources:
                   - codebuild:BatchGetProjects
                   - states:ListStateMachines
                   - states:DescribeStateMachine
+                  - glue:GetDevEndpoints
+                  - batch:DescribeJobDefinitions
+                  - apprunner:ListServices
+                  - apprunner:DescribeService
+                  - sagemaker:ListNotebookInstances
+                  - sagemaker:DescribeNotebookInstance
+                  - bedrock-agentcore:ListAgentRuntimes
+                  - bedrock-agentcore:GetAgentRuntime
+                  - bedrock-agentcore:ListCodeInterpreters
+                  - bedrock-agentcore:GetCodeInterpreter
+                  - bedrock-agentcore:ListBrowsers
+                  - bedrock-agentcore:GetBrowser
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeLaunchTemplateVersions
+                  - autoscaling:DescribeAutoScalingGroups
+                  - codedeploy:ListApplications
+                  - codedeploy:ListDeploymentGroups
+                  - codedeploy:BatchGetDeploymentGroups
                   - eks:ListClusters
                   - eks:DescribeCluster
                   - eks:ListPodIdentityAssociations

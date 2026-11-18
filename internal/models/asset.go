@@ -33,10 +33,25 @@ const (
 	AssetVPCEndpoint              AssetType = "vpc_endpoint"
 	AssetIRSATrust                AssetType = "irsa_trust"
 	// Existing resources that run as an IAM role (the role is on a WORKLOAD_RUNS_AS_ROLE edge).
-	AssetCloudFormationStack AssetType = "cloudformation_stack"
-	AssetCodeBuildProject    AssetType = "codebuild_project"
-	AssetStateMachine        AssetType = "state_machine"
+	AssetCloudFormationStack      AssetType = "cloudformation_stack"
+	AssetCodeBuildProject         AssetType = "codebuild_project"
+	AssetStateMachine             AssetType = "state_machine"
+	AssetGlueDevEndpoint          AssetType = "glue_dev_endpoint"
+	AssetBatchJobDefinition       AssetType = "batch_job_definition"
+	AssetAppRunnerService         AssetType = "apprunner_service"
+	AssetSageMakerNotebook        AssetType = "sagemaker_notebook"
+	AssetLaunchTemplate           AssetType = "ec2_launch_template"
+	AssetCodeDeployGroup          AssetType = "codedeploy_deployment_group"
+	AssetAgentCoreRuntime         AssetType = "agentcore_runtime"
+	AssetAgentCoreCodeInterpreter AssetType = "agentcore_code_interpreter"
+	AssetAgentCoreBrowser         AssetType = "agentcore_browser"
 )
+
+// WorkloadResourceTypes are the existing resources that record the role they run as on a WORKLOAD_RUNS_AS_ROLE edge.
+var WorkloadResourceTypes = []AssetType{
+	AssetCloudFormationStack, AssetCodeBuildProject, AssetStateMachine, AssetGlueDevEndpoint, AssetBatchJobDefinition, AssetAppRunnerService,
+	AssetSageMakerNotebook, AssetLaunchTemplate, AssetCodeDeployGroup, AssetAgentCoreRuntime, AssetAgentCoreCodeInterpreter, AssetAgentCoreBrowser,
+}
 
 type AssetNode struct {
 	ARN        string         `json:"arn"`

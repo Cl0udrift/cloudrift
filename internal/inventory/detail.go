@@ -273,6 +273,20 @@ func runsAsLabel(mechanism string) string {
 		return "CodeBuild project service role"
 	case "stepfunctions_execution_role":
 		return "Step Functions state machine role"
+	case "glue_dev_endpoint_role":
+		return "Glue development endpoint role"
+	case "batch_job_role":
+		return "Batch job role"
+	case "apprunner_instance_role":
+		return "App Runner instance role"
+	case "sagemaker_notebook_role":
+		return "SageMaker notebook role"
+	case "launch_template_instance_profile":
+		return "Role of the launch template's instance profile"
+	case "codedeploy_target_instance":
+		return "Role of instances this deployment group targets"
+	case "agentcore_runtime_role", "agentcore_code_interpreter_role", "agentcore_browser_role":
+		return "Bedrock AgentCore execution role"
 	}
 	return "Role this resource runs as"
 }

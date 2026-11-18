@@ -71,7 +71,10 @@ func pfLabel(perm string, passrole bool) string {
 	case "lambda:UpdateFunctionCode":
 		return "edit_function_code"
 	case "ssm:StartSession", "ssm:SendCommand", "ec2-instance-connect:SendSSHPublicKey", "ecs:ExecuteCommand", "ec2:ModifyInstanceAttribute",
-		"cloudformation:UpdateStack", "cloudformation:CreateChangeSet", "codebuild:StartBuild", "codebuild:StartBuildBatch", "states:UpdateStateMachine":
+		"cloudformation:UpdateStack", "cloudformation:CreateChangeSet", "codebuild:StartBuild", "codebuild:StartBuildBatch", "states:UpdateStateMachine",
+		"glue:UpdateDevEndpoint", "batch:SubmitJob", "apprunner:UpdateService", "sagemaker:CreatePresignedNotebookInstanceUrl", "sagemaker:UpdateNotebookInstance",
+		"bedrock-agentcore:InvokeCodeInterpreter", "bedrock-agentcore:InvokeAgentRuntimeCommand", "bedrock-agentcore:ConnectBrowserAutomationStream",
+		"ec2:CreateLaunchTemplateVersion", "codedeploy:CreateDeployment":
 		return "workload_exec" // runs commands or code on a workload that runs as a role
 	case "iam:DeleteAccessKey":
 		return "" // enabler only
@@ -256,6 +259,15 @@ func pfRun(p pfPath, granted []string, deny string, mode ...string) (fired, tech
 	project := models.AssetNode{ARN: "arn:aws:codebuild:us-east-1:" + pfAcct + ":project/existing", AssetType: models.AssetCodeBuildProject, AccountID: pfAcct, Properties: map[string]any{}}
 	machine := models.AssetNode{ARN: "arn:aws:states:us-east-1:" + pfAcct + ":stateMachine:existing", AssetType: models.AssetStateMachine, AccountID: pfAcct, Properties: map[string]any{}}
 	assets = append(assets, fn, inst, prof, taskDef, task, stack, project, machine)
+	// One more existing resource of each remaining type, all running as AdminRole.
+	var more []models.AssetNode
+	for _, t := range models.WorkloadResourceTypes {
+		if t == models.AssetCloudFormationStack || t == models.AssetCodeBuildProject || t == models.AssetStateMachine {
+			continue
+		}
+		more = append(more, models.AssetNode{ARN: "arn:aws:fixture:us-east-1:" + pfAcct + ":" + string(t) + "/existing", AssetType: t, AccountID: pfAcct, Properties: map[string]any{}})
+	}
+	assets = append(assets, more...)
 	if m == "norole" {
 		rels = append(rels, models.Relationship{SourceARN: fn.ARN, TargetARN: adminRole.ARN, RelType: models.RelLambdaUsesExecutionRole})
 	} else {
@@ -266,7 +278,7 @@ func pfRun(p pfPath, granted []string, deny string, mode ...string) (fired, tech
 	rels = append(rels,
 		models.Relationship{SourceARN: inst.ARN, TargetARN: prof.ARN, RelType: models.RelEC2UsesInstanceProfile})
 	if m != "norole" {
-		for _, w := range []models.AssetNode{stack, project, machine} {
+		for _, w := range append([]models.AssetNode{stack, project, machine}, more...) {
 			rels = append(rels, models.Relationship{SourceARN: w.ARN, TargetARN: adminRole.ARN, RelType: models.RelRunsAsRole})
 		}
 		rels = append(rels,
@@ -479,17 +491,19 @@ func TestPathfindingBenchmark(t *testing.T) {
 // pfFloor is every path the benchmark saw detected with the minimal reference permissions when it was added.
 // A path leaving this list is a regression. A path joining it should be added in the same change.
 var pfFloor = []string{
-	"apprunner-001", "batch-001", "batch-003", "bedrock-001", "bedrock-003", "bedrock-005", "bedrock-006",
-	"braket-001", "cloudformation-001", "cloudformation-002", "cloudformation-003", "cloudformation-004", "cloudformation-005", "codebuild-001",
-	"codebuild-002", "codebuild-003", "codebuild-004", "cognitoidentity-001", "datapipeline-001", "ec2-001", "ec2-002", "ec2-003",
+	"apprunner-001", "apprunner-002", "batch-001", "batch-002", "batch-003", "bedrock-001", "bedrock-002",
+	"bedrock-003", "bedrock-004", "bedrock-005", "bedrock-006", "bedrock-007", "braket-001",
+	"cloudformation-001", "cloudformation-002", "cloudformation-003", "cloudformation-004",
+	"cloudformation-005", "codebuild-001", "codebuild-002", "codebuild-003", "codebuild-004", "codedeploy-001",
+	"cognitoidentity-001", "datapipeline-001", "ec2-001", "ec2-002", "ec2-003", "ec2-005",
 	"ec2instanceconnect-003", "ecs-001", "ecs-002", "ecs-003", "ecs-004", "ecs-005", "ecs-006", "ecs-007",
-	"ecs-008", "ecs-009", "emr-001", "emrserverless-001", "gamelift-001", "glue-001", "glue-003", "glue-004",
-	"glue-005", "glue-006", "glue-007", "iam-001", "iam-002", "iam-003", "iam-004", "iam-005", "iam-006",
-	"iam-007", "iam-008", "iam-009", "iam-010", "iam-011", "iam-012", "iam-013", "iam-014", "iam-015", "iam-016",
-	"iam-017", "iam-018", "iam-019", "iam-020", "iam-021", "imagebuilder-001", "kinesisanalytics-001",
-	"lambda-001", "lambda-002", "lambda-003", "lambda-004", "lambda-005", "lambda-006", "omics-001",
-	"sagemaker-001", "sagemaker-002", "sagemaker-003", "scheduler-001", "ssm-001", "ssm-002", "ssm-003",
-	"stepfunctions-001", "stepfunctions-002", "sts-001",
+	"ecs-008", "ecs-009", "emr-001", "emrserverless-001", "gamelift-001", "glue-001", "glue-002", "glue-003",
+	"glue-004", "glue-005", "glue-006", "glue-007", "iam-001", "iam-002", "iam-003", "iam-004", "iam-005",
+	"iam-006", "iam-007", "iam-008", "iam-009", "iam-010", "iam-011", "iam-012", "iam-013", "iam-014",
+	"iam-015", "iam-016", "iam-017", "iam-018", "iam-019", "iam-020", "iam-021", "imagebuilder-001",
+	"kinesisanalytics-001", "lambda-001", "lambda-002", "lambda-003", "lambda-004", "lambda-005", "lambda-006",
+	"omics-001", "sagemaker-001", "sagemaker-002", "sagemaker-003", "sagemaker-004", "sagemaker-005",
+	"scheduler-001", "ssm-001", "ssm-002", "ssm-003", "stepfunctions-001", "stepfunctions-002", "sts-001",
 }
 
 func pfAssert(t *testing.T, out []pfCase, paths []pfPath) {

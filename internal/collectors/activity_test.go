@@ -227,7 +227,6 @@ func (f *fakeActivityIAM) GetRole(_ context.Context, in *iam.GetRoleInput, _ ...
 	return &iam.GetRoleOutput{Role: &role}, nil
 }
 
-
 func TestCollectActivityRecordsIAMReportedStatus(t *testing.T) {
 	now := time.Date(2026, 4, 18, 0, 0, 0, 0, time.UTC)
 	defer setActivityNow(now)()

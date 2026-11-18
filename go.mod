@@ -29,11 +29,18 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.12 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.12 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.23 // indirect
+	github.com/aws/aws-sdk-go-v2/service/apprunner v1.48.12 // indirect
+	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.82.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/batch v1.79.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/bedrockagentcorecontrol v1.81.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/cloudformation v1.84.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/cloudtrail v1.65.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/codebuild v1.79.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/codedeploy v1.47.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.295.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.100.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/eks v1.104.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/glue v1.176.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.23 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.14 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.8 // indirect
@@ -41,6 +48,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/kms v1.62.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/lambda v1.89.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/rds v1.131.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sagemaker v1.291.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.50.7 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sfn v1.53.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/signin v1.0.10 // indirect

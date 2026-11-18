@@ -9,12 +9,12 @@ import (
 
 func TestClassifyTargetService(t *testing.T) {
 	cases := map[string]string{
-		"app.s3-website-us-east-1.amazonaws.com": "s3_website",
-		"d111111abcdef8.cloudfront.net":          "cloudfront",
+		"app.s3-website-us-east-1.amazonaws.com":  "s3_website",
+		"d111111abcdef8.cloudfront.net":           "cloudfront",
 		"abc.execute-api.us-east-1.amazonaws.com": "apigateway",
-		"foo.elb.amazonaws.com":                  "alb",
-		"foo.elasticbeanstalk.com":               "elasticbeanstalk",
-		"example.vendor.com":                     "third_party",
+		"foo.elb.amazonaws.com":                   "alb",
+		"foo.elasticbeanstalk.com":                "elasticbeanstalk",
+		"example.vendor.com":                      "third_party",
 	}
 	for target, want := range cases {
 		got := classifyTargetService(target)

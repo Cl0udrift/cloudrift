@@ -10,15 +10,22 @@ import (
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/apprunner"
+	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
+	"github.com/aws/aws-sdk-go-v2/service/batch"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockagentcorecontrol"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
 	"github.com/aws/aws-sdk-go-v2/service/codebuild"
+	"github.com/aws/aws-sdk-go-v2/service/codedeploy"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/aws/aws-sdk-go-v2/service/glue"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
+	"github.com/aws/aws-sdk-go-v2/service/sagemaker"
 	"github.com/aws/aws-sdk-go-v2/service/sfn"
 
 	"github.com/Zero0x00/cloudrift/internal/config"
@@ -51,6 +58,14 @@ type WorkloadClients struct {
 	CloudFormation CloudFormationAPI
 	CodeBuild      CodeBuildAPI
 	StepFunctions  StepFunctionsAPI
+	Glue           GlueAPI
+	Batch          BatchAPI
+	AppRunner      AppRunnerAPI
+	SageMaker      SageMakerAPI
+	AgentCore      AgentCoreAPI
+	CodeDeploy     CodeDeployAPI
+	AutoScaling    AutoScalingAPI
+	LaunchTemplate LaunchTemplateAPI
 }
 
 // OrganizationAccountNodes records discovered organization membership.
@@ -90,6 +105,8 @@ var regionalWorkloadClients = func(cfg awsv2.Config) WorkloadClients {
 		EC2: ec2.NewFromConfig(cfg), IAM: iam.NewFromConfig(cfg), Lambda: lambda.NewFromConfig(cfg),
 		ECS: ecs.NewFromConfig(cfg), EKS: eks.NewFromConfig(cfg),
 		CloudFormation: cloudformation.NewFromConfig(cfg), CodeBuild: codebuild.NewFromConfig(cfg), StepFunctions: sfn.NewFromConfig(cfg),
+		Glue: glue.NewFromConfig(cfg), Batch: batch.NewFromConfig(cfg), AppRunner: apprunner.NewFromConfig(cfg), SageMaker: sagemaker.NewFromConfig(cfg),
+		AgentCore: bedrockagentcorecontrol.NewFromConfig(cfg), CodeDeploy: codedeploy.NewFromConfig(cfg), AutoScaling: autoscaling.NewFromConfig(cfg), LaunchTemplate: ec2.NewFromConfig(cfg),
 	}
 }
 
@@ -159,6 +176,8 @@ func CollectWorkloads(ctx context.Context, cfg *config.Config, accounts []Accoun
 			clients := regionalWorkloadClients(regional)
 			if cfg != nil && !cfg.Scan.ServiceResources {
 				clients.CloudFormation, clients.CodeBuild, clients.StepFunctions = nil, nil, nil
+				clients.Glue, clients.Batch, clients.AppRunner, clients.SageMaker, clients.AgentCore = nil, nil, nil, nil, nil
+				clients.CodeDeploy, clients.AutoScaling, clients.LaunchTemplate = nil, nil, nil
 			}
 			nodes, edges, err := CollectRegionalWorkloads(ctx, job.account.ID, job.region, clients, time.Now().UTC())
 			mu.Lock()
@@ -223,7 +242,7 @@ func CollectRegionalWorkloads(ctx context.Context, accountID, region string, cli
 			rels = append(rels, edges...)
 		}
 	}
-	svcAssets, svcRels := collectServiceResources(ctx, accountID, region, clients, collectedAt)
+	svcAssets, svcRels := collectServiceResources(ctx, accountID, region, clients, collectedAt, assets, rels)
 	assets = append(assets, svcAssets...)
 	rels = append(rels, svcRels...)
 	return assets, rels, nil
