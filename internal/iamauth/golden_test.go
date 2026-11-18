@@ -271,7 +271,7 @@ func goldenCases() []goldenCase {
 }
 
 func TestGoldenCorpus(t *testing.T) {
-	cases := goldenCases()
+	cases := append(goldenCases(), awsExampleCases()...)
 	var falseAllow, expectedAllow, gotAllow int
 	for _, c := range cases {
 		d := Evaluate(c.build())

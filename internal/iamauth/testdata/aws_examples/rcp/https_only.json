@@ -1,0 +1,28 @@
+{
+    "Version":"2012-10-17",		 	 	 
+    "Statement": [
+        {
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": [
+                "s3:*",
+                "sts:*",
+                "kms:*",
+                "sqs:*",
+                "secretsmanager:*",
+                "cognito-identity:*",
+                "cognito-idp:*",
+                "logs:*",
+                "dynamodb:*",
+                "ecr:*",
+                "aoss:*"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "BoolIfExists": {
+                    "aws:SecureTransport": "false"
+                }
+            }
+        }
+    ]
+}
