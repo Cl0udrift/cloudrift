@@ -123,6 +123,7 @@ type InventoryResource struct {
 	CollectedAt        string `json:"collected_at,omitempty"`
 	CollectionStatus   string `json:"collection_status,omitempty"`
 	FindingCount       int    `json:"finding_count"`
+	MaxSeverity        string `json:"max_severity,omitempty"`
 	RelationshipCount  int    `json:"relationship_count"`
 	IdentityAssociated bool   `json:"identity_associated"`
 }

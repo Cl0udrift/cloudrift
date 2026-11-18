@@ -34,7 +34,7 @@ var catalog = []serviceDef{
 	{ID: "ec2", Name: "EC2", Types: []string{"ec2_instance"}},
 	{ID: "lambda", Name: "Lambda", Types: []string{"lambda_function"}},
 	{ID: "s3", Name: "S3", Types: []string{"s3_bucket", "s3_object"}},
-	{ID: "iam", Name: "IAM", Types: []string{"iam_role", "iam_policy", "instance_profile"}},
+	{ID: "iam", Name: "IAM", Types: []string{"iam_role", "iam_user", "iam_group", "iam_policy", "instance_profile"}},
 	{ID: "ecs", Name: "ECS", Types: []string{"ecs_cluster", "ecs_service", "ecs_task", "ecs_task_definition"}},
 	{ID: "eks", Name: "EKS", Types: []string{"eks_cluster", "eks_pod_identity_association"}},
 	{ID: "route53", Name: "Route 53", Types: []string{"dns_record"}},
@@ -47,7 +47,7 @@ var typeService = map[models.AssetType]string{}
 var typeName = map[string]string{
 	"ec2_instance": "EC2 instance", "lambda_function": "Lambda function",
 	"s3_bucket": "S3 bucket", "s3_object": "S3 object",
-	"iam_role": "IAM role", "iam_policy": "IAM managed policy", "instance_profile": "IAM instance profile",
+	"iam_role": "IAM role", "iam_user": "IAM user", "iam_group": "IAM group", "iam_policy": "IAM managed policy", "instance_profile": "IAM instance profile",
 	"ecs_cluster": "ECS cluster", "ecs_service": "ECS service", "ecs_task": "ECS task", "ecs_task_definition": "ECS task definition",
 	"eks_cluster": "EKS cluster", "eks_pod_identity_association": "EKS Pod Identity association",
 	"dns_record": "DNS record", "cloudfront_dist": "CloudFront distribution",
@@ -70,7 +70,7 @@ var typeCategory = map[string]string{
 	"ec2_instance": categoryCompute, "lambda_function": categoryCompute,
 	"ecs_cluster": categoryCompute, "ecs_service": categoryCompute, "ecs_task": categoryCompute, "eks_cluster": categoryCompute,
 	"s3_bucket": categoryStorage, "s3_object": categoryStorage,
-	"iam_role": categoryIdentity, "iam_policy": categoryIdentity, "instance_profile": categoryIdentity,
+	"iam_role": categoryIdentity, "iam_user": categoryIdentity, "iam_group": categoryIdentity, "iam_policy": categoryIdentity, "instance_profile": categoryIdentity,
 	"ecs_task_definition": categoryConfiguration, "eks_pod_identity_association": categoryConfiguration,
 	"dns_record": categoryNetwork, "cloudfront_dist": categoryNetwork, "apigateway_domain": categoryNetwork, "acm_cert": categoryNetwork,
 }

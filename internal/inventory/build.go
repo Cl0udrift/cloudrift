@@ -16,12 +16,14 @@ type Filter struct {
 	ResourceType string
 	Category     string
 	Query        string
+	HasFindings  bool
 }
 
 type indexed struct {
 	asset    models.AssetNode
 	service  string
 	findings int
+	severity string
 	rels     int
 	identity bool
 }
@@ -29,9 +31,13 @@ type indexed struct {
 // Build returns counted assets for the filter. Duplicate identities are reconciled first.
 func Build(assets []models.AssetNode, rels []models.Relationship, findings []models.Finding, filter Filter) []schema.InventoryResource {
 	findingCount := map[string]int{}
+	worst := map[string]string{}
 	for _, finding := range findings {
 		if finding.AffectedARN != "" {
 			findingCount[finding.AffectedARN]++
+			if severityRank(string(finding.Severity)) > severityRank(worst[finding.AffectedARN]) {
+				worst[finding.AffectedARN] = string(finding.Severity)
+			}
 		}
 	}
 	relCount := map[string]int{}
@@ -50,11 +56,11 @@ func Build(assets []models.AssetNode, rels []models.Relationship, findings []mod
 	var items []indexed
 	for _, asset := range reconcileAssets(assets) {
 		svc := serviceOf(asset)
-		if !match(asset, svc, filter) {
+		if !match(asset, svc, filter) || (filter.HasFindings && findingCount[asset.ARN] == 0) {
 			continue
 		}
 		id := publicID(asset)
-		items = append(items, indexed{asset: asset, service: svc, findings: findingCount[asset.ARN], rels: relCount[asset.ARN], identity: identity[id]})
+		items = append(items, indexed{asset: asset, service: svc, findings: findingCount[asset.ARN], severity: worst[asset.ARN], rels: relCount[asset.ARN], identity: identity[id]})
 	}
 	return resources(items)
 }
@@ -120,7 +126,7 @@ func toResource(item indexed) schema.InventoryResource {
 		ResourceType: typ, ResourceTypeName: typeLabel(typ), Name: name,
 		AccountID: asset.AccountID, Region: asset.Region,
 		State: stateOf(asset), CollectedAt: strProp(asset, "collected_at"),
-		CollectionStatus: collectionStatus(asset), FindingCount: item.findings,
+		CollectionStatus: collectionStatus(asset), FindingCount: item.findings, MaxSeverity: item.severity,
 		RelationshipCount: item.rels, IdentityAssociated: item.identity,
 	}
 }
@@ -182,4 +188,21 @@ func roleEdge(rel models.RelType) bool {
 	default:
 		return false
 	}
+}
+
+// severityRank orders severities; an unknown or empty value ranks below info.
+func severityRank(s string) int {
+	switch s {
+	case "critical":
+		return 5
+	case "high":
+		return 4
+	case "medium":
+		return 3
+	case "low":
+		return 2
+	case "info":
+		return 1
+	}
+	return 0
 }

@@ -385,6 +385,7 @@ export interface InventoryResource {
   collected_at?: string;
   collection_status?: string;
   finding_count: number;
+  max_severity?: string;
   relationship_count: number;
   identity_associated: boolean;
 }

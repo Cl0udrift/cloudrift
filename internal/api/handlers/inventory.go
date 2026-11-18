@@ -44,6 +44,7 @@ func InventoryResources(outputDir string) http.HandlerFunc {
 			ResourceType: strings.TrimSpace(r.URL.Query().Get("resource_type")),
 			Category:     strings.TrimSpace(r.URL.Query().Get("category")),
 			Query:        strings.TrimSpace(r.URL.Query().Get("q")),
+			HasFindings:  r.URL.Query().Get("has_findings") == "true",
 		})
 		list := inventory.Page(items, strings.TrimSpace(r.URL.Query().Get("sort")), page, pageSize)
 		list.ScanID = scanID

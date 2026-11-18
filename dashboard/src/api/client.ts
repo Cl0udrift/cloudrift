@@ -340,7 +340,7 @@ export const apiClient = {
   },
   inventoryResources(
     scanId: string,
-    params: { account_id?: string; region?: string; service?: string; resource_type?: string; category?: string; q?: string; page?: number; page_size?: number; sort?: string }
+    params: { account_id?: string; region?: string; service?: string; resource_type?: string; category?: string; q?: string; has_findings?: string; page?: number; page_size?: number; sort?: string }
   ): Promise<InventoryListResponse> {
     return fetchJSON<InventoryListResponse>(`/scans/${encodeURIComponent(scanId)}/inventory/resources${makeQueryString(params)}`);
   },

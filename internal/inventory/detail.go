@@ -67,6 +67,17 @@ func compare(a, b schema.InventoryResource, key string) bool {
 			return a.ID < b.ID
 		}
 		return a.Region < b.Region
+	case "severity":
+		if ra, rb := severityRank(a.MaxSeverity), severityRank(b.MaxSeverity); ra != rb {
+			return ra < rb
+		}
+		if a.FindingCount != b.FindingCount {
+			return a.FindingCount < b.FindingCount
+		}
+		if a.Name != b.Name {
+			return a.Name > b.Name // so a descending sort lists names A to Z
+		}
+		return a.ID < b.ID
 	case "findings":
 		if a.FindingCount == b.FindingCount {
 			return a.ID < b.ID

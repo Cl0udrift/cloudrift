@@ -240,3 +240,40 @@ func TestSummaryScale(t *testing.T) {
 		t.Fatalf("summary too slow: %s", elapsed)
 	}
 }
+
+func TestIAMUsersAndGroupsAreIdentityResourcesOfIAM(t *testing.T) {
+	assets := []models.AssetNode{
+		{ScanID: "s", ARN: "arn:aws:iam::1:user/a", AssetType: models.AssetIAMUser, Name: "a", AccountID: "1"},
+		{ScanID: "s", ARN: "arn:aws:iam::1:group/g", AssetType: models.AssetIAMGroup, Name: "g", AccountID: "1"},
+	}
+	for _, r := range Build(assets, nil, nil, Filter{}) {
+		if r.Service != "iam" || r.Category != "identity" || strings.HasPrefix(r.ResourceTypeName, "iam_") {
+			t.Fatalf("%s: service %q category %q label %q", r.Name, r.Service, r.Category, r.ResourceTypeName)
+		}
+	}
+}
+
+func TestSeverityIsWorstFindingAndHasFindingsFilters(t *testing.T) {
+	a := models.AssetNode{ScanID: "s", ARN: "arn:aws:iam::1:user/a", AssetType: models.AssetIAMUser, Name: "a", AccountID: "1"}
+	b := models.AssetNode{ScanID: "s", ARN: "arn:aws:iam::1:user/b", AssetType: models.AssetIAMUser, Name: "b", AccountID: "1"}
+	fs := []models.Finding{
+		{AffectedARN: a.ARN, Severity: models.SeverityLow},
+		{AffectedARN: a.ARN, Severity: models.SeverityHigh},
+		{AffectedARN: a.ARN, Severity: models.SeverityMedium},
+	}
+	all := Build([]models.AssetNode{a, b}, nil, fs, Filter{})
+	for _, r := range all {
+		if r.Name == "a" && (r.MaxSeverity != "high" || r.FindingCount != 3) {
+			t.Fatalf("a: %+v", r)
+		}
+		if r.Name == "b" && r.MaxSeverity != "" {
+			t.Fatalf("b: %+v", r)
+		}
+	}
+	if got := Build([]models.AssetNode{a, b}, nil, fs, Filter{HasFindings: true}); len(got) != 1 || got[0].Name != "a" {
+		t.Fatalf("has findings: %+v", got)
+	}
+	if p := Page(all, "-severity", 1, 25); p.Items[0].Name != "a" {
+		t.Fatalf("severity sort: %+v", p.Items)
+	}
+}
