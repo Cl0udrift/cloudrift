@@ -220,6 +220,13 @@ func (awsSource) Collect(ctx context.Context, cfg *config.Config, progress Progr
 	}
 	slog.Info("collector finished", "collector", "activity", "records", len(activity))
 
+	if cfg.Scan.IdentityCenter {
+		progress("collecting", "reading IAM Identity Center")
+		icAssets, icRels := collectors.CollectIdentityCenter(ctx, baseCfg, time.Now())
+		assets = append(assets, icAssets...)
+		rels = append(rels, icRels...)
+		slog.Info("collector finished", "collector", "identity-center", "assets", len(icAssets))
+	}
 	if cfg.Scan.AssumeRoleActivity {
 		progress("collecting", "reading CloudTrail AssumeRole history")
 		actAssets, actRels, err := collectors.CollectAssumeRoleActivity(ctx, cfg, accounts, time.Now())

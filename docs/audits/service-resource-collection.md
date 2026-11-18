@@ -45,3 +45,19 @@ and callers that stored policy does not allow today.
   events or `scan.assume_role_activity_seconds` (default 120 per account). A Region that stops early is `partial` and says so.
 - It shows a call was made. It never changes an allow or deny decision, and no edge does not show the call never happened.
 - Not read: data events, CloudTrail Lake and Athena. Those need customer-owned infrastructure or paid queries.
+
+## IAM Identity Center
+
+`scan.identity_center` (opt-in, default false) reads IAM Identity Center and fills the Identity Center page: permission sets (managed
+policies, inline policy, session length), which users and groups are assigned to which account, group membership, and which sets are
+administrative (the AdministratorAccess managed policy, or an inline policy that allows `*` on `*`). Each set is linked to the
+`AWSReservedSSO_<name>_*` role it creates in an account, when that role is in the role inventory.
+
+- Needs the organization management account or the delegated administrator, and the read actions in `iam/auditing-role-policy.json`
+  (`sso:*` reads and `identitystore:DescribeUser`, `DescribeGroup`, `ListGroupMemberships`). Each of the 18 Regions is asked, because the
+  instance lives in one of them. From any other account the scan records "no instance", which does not show nobody can sign in.
+- A credential that is denied in every Region is a failed collector with the reason, never "no instance".
+- Bounds: 500 permission sets, 5,000 assigned users and groups, 5,000 members per group; hitting one is a partial read.
+- Not done: escalation search through Identity Center roles, permission boundaries on a set, and the resulting role's effective permissions.
+- Not tested against a real instance: the account used for live tests has none. The collector and the page are tested with fakes and a
+  synthetic scan.

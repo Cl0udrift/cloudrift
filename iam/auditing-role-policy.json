@@ -63,6 +63,24 @@
       "Effect": "Allow",
       "Action": "ce:GetCostAndUsage",
       "Resource": "*"
+    },
+    {
+      "Sid": "IdentityCenterRead",
+      "Effect": "Allow",
+      "Action": [
+        "sso:ListInstances",
+        "sso:ListPermissionSets",
+        "sso:DescribePermissionSet",
+        "sso:ListManagedPoliciesInPermissionSet",
+        "sso:ListCustomerManagedPolicyReferencesInPermissionSet",
+        "sso:GetInlinePolicyForPermissionSet",
+        "sso:ListAccountsForProvisionedPermissionSet",
+        "sso:ListAccountAssignments",
+        "identitystore:DescribeUser",
+        "identitystore:DescribeGroup",
+        "identitystore:ListGroupMemberships"
+      ],
+      "Resource": "*"
     }
   ]
 }

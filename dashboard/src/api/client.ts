@@ -6,6 +6,7 @@ import type {
   RoleUsageResponse,
   WhoCanResponse,
   AccessTargetList,
+  IdentityCenterResponse,
   ReferenceCoverage,
   PrincipalPoliciesResponse,
   AccountsBreakdownResponse,
@@ -106,6 +107,9 @@ export const apiClient = {
   },
   getWhoCan(scanId: string, action: string, arn: string): Promise<WhoCanResponse> {
     return fetchJSON<WhoCanResponse>(`/scans/${encodeURIComponent(scanId)}/identities/who-can${makeQueryString({ action, arn })}`);
+  },
+  getIdentityCenter(scanId: string): Promise<IdentityCenterResponse> {
+    return fetchJSON<IdentityCenterResponse>(`/scans/${encodeURIComponent(scanId)}/identity-center`);
   },
   accessTargets(scanId: string, params: { q?: string; arn?: string; kind?: string; limit?: number }): Promise<AccessTargetList> {
     return fetchJSON<AccessTargetList>(`/scans/${encodeURIComponent(scanId)}/identities/targets${makeQueryString(params)}`);

@@ -25,18 +25,18 @@ type QueryRelatedObject struct {
 }
 
 type QueryResponse struct {
-	Answer              string               `json:"answer"`
-	AnswerType          string               `json:"answer_type"`
-	Intent              string               `json:"intent"`
-	Confidence          string               `json:"confidence"`
-	SupportLevel        string               `json:"support_level"`
-	ScanID              string               `json:"scan_id,omitempty"`
-	GraphUsed           bool                 `json:"graph_used"`
-	SemanticUsed        bool                 `json:"semantic_used"`
-	DomainUsed          bool                 `json:"domain_used"`
-	SupportingFacts     []QuerySupportingFact`json:"supporting_facts"`
-	RelatedObjects      []QueryRelatedObject `json:"related_objects"`
-	RecommendedActions  []string             `json:"recommended_actions,omitempty"`
-	FollowUpSuggestions []string             `json:"follow_up_suggestions,omitempty"`
-	Notes               []string             `json:"notes,omitempty"`
+	Answer              string                `json:"answer"`
+	AnswerType          string                `json:"answer_type"`
+	Intent              string                `json:"intent"`
+	Confidence          string                `json:"confidence"`
+	SupportLevel        string                `json:"support_level"`
+	ScanID              string                `json:"scan_id,omitempty"`
+	GraphUsed           bool                  `json:"graph_used"`
+	SemanticUsed        bool                  `json:"semantic_used"`
+	DomainUsed          bool                  `json:"domain_used"`
+	SupportingFacts     []QuerySupportingFact `json:"supporting_facts"`
+	RelatedObjects      []QueryRelatedObject  `json:"related_objects"`
+	RecommendedActions  []string              `json:"recommended_actions,omitempty"`
+	FollowUpSuggestions []string              `json:"follow_up_suggestions,omitempty"`
+	Notes               []string              `json:"notes,omitempty"`
 }

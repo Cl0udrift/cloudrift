@@ -27,6 +27,9 @@ const (
 	// RelRunsAsRole links an existing resource (a CloudFormation stack, a CodeBuild project, a state machine) to the role
 	// it runs as. The mechanism property says which. It is configuration, not an attacker transition.
 	RelRunsAsRole RelType = "WORKLOAD_RUNS_AS_ROLE"
+	// IAM Identity Center configuration. Not attacker transitions.
+	RelIdentityCenterAssigned RelType = "IDENTITY_CENTER_ASSIGNED"  // user or group -> permission set, in one account
+	RelIdentityCenterMember   RelType = "IDENTITY_CENTER_MEMBER_OF" // user -> group
 	// RelObservedAssumeRole links a caller to a role it was seen assuming in CloudTrail event history. It is evidence that
 	// the call happened, not an authorization decision and not an attacker transition.
 	RelObservedAssumeRole RelType = "OBSERVED_ASSUME_ROLE"

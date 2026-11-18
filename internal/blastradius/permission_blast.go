@@ -920,6 +920,9 @@ func broadCandidates(role models.AssetNode, assets []models.AssetNode, rels []mo
 	return uniqueSorted(out)
 }
 
+// LooksAdministrative reports whether a policy document allows every action on every resource without a condition.
+func LooksAdministrative(raw string) bool { return looksAdministrative(raw) }
+
 func looksAdministrative(raw string) bool {
 	compact := strings.ReplaceAll(raw, " ", "")
 	lower := strings.ToLower(compact)

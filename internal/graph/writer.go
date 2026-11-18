@@ -286,6 +286,10 @@ func cypherRelType(rt models.RelType) (string, error) {
 		return "LAMBDA_USES_EXECUTION_ROLE", nil
 	case models.RelRunsAsRole:
 		return "WORKLOAD_RUNS_AS_ROLE", nil
+	case models.RelIdentityCenterAssigned:
+		return "IDENTITY_CENTER_ASSIGNED", nil
+	case models.RelIdentityCenterMember:
+		return "IDENTITY_CENTER_MEMBER_OF", nil
 	case models.RelObservedAssumeRole:
 		return "OBSERVED_ASSUME_ROLE", nil
 	case models.RelECSTaskDefUsesTaskRole:

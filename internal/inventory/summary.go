@@ -122,7 +122,7 @@ func cardFor(id, name string, items []schema.InventoryResource, coverage string)
 		}
 	}
 	return schema.InventoryServiceCard{
-		Service: id, Name: name, Count: len(items), ResourceTypes: typeNames,
+		Service: id, Name: name, ConfigKey: optInSetting[id], Count: len(items), ResourceTypes: typeNames,
 		Coverage: coverage, CoverageText: coverageText(coverage, len(items)), FindingCount: findings,
 	}
 }
@@ -146,7 +146,7 @@ func coverageText(coverage string, count int) string {
 	case coverageFailed:
 		return "Collection failed. This is not a discovered count of zero."
 	case coverageNotCollected:
-		return "This collector did not run for the selected scan."
+		return "This collector did not run for the selected scan. It is opt-in: turn it on in Settings and scan again."
 	case coverageUnsupported:
 		return "Cloudrift does not inventory this resource type."
 	case coverageNotApplicable:
@@ -233,6 +233,9 @@ func coverageFor(serviceID string, filter Filter, observations []statusObservati
 	if len(matched) == 0 {
 		if count > 0 {
 			return coverageUnknown
+		}
+		if optInSetting[serviceID] != "" {
+			return coverageNotCollected // an opt-in collector that was off, or did not run
 		}
 		if noCollector[serviceID] {
 			return coverageUnsupported // no collector exists for it, which is not the same as one that was not recorded

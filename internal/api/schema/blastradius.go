@@ -78,22 +78,22 @@ type BlastRadiusSummary struct {
 
 // AttackTransition is one evaluated technique from one role session.
 type AttackTransition struct {
-	TagEnabler *TagEnabler `json:"tag_enabler,omitempty"`
-	Technique            string   `json:"technique"`
-	SourcePrincipal      string   `json:"source_principal"`
-	TargetARN            string   `json:"target_arn"`
-	Status               string   `json:"status"`
-	Reason               string   `json:"reason"`
-	DecisionID           string   `json:"decision_id,omitempty"`
-	EvidenceFingerprint  string   `json:"evidence_fingerprint,omitempty"`
-	ContextFingerprint   string   `json:"context_fingerprint,omitempty"`
-	Evidence             []string `json:"evidence,omitempty"`
-	MissingPrerequisites []string `json:"missing_prerequisites,omitempty"`
-	SameAccount          bool     `json:"same_account"`
-	Feasibility          string   `json:"feasibility"`
-	Cycle                bool     `json:"cycle,omitempty"`
-	Depth                int      `json:"depth"`
-	SessionPolicyState   string   `json:"session_policy_state,omitempty"`
+	TagEnabler           *TagEnabler `json:"tag_enabler,omitempty"`
+	Technique            string      `json:"technique"`
+	SourcePrincipal      string      `json:"source_principal"`
+	TargetARN            string      `json:"target_arn"`
+	Status               string      `json:"status"`
+	Reason               string      `json:"reason"`
+	DecisionID           string      `json:"decision_id,omitempty"`
+	EvidenceFingerprint  string      `json:"evidence_fingerprint,omitempty"`
+	ContextFingerprint   string      `json:"context_fingerprint,omitempty"`
+	Evidence             []string    `json:"evidence,omitempty"`
+	MissingPrerequisites []string    `json:"missing_prerequisites,omitempty"`
+	SameAccount          bool        `json:"same_account"`
+	Feasibility          string      `json:"feasibility"`
+	Cycle                bool        `json:"cycle,omitempty"`
+	Depth                int         `json:"depth"`
+	SessionPolicyState   string      `json:"session_policy_state,omitempty"`
 	// SessionOrigin is hypothetical_initial or modeled_assume_role.
 	SessionOrigin string `json:"session_origin,omitempty"`
 	// SessionEvidenceClass is scenario_assumption, verified_observation, or missing.
@@ -167,18 +167,18 @@ type TagEnabler struct {
 
 type PermissionDecision struct {
 	// TagEnabler is set when Reason is satisfiable_by_tagging.
-	TagEnabler *TagEnabler `json:"tag_enabler,omitempty"`
-	Action              string   `json:"action"`
-	Category            string   `json:"category"`
-	ResourceARN         string   `json:"resource_arn"`
-	AccountID           string   `json:"account_id,omitempty"`
-	Status              string   `json:"status"`
-	Reason              string   `json:"reason"`
-	Evidence            []string `json:"evidence,omitempty"`
-	SameAccount         bool     `json:"same_account"`
-	Classification      string   `json:"classification,omitempty"`
-	DecisionID          string   `json:"decision_id,omitempty"`
-	EvidenceFingerprint string   `json:"evidence_fingerprint,omitempty"`
+	TagEnabler          *TagEnabler `json:"tag_enabler,omitempty"`
+	Action              string      `json:"action"`
+	Category            string      `json:"category"`
+	ResourceARN         string      `json:"resource_arn"`
+	AccountID           string      `json:"account_id,omitempty"`
+	Status              string      `json:"status"`
+	Reason              string      `json:"reason"`
+	Evidence            []string    `json:"evidence,omitempty"`
+	SameAccount         bool        `json:"same_account"`
+	Classification      string      `json:"classification,omitempty"`
+	DecisionID          string      `json:"decision_id,omitempty"`
+	EvidenceFingerprint string      `json:"evidence_fingerprint,omitempty"`
 	// Explanation is a plain-language reason. The fields below are the raw facts behind it.
 	Explanation          string   `json:"explanation,omitempty"`
 	MissingEvidence      []string `json:"missing_evidence,omitempty"`

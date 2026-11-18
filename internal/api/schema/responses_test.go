@@ -76,4 +76,3 @@ func TestScanProgressEventJSONShape(t *testing.T) {
 		}
 	}
 }
-

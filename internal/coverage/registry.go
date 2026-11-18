@@ -104,6 +104,15 @@ func Modules() []Module {
 			ConfigKeys:  []string{"trust.stale_threshold_days", "trust.ghost_threshold_days"}, Page: "/identities",
 		},
 		{
+			ID: "identity-center", Name: "IAM Identity Center", Area: AreaCollect, Status: StatusOptIn,
+			Summary:     "Reads single sign-on permission sets, who is assigned to which account, and users and groups, for the Identity Center page.",
+			Covers:      []string{"Permission sets with their managed policies, inline policy and session length", "User and group assignments per account, with group membership", "Which permission sets are administrative, and the IAM role each becomes in an account"},
+			Limitations: []string{"Visible only from the organization management account or the delegated administrator; from another account the scan records no instance", "Administrative means AdministratorAccess or an inline policy that allows * on *; other broad policies, and customer managed policies (names only), are not judged", "Permission boundaries on a permission set and the resulting role's effective permissions are not combined", "Identity Center roles are not searched for escalation paths yet"},
+			ConfigKeys:  []string{"scan.identity_center"},
+			Permissions: []string{"sso:ListInstances", "sso:ListPermissionSets", "sso:DescribePermissionSet", "sso:ListManagedPoliciesInPermissionSet", "sso:ListCustomerManagedPolicyReferencesInPermissionSet", "sso:GetInlinePolicyForPermissionSet", "sso:ListAccountsForProvisionedPermissionSet", "sso:ListAccountAssignments", "identitystore:DescribeUser", "identitystore:DescribeGroup", "identitystore:ListGroupMemberships"},
+			Docs:        "docs/audits/service-resource-collection.md", Page: "/identity-center", Collectors: []string{"identity_center"},
+		},
+		{
 			ID: "assume-activity", Name: "Who assumed each role", Area: AreaCollect, Status: StatusOptIn,
 			Summary:     "Reads the CloudTrail event history to show which callers actually assumed a role, next to who is allowed to.",
 			Covers:      []string{"AssumeRole calls in the last 1 to 90 days (default 30): caller, role, count, first and last seen", "Callers outside the scan (other accounts, services) are listed too", "A caller seen assuming a role that stored policy does not allow today is not dropped"},

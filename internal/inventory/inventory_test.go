@@ -92,6 +92,9 @@ func TestSummaryExcludesEvidenceAndBalancesServices(t *testing.T) {
 		if noCollector[card.Service] {
 			want = "UNSUPPORTED" // no collector exists, so it is not a collector whose result is missing
 		}
+		if optInSetting[card.Service] != "" {
+			want = "NOT_COLLECTED" // opt-in and off (or never run)
+		}
 		if card.Count != 0 || card.Coverage != want {
 			t.Fatalf("empty shown as collected zero: %+v", card)
 		}

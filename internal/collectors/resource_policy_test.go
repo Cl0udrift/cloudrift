@@ -139,7 +139,7 @@ func TestCollectRegionalResourcePolicies(t *testing.T) {
 	}
 	got := byARN(CollectRegionalResourcePolicies(context.Background(), acct, region, ResourcePolicyClients{Secrets: sec, KMS: k}, time.Unix(0, 0)))
 
-	if len(got) != 4 { // 3 secrets + 1 customer key; the AWS managed key is skipped
+	if len(got) != 4+2 { // 3 secrets + 1 customer key (the AWS managed key is skipped), and a success record each for secrets and KMS only: no RDS or VPC client was given
 		t.Fatalf("assets: %d %v", len(got), got)
 	}
 	d := got[secretARN("default-AAAAAA")].Properties

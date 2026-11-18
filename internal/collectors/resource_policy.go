@@ -182,6 +182,21 @@ func CollectRegionalResourcePolicies(ctx context.Context, accountID, region stri
 	if c.EC2 != nil {
 		out = append(out, collectVPCEndpoints(ctx, accountID, region, c.EC2, retrieved)...)
 	}
+	// Each collector that did not fail gets a success record, so "nothing found" can be told apart from "never ran".
+	failed := map[string]bool{}
+	for _, n := range out {
+		if n.AssetType == "collection_status" {
+			if name, _ := n.Properties["collector"].(string); name != "" {
+				failed[name] = true
+			}
+		}
+	}
+	ran := map[string]bool{"secrets": c.Secrets != nil, "kms": c.KMS != nil, "vpc_endpoints": c.EC2 != nil, "rds": c.RDS != nil}
+	for _, name := range []string{"secrets", "kms", "vpc_endpoints", "rds"} {
+		if ran[name] && !failed[name] {
+			out = append(out, CollectionStatus(accountID, region, name, "regional", "succeeded", ""))
+		}
+	}
 	return out
 }
 

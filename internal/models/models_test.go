@@ -68,4 +68,3 @@ func TestSnapshotJSON(t *testing.T) {
 		}
 	}
 }
-

@@ -31,13 +31,13 @@ type RoleCapabilityFlags struct {
 }
 
 type RolePermissionVisibility struct {
-	Classification                    PermissionTier       `json:"classification"`
-	Capabilities                      RoleCapabilityFlags  `json:"capabilities"`
-	Reasons                           []string             `json:"reasons"`
-	Confidence                        PermissionConfidence `json:"confidence"`
-	AnalysisMode                      string               `json:"analysis_mode"`
-	PolicyParseOK                     bool                 `json:"policy_parse_ok"`
-	UsedManagedPolicyNameHeuristics   bool                 `json:"used_managed_policy_name_heuristics"`
-	ComplexPolicyDetected             bool                 `json:"complex_policy_detected"`
-	ManagedPolicyDocumentsInspected   bool                 `json:"managed_policy_documents_inspected"`
+	Classification                  PermissionTier       `json:"classification"`
+	Capabilities                    RoleCapabilityFlags  `json:"capabilities"`
+	Reasons                         []string             `json:"reasons"`
+	Confidence                      PermissionConfidence `json:"confidence"`
+	AnalysisMode                    string               `json:"analysis_mode"`
+	PolicyParseOK                   bool                 `json:"policy_parse_ok"`
+	UsedManagedPolicyNameHeuristics bool                 `json:"used_managed_policy_name_heuristics"`
+	ComplexPolicyDetected           bool                 `json:"complex_policy_detected"`
+	ManagedPolicyDocumentsInspected bool                 `json:"managed_policy_documents_inspected"`
 }

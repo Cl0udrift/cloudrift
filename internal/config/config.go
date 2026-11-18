@@ -49,6 +49,11 @@ type Config struct {
 		// Without the read actions in the audit role a region reports a failed collector and the resource type is not
 		// searched; see docs/audits/service-resource-collection.md.
 		ServiceResources bool `toml:"service_resources"`
+		// IdentityCenter collects IAM Identity Center (SSO) permission sets, account assignments, users and groups, so the
+		// Identity Center page can show who reaches which account with which permissions. Opt-in, default false. It works
+		// only with the organization management account or the delegated administrator, and needs sso and identitystore
+		// read actions; see docs/audits/service-resource-collection.md.
+		IdentityCenter bool `toml:"identity_center"`
 		// AssumeRoleActivity reads who assumed which role from the CloudTrail management event history (LookupEvents), so a
 		// path shows "was used" next to "can be used". Opt-in, default false: it is rate limited to 2 requests per second per
 		// Region. AssumeRoleActivityDays is the window (1 to 90, default 30). AssumeRoleActivitySeconds is the budget per

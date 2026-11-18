@@ -116,7 +116,9 @@ export function InventoryPage() {
   const collectedCount = serviceCards.filter((c) => cov(c) === "collected").length;
   // A service the account or Region does not offer, or that Cloudrift has no collector for, is not a gap in what was collected.
   const unavailableNames = serviceCards.filter((c) => cov(c) === "unsupported").map((c) => c.name);
-  const collectableCount = serviceCards.length - unavailableNames.length;
+  // Opt-in collectors that are off are a choice, not a gap: they are listed with the setting that turns them on.
+  const offNames = serviceCards.filter((c) => c.config_key && cov(c) === "not_collected").map((c) => c.name);
+  const collectableCount = serviceCards.length - unavailableNames.length - offNames.length;
   const notInventoried = summary.data?.not_inventoried ?? [];
   const totalFindings = serviceCards.reduce((n, c) => n + c.finding_count, 0);
   const shownBars = (summary.data?.distribution ?? []).filter((item) => item.count > 0);
@@ -173,6 +175,7 @@ export function InventoryPage() {
                   <span className="text-xs text-slate-600 dark:text-slate-400">{collectedCount} of {collectableCount} services collected</span>
                 </div>
                 {notRecorded > 0 ? <p className="mt-2 hidden text-xs text-slate-600 dark:text-slate-400 sm:block"><span className="font-medium">Not recorded:</span> {notRecordedNames.join(", ")}. A missing asset is not evidence the service is empty.</p> : null}
+                {offNames.length > 0 ? <p className="mt-1 hidden text-xs text-slate-600 dark:text-slate-400 sm:block"><span className="font-medium">Off (opt-in):</span> {offNames.join(", ")}. <Link className="underline" to="/settings#cfg-scan.resource_policies">Turn on in Settings</Link>, then scan again.</p> : null}
                 {notInventoried.length + unavailableNames.length > 0 ? <p className="mt-1 hidden text-xs text-slate-600 dark:text-slate-400 sm:block"><span className="font-medium">Not inventoried:</span> {[...notInventoried, ...unavailableNames].join(", ")}.</p> : null}
                 <a href="#inventory-coverage" className="mt-2 block text-xs text-cyan-800 underline dark:text-cyan-300">Collection coverage ↓</a>
               </div>
@@ -312,6 +315,7 @@ export function InventoryPage() {
               </summary>
               <div className="mt-4 space-y-4">
                 {notRecorded > 0 ? <p className="text-sm"><span className="font-medium">Not recorded:</span> {notRecordedNames.join(", ")}. A missing asset is not evidence the service is empty.</p> : null}
+                {offNames.length > 0 ? <p className="text-sm"><span className="font-medium">Off (opt-in):</span> {offNames.join(", ")}. <Link className="underline" to="/settings#cfg-scan.resource_policies">Turn on in Settings</Link>, then scan again.</p> : null}
                 {notInventoried.length + unavailableNames.length > 0 ? <p className="text-sm"><span className="font-medium">Not inventoried:</span> {[...notInventoried, ...unavailableNames].join(", ")}. {unavailableNames.length > 0 ? "Some of these are services this account or Region does not offer." : ""}</p> : null}
                 <p className="cr-helper">{summary.data.accounts_note} {summary.data.coverage_note} {col?.note}</p>
                 {col ? (

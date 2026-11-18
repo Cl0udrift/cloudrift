@@ -64,6 +64,8 @@ github.com/aws/aws-sdk-go-v2/service/glue v1.176.0 h1:TtBq8o+YaGNzEGLl7fBE9YYKEl
 github.com/aws/aws-sdk-go-v2/service/glue v1.176.0/go.mod h1:34rxTS3Y1PWu3ClPMnt6Xr+M93Nixt0wXxpoIAEnugc=
 github.com/aws/aws-sdk-go-v2/service/iam v1.53.8 h1:p0oB4eZfBfBAOasnKvHJOlNcuHVE/ieuWs7uIZgQlyQ=
 github.com/aws/aws-sdk-go-v2/service/iam v1.53.8/go.mod h1:epCaPnGVdiX5ra1lHPfRkVuiQGxrdY8bRI2FBJU+6ok=
+github.com/aws/aws-sdk-go-v2/service/identitystore v1.50.0 h1:ZnxqyLLS0KDFaXe2eaXXp0T60VJbjs9CbpUpTxbyqV4=
+github.com/aws/aws-sdk-go-v2/service/identitystore v1.50.0/go.mod h1:Cu9/9lWL5/OcvQx5CqRiXxPoIVWAUvyPX5LTxVZVTLA=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.8 h1:HtOTYcbVcGABLOVuPYaIihj6IlkqubBwFj10K5fxRek=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.8/go.mod h1:VsK9abqQeGlzPgUr+isNWzPlK2vKe9INMLWnY65f5Xs=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.23 h1:MCIR6iZaCKO4UE0hUvoWWLI6JVjppopV64JfAJaMjng=
@@ -98,6 +100,8 @@ github.com/aws/aws-sdk-go-v2/service/signin v1.0.10 h1:a1Fq/KXn75wSzoJaPQTgZO0wH
 github.com/aws/aws-sdk-go-v2/service/signin v1.0.10/go.mod h1:p6+MXNxW7IA6dMgHfTAzljuwSKD0NCm/4lbS4t6+7vI=
 github.com/aws/aws-sdk-go-v2/service/sso v1.30.16 h1:x6bKbmDhsgSZwv6q19wY/u3rLk/3FGjJWyqKcIRufpE=
 github.com/aws/aws-sdk-go-v2/service/sso v1.30.16/go.mod h1:CudnEVKRtLn0+3uMV0yEXZ+YZOKnAtUJ5DmDhilVnIw=
+github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.53.0 h1:PlAR8o03x6H1WSeVVM73wNffsthC2mtdUhWPEoFvxpM=
+github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.53.0/go.mod h1:p5vb7fTaOAK8atOjL2Ksvi4qopCKoNE0rZLdc0hKHYY=
 github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.20 h1:oK/njaL8GtyEihkWMD4k3VgHCT64RQKkZwh0DG5j8ak=
 github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.20/go.mod h1:JHs8/y1f3zY7U5WcuzoJ/yAYGYtNIVPKLIbp61euvmg=
 github.com/aws/aws-sdk-go-v2/service/sts v1.42.0 h1:ks8KBcZPh3PYISr5dAiXCM5/Thcuxk8l+PG4+A0exds=

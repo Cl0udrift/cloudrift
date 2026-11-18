@@ -82,8 +82,10 @@ type InventoryCategory struct {
 
 // InventoryServiceCard is one AWS service in the coverage catalog, or Other.
 type InventoryServiceCard struct {
-	Service       string   `json:"service"`
-	Name          string   `json:"name"`
+	Service string `json:"service"`
+	Name    string `json:"name"`
+	// ConfigKey is the setting that turns this collector on, when it is opt-in.
+	ConfigKey     string   `json:"config_key,omitempty"`
 	Count         int      `json:"count"`
 	ResourceTypes []string `json:"resource_types"`
 	Coverage      string   `json:"coverage"`

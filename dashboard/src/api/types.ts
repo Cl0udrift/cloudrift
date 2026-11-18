@@ -298,6 +298,8 @@ export interface WorkloadAttachment {
 }
 
 export interface InventoryServiceCard {
+  /** The setting that turns this collector on, when it is opt-in. */
+  config_key?: string;
   service: string;
   name: string;
   count: number;
@@ -1427,5 +1429,61 @@ export interface RoleUsageResponse {
   unknown: number;
   history_read?: boolean;
   observed?: ObservedCaller[];
+  notes: string[];
+}
+
+export interface IdentityCenterPolicyRef {
+  name: string;
+  arn?: string;
+}
+export interface IdentityCenterPermissionSet {
+  arn: string;
+  name: string;
+  description: string;
+  session_duration: string;
+  administrative: boolean;
+  admin_reason?: string;
+  managed_policies: IdentityCenterPolicyRef[];
+  customer_managed_policies: IdentityCenterPolicyRef[];
+  has_inline_policy: boolean;
+  accounts: string[];
+  roles: string[];
+  assignments: number;
+  read_status: string;
+  read_error?: string;
+}
+export interface IdentityCenterAssignment {
+  account_id: string;
+  permission_set: string;
+  permission_set_arn: string;
+  administrative: boolean;
+  via: string;
+}
+export interface IdentityCenterPrincipal {
+  arn: string;
+  kind: "user" | "group";
+  name: string;
+  display_name?: string;
+  name_read: boolean;
+  groups: string[];
+  members: number;
+  assignments: IdentityCenterAssignment[];
+  administrative_in: string[];
+}
+export interface IdentityCenterAccount {
+  account_id: string;
+  permission_sets: number;
+  principals: number;
+  administrative_principals: number;
+}
+export interface IdentityCenterResponse {
+  scan_id: string;
+  state: "collected" | "partial" | "failed" | "no_instance" | "not_collected";
+  detail: string;
+  config_key?: string;
+  instances: { arn: string; name: string; identity_store_id: string; owner_account_id: string; status: string }[];
+  permission_sets: IdentityCenterPermissionSet[];
+  principals: IdentityCenterPrincipal[];
+  accounts: IdentityCenterAccount[];
   notes: string[];
 }
