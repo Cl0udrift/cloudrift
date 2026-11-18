@@ -205,3 +205,17 @@ func TestAccessTargetsSearchIsCappedAndReportsTheTotal(t *testing.T) {
 		t.Fatalf("a non-identity is not a target, and the list is [] not null: %+v", none)
 	}
 }
+
+func TestRoleUsageNamesCallersItCouldNotDecide(t *testing.T) {
+	dir := t.TempDir()
+	role := models.AssetNode{ARN: "arn:aws:iam::1:role/target", Name: "target", AccountID: "1", AssetType: models.AssetIAMRole, ScanID: "wc2", Properties: map[string]any{}}
+	user := models.AssetNode{ARN: "arn:aws:iam::1:user/nodocs", Name: "nodocs", AccountID: "1", AssetType: models.AssetIAMUser, ScanID: "wc2", Properties: map[string]any{}}
+	whoCanScan(t, dir, []models.AssetNode{role, user})
+	rr := httptest.NewRecorder()
+	GetRoleUsage(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/wc2/identities/usage?arn="+role.ARN, nil), "id", "wc2"))
+	var got schema.RoleUsageResponse
+	mustDecode(t, rr, &got)
+	if got.Unknown != 1 || len(got.UnknownCallers) != 1 || got.UnknownCallers[0].ReasonText == "" || len(got.Assumers) != 0 {
+		t.Fatalf("an undecided caller must be named, not counted only: %+v", got)
+	}
+}

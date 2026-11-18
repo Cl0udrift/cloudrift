@@ -6,21 +6,13 @@ import { formatQueryError } from "../api/httpError";
 import { queryKeys } from "../api/queryKeys";
 import { TargetPicker } from "../components/access/TargetPicker";
 import { ActionPicker } from "../components/access/ActionPicker";
-import { AccessFlow } from "../components/access/AccessFlow";
-import { accessSentence } from "../lib/accessSentence";
+import { CallerCard, CountTile, UnknownCallersList } from "../components/access/CallerCard";
 import { whoCanCsv } from "../lib/accessExport";
 import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
 import { StateChip, type Tone } from "../components/ui/StatusChip";
 import { useScanContext } from "../hooks/useScanContext";
 import { actionFits, actionsFor, kindOf, type TargetKind } from "../lib/accessActions";
-
-// Access statuses, not risk verdicts: red is kept for findings.
-const statusChip: Record<string, [Tone, string, string]> = {
-  VALIDATED_ALLOWED: ["info", "●", "Can"],
-  ALLOWED_PENDING_CONTROLS: ["hyp", "◐", "Allowed by policies, org controls unchecked"],
-  CONDITIONAL: ["hyp", "◐", "Conditional"]
-};
 
 const ACTION_HELP: Record<string, string> = {
   "sts:AssumeRole": "assume this role",
@@ -37,15 +29,6 @@ const ACTION_HELP: Record<string, string> = {
   "iam:PutRolePolicy": "write an inline policy on this role",
   "iam:UpdateAssumeRolePolicy": "rewrite this role's trust policy"
 };
-
-function Tile({ label, value, tone, hint }: { label: string; value: number; tone: Tone; hint: string }) {
-  return (
-    <div className={`cr-tone-${tone} rounded-lg border p-3`} title={hint}>
-      <div className="text-2xl font-semibold tabular-nums">{value}</div>
-      <div className="text-xs font-medium">{label}</div>
-    </div>
-  );
-}
 
 /** "Who can do this to that?" asked of the stored policies. The reverse of looking at one identity. */
 export function AccessExplorerPage() {
@@ -121,9 +104,9 @@ export function AccessExplorerPage() {
                   Who can {ACTION_HELP[action] ?? action}{targetItem ? <>: <span className="break-all">{targetItem.name}</span></> : null}?
                 </h2>
                 <div className="grid grid-cols-3 gap-3">
-                  <Tile label="Can" value={result.data.allowed} tone="info" hint="Allowed by stored policy" />
-                  <Tile label="Probably" value={result.data.possible} tone="hyp" hint="Allowed, but organization controls were not checked" />
-                  <Tile label="Not checked" value={result.data.unknown} tone="unk" hint="Could not be decided: not allowed, not ruled out" />
+                  <CountTile label="Can" value={result.data.allowed} tone="info" hint="Allowed by stored policy" />
+                  <CountTile label="Probably" value={result.data.possible} tone="hyp" hint="Allowed, but organization controls were not checked" />
+                  <CountTile label="Not checked" value={result.data.unknown} tone="unk" hint="Could not be decided: not allowed, not ruled out" />
                 </div>
                 <p className="cr-helper">{result.data.evaluated} users and roles were checked against stored policies.</p>
                 {result.data.callers.length === 0 ? (
@@ -133,41 +116,10 @@ export function AccessExplorerPage() {
                   </p>
                 ) : (
                   <ul className="space-y-3">
-                    {result.data.callers.map((c) => {
-                      const [tone, glyph, label] = statusChip[c.status] ?? statusChip.CONDITIONAL;
-                      const verb = ACTION_HELP[action] ?? action;
-                      return (
-                        <li key={c.arn} className="hs-card space-y-3 p-4">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <span className="text-xs uppercase text-slate-500">{c.kind}</span>{" "}
-                              {c.kind === "user" ? <Link className="break-all text-base font-semibold underline" to={`/principals?principal=${encodeURIComponent(c.arn)}`}>{c.name}</Link> : <span className="break-all text-base font-semibold">{c.name}</span>}
-                              <span className="ml-2 text-xs text-slate-500">{c.account_id}</span>
-                            </div>
-                            <StateChip tone={tone} glyph={glyph} label={label} title={c.reason} />
-                          </div>
-                          <p className="text-sm">{accessSentence(c.name, verb, c.paths?.[0])}</p>
-                          {(c.paths ?? []).map((path, i) => <AccessFlow key={i} steps={path.steps} />)}
-                          {(c.paths?.length ?? 0) === 0 && (c.reason_text || c.reason) ? <p className="text-xs text-slate-500">{c.reason_text || c.reason}</p> : null}
-                        </li>
-                      );
-                    })}
+                    {result.data.callers.map((c) => <CallerCard key={c.arn} caller={c} verb={ACTION_HELP[action] ?? action} />)}
                   </ul>
                 )}
-                {result.data.unknown_callers.length > 0 ? (
-                  <details className="hs-card p-4" open={result.data.callers.length === 0}>
-                    <summary className="hs-focus-ring cursor-pointer rounded font-medium">Not checked ({result.data.unknown_callers.length}): could not be decided</summary>
-                    <p className="cr-helper mt-1">They are not shown as allowed, and they are not ruled out.</p>
-                    <ul className="mt-2 divide-y divide-slate-200 dark:divide-slate-800">
-                      {result.data.unknown_callers.map((c) => (
-                        <li key={c.arn} className="py-2">
-                          <span className="text-xs uppercase text-slate-500">{c.kind}</span> <span className="break-all font-medium">{c.name}</span> <span className="text-xs text-slate-500">{c.account_id}</span>
-                          <p className="text-xs text-slate-500">{c.reason_text}</p>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                ) : null}
+                <UnknownCallersList callers={result.data.unknown_callers} open={result.data.callers.length === 0} />
                 <div className="flex flex-wrap gap-3 text-xs">
                   <button type="button" className="hs-btn-default px-2 py-1" onClick={() => {
                     const blob = new Blob([whoCanCsv(result.data, targetItem?.name ?? arn)], { type: "text/csv" });

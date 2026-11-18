@@ -18,6 +18,53 @@ import { PolicyInventoryNotice } from "../components/identities/PolicyInventoryN
 import { StatePanel } from "../components/StatePanel";
 import { useScanContext } from "../hooks/useScanContext";
 
+const CLASS_LABEL: Record<string, string> = {
+  SERVICE_LINKED_ROLE: "Service-linked",
+  SAME_ACCOUNT: "Same account",
+  AWS_SERVICE_ROLE: "AWS service role",
+  EXTERNAL_DELEGATED: "Trusts an outside account",
+  INTERNAL_CROSS_ACCOUNT: "Trusts another of your accounts",
+  INTERNAL_NOT_SCANNED: "Trusts an account not scanned",
+  UNKNOWN_ORG_MEMBERSHIP: "Trusts an account of unknown membership",
+  FEDERATED_ROLE: "Federated",
+  MIXED_TRUST: "Mixed trust",
+  UNRESOLVED: "Unresolved",
+  UNCLASSIFIED: "Unclassified"
+};
+const humanize = (c: string) => CLASS_LABEL[c] ?? c.toLowerCase().replace(/_/g, " ");
+
+function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" aria-pressed={on} onClick={onClick} className={`rounded-full border px-3 py-1 text-xs transition-colors hover:border-cyan-500 ${on ? "border-cyan-500 bg-cyan-500/15 font-medium" : "border-slate-300 dark:border-slate-700"}`}>
+      {children}
+    </button>
+  );
+}
+
+/** The four numbers a reviewer wants first. Each is a filter on the list below. */
+function RoleTiles({ scanId, idleDays, active, onPick }: { scanId: string; idleDays: number; active: { idle: boolean; broad: boolean; unknown: boolean; none: boolean }; onPick: (key: "all" | "idle" | "broad" | "unknown") => void }) {
+  const useCount = (key: string, extra: Record<string, string>) =>
+    useQuery({ queryKey: ["identities-count", scanId, key, extra], queryFn: () => apiClient.listIdentities(scanId, { page: 1, page_size: 1, ...extra }), enabled: Boolean(scanId) });
+  const all = useCount("all", {});
+  const idle = useCount("idle", { idle: "true", idle_days: String(idleDays) });
+  const broad = useCount("broad", { broad: "candidate" });
+  const unknown = useCount("unknown", { unknown: "true" });
+  const tile = (key: "all" | "idle" | "broad" | "unknown", label: string, q: { data?: { total_items: number } }, on: boolean, hint: string) => (
+    <button type="button" aria-pressed={on} title={hint} onClick={() => onPick(key)} className={`hs-card p-3 text-left ${on ? "ring-1 ring-cyan-500" : ""}`}>
+      <span className="block text-2xl font-semibold tabular-nums">{q.data ? q.data.total_items : "…"}</span>
+      <span className="block text-xs font-medium">{label}</span>
+    </button>
+  );
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {tile("all", "Roles", all, active.none, "All IAM roles in this scan")}
+      {tile("idle", `Idle ${idleDays}+ days`, idle, active.idle, "No recent use reported by IAM, or none in its tracking window")}
+      {tile("broad", "Declared broad permission", broad, active.broad, "A policy document declares a broad permission. Declared is not evaluated access.")}
+      {tile("unknown", "Unknown evidence", unknown, active.unknown, "Policy documents were not collected, so nothing can be said either way")}
+    </div>
+  );
+}
+
 export function IdentitiesPage() {
   const { selectedScanId } = useScanContext();
   const [params, setParams] = useSearchParams();
@@ -98,8 +145,27 @@ export function IdentitiesPage() {
         <ScanRequired />
       ) : (
         <div className="space-y-6">
-        <AccountPermissionMatrix scanId={selectedScanId} onSelect={selectFromMatrix} idleDays={idleDays} onIdleDays={(d) => { const n = new URLSearchParams(params); if (d === IDLE_DAYS) n.delete("idle_days"); else n.set("idle_days", String(d)); n.delete("page"); setParams(n); }} />
-        <UserMatrix scanId={selectedScanId} />
+        <RoleTiles
+          scanId={selectedScanId}
+          idleDays={idleDays}
+          active={{ idle: idleOnly, broad: broad === "candidate", unknown: unknownOnly, none: !idleOnly && broad !== "candidate" && !unknownOnly && !category }}
+          onPick={(key) => {
+            const n = new URLSearchParams(params);
+            for (const k of ["idle", "idle_days", "broad", "unknown", "category", "role", "page"]) n.delete(k);
+            if (key === "idle") { n.set("idle", "true"); n.set("idle_days", String(idleDays)); }
+            if (key === "broad") n.set("broad", "candidate");
+            if (key === "unknown") n.set("unknown", "true");
+            setImpact(false);
+            setParams(n);
+          }}
+        />
+        <details className="hs-card p-4">
+          <summary className="hs-focus-ring cursor-pointer rounded text-sm font-semibold">Per-account tables: declared permissions of roles and users</summary>
+          <div className="mt-4 space-y-6">
+            <AccountPermissionMatrix scanId={selectedScanId} onSelect={selectFromMatrix} idleDays={idleDays} onIdleDays={(d) => { const n = new URLSearchParams(params); if (d === IDLE_DAYS) n.delete("idle_days"); else n.set("idle_days", String(d)); n.delete("page"); setParams(n); }} />
+            <UserMatrix scanId={selectedScanId} />
+          </div>
+        </details>
         {category || unknownOnly || idleOnly ? (
           <p className="cr-helper flex flex-wrap items-center gap-2" role="status">
             Showing roles with {idleOnly ? `no recent use reported by IAM (${idleDays} days or more, or none in the tracking window)` : unknownOnly ? "unknown policy evidence" : `declared ${category}`}{accountID ? ` in account ${accountID}` : ""}.
@@ -108,8 +174,19 @@ export function IdentitiesPage() {
         ) : null}
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <div className="space-y-3">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <input className="hs-input sm:col-span-2" placeholder="Search role or account" value={q} onChange={(e) => patch("q", e.target.value)} aria-label="Search role or account" />
+            <input className="hs-input" placeholder="Search role or account" value={q} onChange={(e) => patch("q", e.target.value)} aria-label="Search role or account" />
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Quick filters">
+              <Chip on={trust === "external"} onClick={() => patch("trust", trust === "external" ? "" : "external")}>Trusts outside accounts</Chip>
+              <Chip on={workload === "attached"} onClick={() => patch("workload", workload === "attached" ? "" : "attached")}>Runs a workload</Chip>
+              <Chip on={purpose === "SERVICE_LINKED_ROLE"} onClick={() => patch("purpose", purpose === "SERVICE_LINKED_ROLE" ? "" : "SERVICE_LINKED_ROLE")}>Service-linked</Chip>
+              {idleOnly ? (
+                <span className="flex flex-wrap items-center gap-1" role="group" aria-label="Idle after">
+                  <span className="text-xs text-slate-500">Idle after</span>
+                  {[30, 60, 90, 180, 365].map((d) => (
+                    <Chip key={d} on={idleDays === d} onClick={() => { const n = new URLSearchParams(params); if (d === IDLE_DAYS) n.delete("idle_days"); else n.set("idle_days", String(d)); n.delete("page"); setParams(n); }}>{d}d</Chip>
+                  ))}
+                </span>
+              ) : null}
             </div>
             <details open={Boolean(accountID || category || unknownOnly || idleOnly || region || purpose || params.get("trust") || params.get("broad") || params.get("evidence") || params.get("workload") || params.get("type"))}>
               <summary className="hs-focus-ring w-fit cursor-pointer rounded text-xs font-medium text-cyan-800 dark:text-cyan-300">More filters</summary>
@@ -190,14 +267,17 @@ export function IdentitiesPage() {
                       patch("role", role.role_arn);
                     }}
                   >
-                    <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{role.name}</p>
-                    <p className="cr-ident !text-[11px] text-slate-500">{role.role_arn}</p>
-                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                      {role.account_id} · {role.classifications.join(", ") || "unclassified"} · workloads {role.workload_count}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="break-all text-base font-semibold text-slate-900 dark:text-slate-100" title={role.role_arn}>{role.name}</p>
+                      <span className="text-xs text-slate-500">{role.account_id}</span>
+                    </div>
+                    <p className="mt-2 flex flex-wrap gap-1.5 text-xs">
+                      {(role.classifications.length ? role.classifications : ["UNCLASSIFIED"]).map((c) => <span key={c} className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">{humanize(c)}</span>)}
+                      <span className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">{lastUsedLabel(role.last_used_status, role.days_since_used, role.last_used_region).text}</span>
+                      {role.workload_count > 0 ? <span className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">{role.workload_count} workload{role.workload_count === 1 ? "" : "s"}</span> : null}
                     </p>
-                    <p className="cr-helper mt-0.5">{lastUsedLabel(role.last_used_status, role.days_since_used, role.last_used_region).text}</p>
                     {role.broad_candidates && role.broad_candidates.length > 0 ? (
-                      <p className="mt-1 flex flex-wrap gap-1">{role.broad_candidates.map((c) => <StateChip key={c} tone="warn" glyph="◆" label={`Declared: ${c}`} title="Declared in a policy document. Not evaluated access." />)}</p>
+                      <p className="mt-2 flex flex-wrap gap-1">{role.broad_candidates.map((c) => <StateChip key={c} tone="warn" glyph="◆" label={`Declared: ${c}`} title="Declared in a policy document. Not evaluated access." />)}</p>
                     ) : null}
                   </button>
                 </li>
@@ -266,10 +346,16 @@ function RoleDetail({
   return (
     <article className="hs-card space-y-4 p-5">
       <header>
-        <h2 className="sr-only">IAM role {profile.role_arn}</h2>
-        <CopyIdentifier value={profile.role_arn} />
-        <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{profile.assumption}</p>
-        <p className="mt-1 text-xs text-slate-500">{(profile.classifications ?? []).join(", ")} · collection {profile.collection_status}</p>
+        <h2 className="break-all text-lg font-semibold text-slate-900 dark:text-slate-100">{profile.role_arn.split("/").pop()}</h2>
+        <p className="mt-2 flex flex-wrap gap-1.5 text-xs">
+          {(profile.classifications ?? []).map((c) => <span key={c} className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">{humanize(c)}</span>)}
+          <span className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">collection {profile.collection_status}</span>
+        </p>
+        <div className="mt-2"><CopyIdentifier value={profile.role_arn} /></div>
+        <details className="mt-2 text-xs text-slate-500">
+          <summary className="cursor-pointer">About this role's analysis</summary>
+          <p className="mt-1">{profile.assumption}</p>
+        </details>
       </header>
       <RoleUsage scanId={scanId} roleArn={profile.role_arn} />
       <section aria-label="Role activity">

@@ -1378,6 +1378,7 @@ export interface RoleUsageResponse {
   role_arn: string;
   assumers: RoleAssumer[];
   workloads: WorkloadAttachment[];
+  unknown_callers?: UnknownCaller[];
   evaluated: number;
   allowed: number;
   possible: number;

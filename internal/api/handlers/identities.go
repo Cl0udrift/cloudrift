@@ -113,9 +113,18 @@ func GetRoleUsage(outputDir string) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "role_not_found", "iam role was not collected in this scan", nil)
 			return
 		}
-		assumers, evaluated, unknown := blastradius.RoleAssumers(scanID, role, assets, rels, time.Time{})
+		assumers, unknownCallers, evaluated := blastradius.WhoCanDetailed(scanID, iamauth.ActionAssumeRole, role, assets, rels, time.Time{})
+		for i := range assumers {
+			assumers[i].ReasonText = reasonText(assumers[i].Reason)
+		}
+		for i := range unknownCallers {
+			unknownCallers[i].ReasonText = reasonText(unknownCallers[i].Reason)
+		}
+		if unknownCallers == nil {
+			unknownCallers = []schema.UnknownCaller{}
+		}
 		out := schema.RoleUsageResponse{
-			ScanID: scanID, RoleARN: role.ARN, Assumers: assumers, Evaluated: evaluated, Unknown: unknown,
+			ScanID: scanID, RoleARN: role.ARN, Assumers: assumers, Evaluated: evaluated, Unknown: len(unknownCallers), UnknownCallers: unknownCallers,
 			Workloads: ciem.WorkloadsForRole(role.ARN, assets, rels),
 			Notes: []string{
 				"Callers are users and roles in this scan, checked against the trust policy and their own policies. Principals in accounts that were not scanned, and federated or service principals, are not listed here.",
@@ -140,7 +149,6 @@ func GetRoleUsage(outputDir string) http.HandlerFunc {
 	}
 }
 
-// whoCanActions are the actions the explorer evaluates: role assumption and the identity-only IAM actions.
 // GetAccessTargets searches the users, groups and roles the Access Explorer can be asked about. It returns at
 // most `limit` matches (default 25, at most 100) and the total, so the picker works on large accounts.
 // With arn it returns that one target, so a link can show its name.
@@ -236,6 +244,7 @@ func reasonText(code string) string {
 	return code
 }
 
+// whoCanAction reports the actions the explorer evaluates: role assumption and the identity-only IAM actions.
 func whoCanAction(action string) bool {
 	if action == iamauth.ActionAssumeRole {
 		return true

@@ -375,7 +375,8 @@ type RoleUsageResponse struct {
 	Evaluated int                  `json:"evaluated"`
 	Allowed   int                  `json:"allowed"`
 	Possible  int                  `json:"possible"`
-	// Unknown counts callers that could not be evaluated because policy documents were missing.
-	Unknown int      `json:"unknown"`
-	Notes   []string `json:"notes"`
+	// Unknown counts callers that could not be evaluated; UnknownCallers names them with the reason.
+	Unknown        int             `json:"unknown"`
+	UnknownCallers []UnknownCaller `json:"unknown_callers"`
+	Notes          []string        `json:"notes"`
 }
