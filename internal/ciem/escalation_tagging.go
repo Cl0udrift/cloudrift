@@ -105,6 +105,9 @@ func afterTaggingFindings(p models.AssetNode, report schema.IdentityAttackReport
 		if i := strings.LastIndex(en.Change, "tag "); i >= 0 {
 			ev["tag"] = en.Change[i+len("tag "):]
 		}
+		tsteps := 1 + stepsFor(tr.Technique)
+		ev["exploitability"] = exploitability(ExploitNeedsEdit, tsteps, p, "the tag change is made by "+who+" and the path works only after it")
+		ev["severity_factors"] = append([]string{factorLine(ExploitNeedsEdit, tsteps)}, ev["severity_factors"].([]string)...)
 		sev = attachReach(p, rc, sev, ev)
 		title := text.title(p.Name, target) + " after " + gerund(en.Change) + onTarget(en.Change)
 		if !direct {

@@ -240,6 +240,14 @@ func escalationFinding(p models.AssetNode, family string, g *escalationGroup, by
 		"severity_factors":        escalationFactors(e, privileged),
 		"remediation_options":     text.options,
 	}
+	steps := stepsFor(e.Technique)
+	level := levelFor(e.Kind, e.Technique, steps)
+	extra := []string{}
+	if level == ExploitNeedsState {
+		extra = append(extra, "the agent, ECS Exec or network reachability it needs was not collected")
+	}
+	ev["exploitability"] = exploitability(level, steps, p, extra...)
+	ev["severity_factors"] = append([]string{factorLine(level, steps)}, ev["severity_factors"].([]string)...)
 	sev = attachReach(p, rc, sev, ev)
 	f := identityFinding(p, CatEscalation+"|"+family+"|"+e.TargetARN, sev, text.title(p.Name, target), text.impact, text.recommendation, ev)
 	f.RemediationCmd = text.command(p, e.TargetARN)
@@ -271,6 +279,10 @@ func rolledUpEscalation(p models.AssetNode, family string, targets []string, byT
 		"severity_factors":        []string{fmt.Sprintf("it reaches %d targets by one technique, more than the %d listed individually", len(targets), escalationCap), fmt.Sprintf("%d of them hold administrative access", privileged)},
 		"remediation_options":     text.options,
 	}
+	rsteps := stepsFor(byTarget[targets[0]].esc.Technique)
+	rlevel := levelFor(kind, byTarget[targets[0]].esc.Technique, rsteps)
+	ev["exploitability"] = exploitability(rlevel, rsteps, p)
+	ev["severity_factors"] = append([]string{factorLine(rlevel, rsteps)}, ev["severity_factors"].([]string)...)
 	sev = attachReach(p, rc, sev, ev)
 	f := identityFinding(p, CatEscalation+"|"+family+"|rolled_up", sev, text.title(p.Name, fmt.Sprintf("%d targets", len(targets))), text.impact+" It reaches "+fmt.Sprint(len(targets))+" targets, so they are rolled up into one finding.", text.recommendation, ev)
 	f.RemediationCmd = text.command(p, targets[0])
@@ -374,6 +386,8 @@ func unverifiedSwitchFindings(p models.AssetNode, report schema.IdentityAttackRe
 			},
 		}
 		sev := models.SeverityMedium
+		ev["exploitability"] = exploitability(ExploitUnknown, 1, p, "the policy's other versions were not read, so whether a broader one exists is unknown")
+		ev["severity_factors"] = append([]string{exploitLabel[ExploitUnknown]}, ev["severity_factors"].([]string)...)
 		sev = attachReach(p, rc, sev, ev)
 		f := identityFinding(p, CatEscalation+"|SET_DEFAULT_POLICY_VERSION|"+tr.TargetARN+"|unverified", sev,
 			p.Name+" can change which version of a policy applies to "+target+", and the versions were not read",

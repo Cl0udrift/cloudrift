@@ -534,3 +534,72 @@ func TestUntaggedAdminInstanceIsAValidatedFindingOnTheRole(t *testing.T) {
 		t.Fatalf("with no Name tag the role can already act: one validated finding on the role, got %+v", got)
 	}
 }
+
+func exploit(t *testing.T, f models.Finding) map[string]any {
+	t.Helper()
+	e, ok := f.Evidence["exploitability"].(map[string]any)
+	if !ok {
+		t.Fatalf("an escalation finding must say how hard it is to use: %+v", f.Evidence)
+	}
+	return e
+}
+
+func TestEscalationFindingsSayHowHardTheyAreToUse(t *testing.T) {
+	// Several ordered calls: pass a role to ECS, register a task definition, run the task.
+	assets := []models.AssetNode{
+		escRole("Dev", passRoleTo([]string{"AdminTask"}, "ecs:RegisterTaskDefinition", "ecs:RunTask"), ""),
+		escRole("AdminTask", adminDoc, svcTrust("ecs-tasks.amazonaws.com")),
+	}
+	fs, _ := escFindings(t, assets, time.Minute)
+	got := byKind(fs, "PASS_ROLE_ECS_004")
+	if len(got) != 1 {
+		t.Fatalf("setup: %d findings", len(got))
+	}
+	e := exploit(t, got[0])
+	if e["level"] != ExploitSeveral || e["steps"] != 3 {
+		t.Fatalf("pass-role plus two required calls is several calls: %+v", e)
+	}
+	if !strings.Contains(fmt.Sprint(e["depends_on"]), "no session policy") {
+		t.Fatalf("the finding must name what the result rests on: %v", e["depends_on"])
+	}
+	if factors := got[0].Evidence["severity_factors"].([]string); !strings.HasPrefix(factors[0], "Several calls") {
+		t.Fatalf("the level leads the severity factors: %v", factors)
+	}
+}
+
+func TestExploitabilityOfTagUnverifiedAndDirectCases(t *testing.T) {
+	assets, rels := keyRotationWorld(true, nil)
+	if e := exploit(t, findingsFor(t, assets, rels, "manager")[0]); e["level"] != ExploitNeedsEdit || e["steps"] != 2 {
+		t.Fatalf("a tag-conditioned path needs a change first, in two steps: %+v", e)
+	}
+	raw, rrels := raynorWorld("")
+	fs, _ := ScoreEscalations(context.Background(), raw, rrels, time.Minute, escNow)
+	if e := exploit(t, fs[0]); e["level"] != ExploitUnknown {
+		t.Fatalf("a switch whose versions were not read is unknown: %+v", e)
+	}
+	raw, rrels = raynorWorld("collected", readDoc, adminDoc, readDoc, readDoc)
+	fs, _ = ScoreEscalations(context.Background(), raw, rrels, time.Minute, escNow)
+	var direct *models.Finding
+	for i := range fs {
+		if fs[i].Evidence["technique"] == "SET_DEFAULT_POLICY_VERSION" {
+			direct = &fs[i]
+		}
+	}
+	if direct == nil {
+		t.Fatal("setup: the confirmed switch must be a finding")
+	}
+	if e := exploit(t, *direct); e["level"] != ExploitDirect || e["steps"] != 1 {
+		t.Fatalf("one allowed call is direct: %+v", e)
+	}
+}
+
+func TestExploitabilityNamesUncheckedOrganizationControlsOnlyWhenTheyWereNotCollected(t *testing.T) {
+	bare := models.AssetNode{Name: "x", Properties: map[string]any{}}
+	if d := fmt.Sprint(exploitability(ExploitDirect, 1, bare)["depends_on"]); !strings.Contains(d, "SCP/RCP") {
+		t.Fatalf("no SCP evidence: say it could still block the path: %s", d)
+	}
+	known := models.AssetNode{Name: "x", Properties: map[string]any{"scp_status": "confirmed_absent"}}
+	if d := fmt.Sprint(exploitability(ExploitDirect, 1, known)["depends_on"]); strings.Contains(d, "SCP/RCP") {
+		t.Fatalf("SCPs were recorded, so there is nothing unchecked to name: %s", d)
+	}
+}

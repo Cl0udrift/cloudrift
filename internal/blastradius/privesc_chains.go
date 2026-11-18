@@ -57,6 +57,22 @@ var passRolePlans = []passRolePlan{
 	}},
 }
 
+// TechniqueSteps is how many calls a pass-role or workload technique needs: iam:PassRole plus its required actions, or
+// its required actions alone for a workload technique. It is 0 for a technique this does not know.
+func TechniqueSteps(kind string) int {
+	for _, p := range allPassRolePlans() {
+		if p.kind == kind {
+			return 1 + len(p.actions)
+		}
+	}
+	for _, w := range iamauth.WorkloadEscalations {
+		if w.Kind == kind {
+			return len(w.Required)
+		}
+	}
+	return 0
+}
+
 func lambdaProbe(account string) string {
 	return "arn:aws:lambda:us-east-1:" + account + ":function:cloudrift-probe"
 }

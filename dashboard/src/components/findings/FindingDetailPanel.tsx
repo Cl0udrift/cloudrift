@@ -146,7 +146,7 @@ const IDENTITY_LABELS: Record<string, string> = {
 };
 
 function identityEvidenceRows(ev: Record<string, unknown>): [string, string][] {
-  const skip = new Set(["issue_category", "assessment_version", "principal_arn", "keys", "track", "path", "severity_factors", "remediation_options", "family", "variants", "targets_shown", "reachable_by"]);
+  const skip = new Set(["issue_category", "assessment_version", "principal_arn", "keys", "track", "path", "severity_factors", "remediation_options", "family", "variants", "targets_shown", "reachable_by", "exploitability"]);
   return Object.entries(ev)
     .filter(([k]) => !skip.has(k))
     .map(([k, v]) => [k.replace(/_/g, " "), Array.isArray(v) ? v.map(String).join(", ") : typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)]);
@@ -222,6 +222,11 @@ export function FindingDetailPanelContent({
           {ev.reachable_by ? (
             <Section title="Who can reach this role">
               <ReachableByList reach={ev.reachable_by as never} scanId={scanId} />
+            </Section>
+          ) : null}
+          {ev.exploitability && typeof ev.exploitability === "object" ? (
+            <Section title="How hard is it to use?">
+              <Exploitability value={ev.exploitability as { level: string; label: string; steps: number; depends_on?: string[] }} />
             </Section>
           ) : null}
           {Array.isArray(ev.severity_factors) ? (
@@ -336,5 +341,31 @@ export function FindingDetailPanelError({ error }: { error: unknown }) {
     <StatePanel intent="error" title="Failed to load finding detail">
       <pre className="whitespace-pre-wrap font-sans text-xs">{formatQueryError(error)}</pre>
     </StatePanel>
+  );
+}
+
+const exploitTone: Record<string, string> = {
+  direct: "cr-tone-bad",
+  several: "cr-tone-warn",
+  needs_state: "cr-tone-hyp",
+  needs_edit: "cr-tone-hyp",
+  unknown: "cr-tone-unk"
+};
+
+/** An ordinal level in words, how many calls, and what the answer rests on. There is no score: nothing justifies one. */
+function Exploitability({ value }: { value: { level: string; label: string; steps: number; depends_on?: string[] } }) {
+  return (
+    <div className="space-y-2 text-sm">
+      <p className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full border px-3 py-0.5 text-xs font-medium ${exploitTone[value.level] ?? "cr-tone-unk"}`}>{value.label}</span>
+        <span className="text-xs text-slate-500">{value.steps} {value.steps === 1 ? "call" : "calls"}</span>
+      </p>
+      {(value.depends_on ?? []).length > 0 ? (
+        <div>
+          <p className="cr-kpi-label">This answer rests on</p>
+          <ul className="list-disc space-y-0.5 pl-5">{(value.depends_on ?? []).map((d) => <li key={d}>{d}</li>)}</ul>
+        </div>
+      ) : null}
+    </div>
   );
 }
