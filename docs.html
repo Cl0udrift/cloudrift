@@ -964,7 +964,10 @@ Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge asse
 - **Escalation paths:** from a role session or a user, finds role hops, policy grants, trust rewrites, PassRole chains, group joins and user takeovers, and the S3 objects and secrets reachable at the end
 - **Who and what uses a role:** each role lists the workloads that run as it and the users and roles that can assume it
 - **Credential hygiene:** console access without MFA, and access keys that are old or unused, from the IAM credential report
-- **Honest coverage:** the Coverage page shows, live, what each part collected for the selected scan and what is not covered
+- **Existing resources that run as a role:** CloudFormation stacks, CodeBuild projects, Step Functions state machines, Glue development endpoints, Batch job definitions, App Runner services, SageMaker notebooks, Bedrock AgentCore runtimes, interpreters and browsers, launch templates behind an Auto Scaling group, and CodeDeploy groups. If a caller may change or run one, it gets that resource's role without `iam:PassRole`
+- **Used, not just allowed:** an opt-in read of the CloudTrail event history shows which callers actually assumed a role, next to who is allowed to
+- **IAM Identity Center:** an opt-in view of permission sets, who is assigned to which account (directly or through a group), and which sets are administrative
+- **Honest coverage:** the Coverage page shows, live, what each part collected for the selected scan and what is not covered, with the setting to turn on for anything that is opt-in
 - **Visibility:** Self-hosted dashboard and CLI reports over the same HTTP server — no cloud dependency
 
 ### Current implementation status
@@ -978,8 +981,13 @@ Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge asse
 | `cloudrift query` | Complete | Vector search over Neo4j; optional LLM answer synthesis when a synthesis provider is configured |
 | Neo4j integration | Optional | Adds blast-radius explorer, graph relationships, vector index |
 | IAM users, groups and credentials | Complete (fakes only) | Collects users, groups, memberships, inline and managed policies, boundaries, and console, MFA and access-key state from the credential report. Not yet run against a real AWS account |
-| Role usage | Complete | Role detail shows which workloads run as the role and which users and roles can assume it. Computed from stored policies, not CloudTrail |
-| Coverage page | Complete | Live status of every module, the evaluated actions and attack techniques, refreshed every 15 seconds |
+| Role usage | Complete | Role detail shows which workloads run as the role and which users and roles can assume it, computed from stored policies. With the CloudTrail opt-in it also shows who was seen assuming the role |
+| Existing-resource collectors | Complete (live-tested for five types) | 12 collectors on one `WORKLOAD_RUNS_AS_ROLE` edge, on by default (`scan.service_resources`). Checked on real AWS with a throwaway lab for CloudFormation, CodeBuild, Step Functions, Batch and a launch template; Glue, App Runner, SageMaker, CodeDeploy and AgentCore were not exercised against real resources |
+| CloudTrail assume-role history | Complete (live-tested) | Opt-in (`scan.assume_role_activity`). Bounded by a window of up to 90 days, an event cap and a time budget; a Region that hits a bound is reported as partial |
+| IAM Identity Center | Complete (fakes and a synthetic scan only) | Opt-in (`scan.identity_center`). Needs the organization management account or the delegated administrator. The account used for live checks has no instance, so only the "no instance" path ran against real AWS |
+| `cloudrift verify authz` | Complete (live-tested) | Compares Cloudrift's identity-policy answers with `iam:SimulatePrincipalPolicy`; exits non-zero on a false allow or a bad deny |
+| Coverage page | Complete | Live status of every module, the evaluated actions and attack techniques, the reference-catalog benchmark, and what is opt-in, refreshed every 15 seconds |
+| Diff | Complete | New and resolved findings, plus findings whose severity or evidence changed (new callers, techniques, exploitability) while their ID stayed the same |
 | Local embeddings | Stub | `provider=local` will error until implemented |
 
 **Try immediately (no AWS):** `cloudrift demo generate && cloudrift dashboard --open`. A live scan (`cloudrift scan`) runs against a real AWS organization with credentials configured.
@@ -1082,10 +1090,13 @@ For the full `dashboard` flag reference, see [CLI Commands](#cli-commands). For 
 | Accounts | Per-account risk breakdown |
 | Diff | Compare two scans side-by-side |
 | Trust Report | IAM trust findings, external principals |
+| Inventory | Every collected resource by service, with related findings, what changed since the previous scan, and collection coverage. Opt-in collectors that are off say so and link to Settings |
 | Users & Groups | Every IAM user and group, which policies apply directly or through a group, explicit Deny markers, and console, MFA and access-key findings |
-| Identities | Per-role and per-account permission matrix, an IAM users table beside it, and a "who and what uses this role" section on each role |
-| Access Explorer | Who can do an action to a chosen user, group or role, asked of the stored policies. In the same account, a role trust policy that names a user or role is enough on its own, as in AWS |
-| Coverage | What is covered, what is not, and live collection state for the selected scan |
+| Identities | Per-role and per-account permission matrix, an IAM users table beside it, and a "who and what uses this role" section on each role, including workloads of every collected type and, with the CloudTrail opt-in, who was seen assuming it |
+| Identity Center | IAM Identity Center: people and groups with the accounts they reach, permission sets (administrative ones flagged, linked to the IAM role each creates), and accounts. Opt-in |
+| Access Explorer | Who can do an action to a chosen user, group or role, asked of the stored policies, with the route drawn as boxes and a CSV export. In the same account, a role trust policy that names a user or role is enough on its own, as in AWS |
+| Coverage | What is covered, what is not, the reference-catalog benchmark, and live collection state for the selected scan |
+| Settings | Every collection and scan setting, including the opt-in collectors, saved to `cloudrift.toml` |
 | External Entities | Entity-centric view with blast actions |
 | Blast Explorer | 3D graph visualization of risk paths (Neo4j required) |
 | Alerting | Slack webhooks, alert rules, event history |
@@ -1488,6 +1499,7 @@ Reference for each `cloudrift` subcommand. This is the canonical command and fla
 | **`cloudrift report`** | Reads `findings.json` for a scan and renders it as table, json, csv, markdown, excel, or sarif. |
 | **`cloudrift dashboard`** | Serves the embedded SPA + REST API over scans under `output_dir`. |
 | **`cloudrift query`** | Vector retrieval over the Neo4j projection, with optional LLM answer synthesis grounded in the retrieved findings. |
+| **`cloudrift verify authz`** | Checks Cloudrift's own authorization answers against `iam:SimulatePrincipalPolicy` for a stored scan. |
 | **`cloudrift version`** | Prints the build version. |
 
 ### `cloudrift scan`
@@ -1585,6 +1597,19 @@ cloudrift query "show high severity external trust" --scan-id latest
 cloudrift query --query "dangling DNS records" --format json
 ```
 
+### `cloudrift verify authz`
+
+Takes users and roles from a stored scan, asks Cloudrift's evaluator whether each may perform identity-only IAM actions, asks the IAM policy simulator the same question, and reports the agreement. Read-only: the only AWS call is `iam:SimulatePrincipalPolicy`. Callers with SCPs or RCPs in the scan are reported as *not comparable*, because the simulator does not apply them.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--scan-id` | `latest` | Scan to check |
+| `--output-dir` | from config | Where scans are stored |
+| `--max-probes` | `200` | At most this many simulator calls |
+| `--json` | `false` | Print the report as JSON |
+
+The report gives what Cloudrift answered (allowed, denied, unknown), how many agree, and any false allow, bad deny or conservative answer (Cloudrift unknown where AWS allows). It exits non-zero on a false allow or a bad deny. On a live account, 189 probes agreed with the simulator: 65 allowed and 124 unknown by Cloudrift, no false allow and no bad deny.
+
 ### `cloudrift version`
 
 Prints the build version. No flags.
@@ -1613,6 +1638,20 @@ Key sections:
 - `[neo4j]` — `uri`, `username`, `password_env` (optional)
 - `[embeddings]` — embedding provider (default: `openai`, local stub)
 - `[synthesis]` — optional LLM answer synthesis for `query` (`provider` default `anthropic`, `model` default `claude-opus-4-8`, `api_key_env` default `ANTHROPIC_API_KEY`, `max_tokens` default `2048`). Synthesis only runs when the API key env var is set; otherwise `query` is retrieval-only.
+
+#### Collection settings (`[scan]`)
+
+These are also on the dashboard **Settings** page, which writes them to `cloudrift.toml`. Anything opt-in is off until you turn it on; the Inventory and Coverage pages say so and link here.
+
+| Key | Default | What it does |
+|---|---|---|
+| `iam_policy_inventory` | `true` | Collects every IAM role, user, group and policy document. The base of permission analysis |
+| `service_resources` | `true` | Collects existing CloudFormation stacks, CodeBuild projects, Step Functions state machines, Glue development endpoints, Batch job definitions, App Runner services, SageMaker notebooks, AgentCore resources, launch templates and CodeDeploy groups, and the role each runs as. Needs extra read permissions; a Region without them reports a failed collector, never "no resources" |
+| `resource_policies` | `false` | Secrets Manager secrets and policies, KMS key policies and grants, Lambda policies, RDS instances, VPC endpoints. Never reads a secret value |
+| `service_last_accessed` | `false` | IAM access advisor data per role |
+| `assume_role_activity` | `false` | CloudTrail `AssumeRole` history through `LookupEvents`. `assume_role_activity_days` (1 to 90, default 30) and `assume_role_activity_seconds` (default 120 per account) bound it |
+| `identity_center` | `false` | IAM Identity Center permission sets, assignments, users and groups. Needs the organization management account or the delegated administrator |
+| `escalation_search_seconds` | `120` | Time budget for the scan-time escalation search. Principals it does not reach are counted in the scan's coverage, never reported as clean. `0` turns it off |
 
 #### AWS profile selection (`[aws]`)
 
@@ -1685,7 +1724,7 @@ This section describes the detection and scoring model used by collectors/scorer
 - **Application-layer bugs** — XSS, SQLi, auth bypass in your apps are not inferred from DNS alone.
 - **Insider threat or runtime exfiltration** — no host-based or network IDS story here.
 - **Misconfigurations inside VPC-only private APIs** unless collectors and IAM permissions reach them.
-- **Historical CloudTrail proof of abuse** — trust scoring uses IAM last-used metadata, not full log analytics (see "Not yet collected" below).
+- **Historical CloudTrail proof of abuse** — trust scoring uses IAM last-used metadata. The optional AssumeRole history (`scan.assume_role_activity`) shows that a call was made inside a window of at most 90 days; it is not full log analytics, and no record does not show a call never happened.
 - **Effective IAM permissions in every case** — with policy inventory on, Cloudrift reads inline and managed policy documents and evaluates a catalog of actions (see the Coverage page), but a result is only as complete as the evidence collected: SCPs and RCPs need management-account access, session policies are not collected from STS, VPC endpoint policies are not applied, and anything missing is reported as UNKNOWN rather than allowed. With policy inventory off, only policy names and inline documents are read. See the permission-tier caveats below.
 - **Confirmed third-party CNAME pairing** — third-party takeover signatures (GitHub Pages, Heroku, Shopify) match on **response-body fingerprints** and can false-positive. A planned refinement pairs each match with the record's CNAME-target suffix (`github.io`, `herokuapp.com`, `myshopify.com`) before confirming.
 - **Guaranteed completeness** — DNS/HTTP probes can miss transient failures; false positives and false negatives are possible; human review of `evidence` fields is expected. Per-account scan failures further limit coverage (see **Scan coverage** below).
@@ -1761,6 +1800,18 @@ With IAM policy inventory on, Cloudrift also reports risk that sits in identitie
 
 The two compound findings are the reason these were added: a weak credential matters most when it is one step from admin, and an administrative role matters most when running compute holds it. Beyond findings, the dashboard answers the follow-up questions: **Users & Groups** shows what applies to a user and why, the role page lists who and what can use the role, and Blast Explorer searches escalation paths from a role session or a user.
 
+#### 4. Attack paths, existing resources and how they are checked
+
+The attack search starts from a user or a role session and follows what the stored policies allow: role hops, policy grants, trust rewrites, `iam:PassRole` chains to 45 service variants, group joins and user takeovers, and the S3 objects and secrets reachable at the end. It also follows **existing resources that run as a role**: if a caller may change or run a CloudFormation stack, CodeBuild project, Step Functions state machine, Glue development endpoint, Batch job definition, App Runner service, SageMaker notebook, AgentCore runtime, interpreter or browser, a launch template an Auto Scaling group launches from, or a CodeDeploy group that targets tagged instances, it obtains that resource's role without `iam:PassRole`. Each result states what Cloudrift could not see (a stack policy, a job queue, a notebook's state) as *not verified*, never as met.
+
+- **Findings:** every validated direct escalation is a finding (one per principal, technique and target). Each carries an *exploitability* level in words (Direct, Several calls, Depends on state, Needs a change first, Unknown) with the call count and what the answer rests on. There is no numeric score. An escalation on a role lists who can assume it and raises one level when a user with a weak credential can.
+- **Alerting:** the `new_escalation_paths` rule compares a scan with the previous one and fires on a new path.
+- **Diff:** a finding whose ID did not change still appears under *Changed* when its callers, techniques or exploitability moved.
+- **Reference benchmark:** a pinned snapshot of the pathfinding.cloud catalog (91 AWS paths) is run in CI against simulated fixtures. All 91 are detected, with 0 false positives, and each path has negative controls (drop a permission, explicit Deny, a boundary, no collected role). This measures the logic on minimal permissions, not detection in a real account, and the Coverage page says so. Where one path sits inside another, the smaller path legitimately fires when the larger one is broken, so those controls are marked ambiguous instead of counted as passes.
+- **Evaluator checks:** 71 hand-written golden cases tied to AWS documentation (19 use the unchanged example SCPs and RCPs from AWS's own sample repositories) with a zero-false-allow gate; 4,032 generated combinations of principal type, account, resource policy, boundary, session policy and SCP, with expected results taken from the AWS evaluation-logic pages. The 13 SCP example cases were also compared with `iam:SimulateCustomPolicy` on real AWS: 12 agree exactly and one is conservative (Cloudrift unknown where AWS denies), with no false allow. RCPs cannot be compared because the simulator does not evaluate them.
+- **Live checks:** `cloudrift verify authz` (above), and throwaway labs for the CloudGoat scenarios and the existing-resource collectors. A lab deployed in a real account, scanned and destroyed showed five existing-resource techniques fire for exactly the five calls an attacker user held.
+- **Not covered:** a real SCP or RCP hierarchy (the account used has no organization), escalation through Identity Center roles, and a stored policy version that is broader without being administrative.
+
 ### AWS Services Fetched Per Account
 
 Cloudrift assumes a read-only audit role (`CloudriftAuditRole`) into each account in the AWS Organization and collects the following:
@@ -1778,10 +1829,13 @@ Cloudrift assumes a read-only audit role (`CloudriftAuditRole`) into each accoun
 | **IAM credential report** | `iam:GenerateCredentialReport`, `iam:GetCredentialReport` | Console access without MFA, old or unused access keys |
 | **VPC endpoints** *(with resource policies)* | `ec2:DescribeVpcEndpoints`, endpoint policy documents | Shown as evidence; not applied to decisions because a scan cannot see which requests use an endpoint |
 | **IAM Activity** | `RoleLastUsed.LastUsedDate` per role via `iam:GetRole` | Determines how stale a trust relationship is |
+| **Existing resources that run as a role** *(on by default, `scan.service_resources`)* | `cloudformation:DescribeStacks`; `codebuild:ListProjects`, `BatchGetProjects`; `states:ListStateMachines`, `DescribeStateMachine`; `glue:GetDevEndpoints`; `batch:DescribeJobDefinitions`; `apprunner:ListServices`, `DescribeService`; `sagemaker:ListNotebookInstances`, `DescribeNotebookInstance`; `bedrock-agentcore` list and get calls; `ec2:DescribeLaunchTemplates`, `DescribeLaunchTemplateVersions`, `autoscaling:DescribeAutoScalingGroups`; `codedeploy:ListApplications`, `ListDeploymentGroups`, `BatchGetDeploymentGroups`. Per Region, run side by side | Finds resources a caller could change or run to obtain their role. A service the account or Region does not offer is `unsupported`, a denied call is a `failed` collector with the reason |
+| **CloudTrail** *(opt-in, `scan.assume_role_activity`)* | `cloudtrail:LookupEvents` for `AssumeRole` events (up to 90 days, 5,000 events per Region, time budget) | Shows which callers actually assumed a role |
+| **IAM Identity Center** *(opt-in, `scan.identity_center`)* | `sso:ListInstances`, `ListPermissionSets`, `DescribePermissionSet`, `ListManagedPoliciesInPermissionSet`, `ListCustomerManagedPolicyReferencesInPermissionSet`, `GetInlinePolicyForPermissionSet`, `ListAccountsForProvisionedPermissionSet`, `ListAccountAssignments`; `identitystore:DescribeUser`, `DescribeGroup`, `ListGroupMemberships`. Management account or delegated administrator only | Shows who reaches which account through single sign-on |
 | **STS** | `GetCallerIdentity` | Confirms assumed-role identity during cross-account scanning |
 | **Cost Explorer** *(optional)* | `GetCostAndUsage` (last 30 days, grouped by account + service) | Enriches findings with actual monthly spend for FinOps prioritization |
 
-> **Not yet collected (planned):** ACM certificate details, API Gateway custom domains, CloudTrail `AssumeRole` events.
+> **Not collected:** ACM certificate details, API Gateway custom domains, RDS clusters and snapshots, VPCs and security groups. CloudTrail data events, CloudTrail Lake and Athena are not read either (they need customer-owned infrastructure or paid queries).
 
 ### What Is Mapped and How Resources Relate
 
@@ -1906,6 +1960,7 @@ Adjust parameters to match your org's naming and security standards.
 - The role is **read-oriented** inventory and analysis — not `AdministratorAccess` for Cloudrift.
 - The action list covers the read-only APIs the collectors actually call: `organizations:ListAccounts/ListParents/ListTagsForResource/DescribeOrganizationalUnit`, `route53:ListHostedZones/ListResourceRecordSets`, `cloudfront:ListDistributions`, `iam` get/list role + policy reads, `iam:GetAccountAuthorizationDetails`, `iam:GenerateCredentialReport` and `iam:GetCredentialReport` (users, groups and credential state; redeploy the StackSet to pick them up), `sts:AssumeRole`, and S3 reads — `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:GetBucketWebsite`, plus **`s3:GetBucketPolicy`** (required for the S3 bucket-policy resource-exposure detection). `ce:GetCostAndUsage` is optional, for FinOps cost enrichment.
 - If StackSet is **not** deployed org-wide, findings are only as complete as the accounts your role can reach. Collectors are **resilient** — a per-account failure (role not assumable, an action denied) is skipped rather than fatal — and the scan records which accounts it reached. **Incomplete coverage automatically downgrades absence-based "reclaimable/critical" subdomain-takeover verdicts to High** (the "missing" resource could live in an account you couldn't scan). See [Security Coverage](#security-coverage).
+- **Newer collectors need their own read actions.** `iam/stackset-template.yaml` (member accounts) includes the actions for the existing-resource collectors and `cloudtrail:LookupEvents`; `iam/auditing-role-policy.json` (management account) includes the organization SCP and RCP reads and the IAM Identity Center reads. Until an account's role is updated, the affected collector records a `failed` status with the reason `access_denied` for that Region; resources are never reported as absent. The full permission table is in `docs/audits/service-resource-collection.md`.
 - **Least privilege:** grant the actions in the template, not full `*`.
 
 ### Verify deployment
@@ -2005,6 +2060,8 @@ The **`internal/`** packages implement a full pipeline (collectors → validator
 **Demo bundle:** `cloudrift demo generate` writes a **deterministic** scan directory (`demo-<UTC-timestamp>`) with non-empty `findings.json`, `scan-metadata.json` (counts consistent with findings), `relationships.json`, and `assets/*.json`, suitable for dashboard and **graph-tier** Neo4j export (`--neo4j`). This is fixture data, not live AWS collection.
 
 ### 3. API documentation
+
+> **Newer endpoints** (all `GET`, under `/api/scans/{id}` unless noted): `/inventory/summary`, `/inventory/resources`, `/inventory/resource`; `/identities/usage` (who and what uses a role, with who was seen assuming it), `/identities/who-can` (who can do an action to a target, with the route drawn as steps), `/identities/targets` (search for a target); `/identity-center` (permission sets, people and groups, accounts); `/api/coverage` and `/api/coverage/reference` (module status and the reference-catalog benchmark). The scan setting keys are served and saved by `/api/config`.
 
 Base URL: same host as the dashboard (default `http://127.0.0.1:8080` — loopback by default; `--host` opts into a non-loopback bind). JSON only for REST. Authentication is optional and off by default: setting `CLOUDRIFT_API_TOKEN` gates the entire server (REST + UI) behind HTTP Basic auth (see [Security review](#9-security-review)).
 
@@ -2485,6 +2542,8 @@ There is **no database** in core Phase 1–2 flow. **Phase 3** adds a **Neo4j gr
 | Cost Explorer | Single `GetCostAndUsage` call; merged into map; distributed across findings sharing account+service |
 
 **Scale limits:** Suited to org-scale **hundreds–low thousands** of findings per scan on a single host; no horizontal API tier.
+
+**Measured scale of the escalation search** (a synthetic account, four workers, one machine; reproduce with `CLOUDRIFT_SCALE_USERS=1000 go test ./internal/ciem -run ScaleOfTheScanTimeSearch -v`): with 1,000 users and 255 roles the scan-time search takes about 28 seconds. Each search touches every asset, so the time per principal grows with the size of the account: at about 6,000 principals the default 120 second budget reaches roughly a quarter of them, and the rest are reported as *not reached* in the scan's coverage record, never as clean. Raise `scan.escalation_search_seconds` for large accounts. The step that lists who can assume each role runs under a bounded extra allowance and is skipped, counted and stated on the finding if it runs out. On real AWS the 12 existing-resource collectors add about 5 seconds to one account across 18 Regions.
 
 ### 9. Security review
 

@@ -5,10 +5,15 @@ Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge asse
 **Key points:**
 - Calls AWS APIs to inventory edge, IAM-trust, and S3 resource-policy exposure across your org
 - Writes findings to local JSON per scan - read via dashboard, CLI reports, or your own tooling
-- Dashboard provides interactive exploration and a scan control center, plus Users & Groups, per-role usage, an attack and escalation explorer, and a live Coverage page
+- Dashboard provides interactive exploration and a scan control center, plus Inventory, Users & Groups, per-role usage, an Access Explorer, an attack and escalation explorer, an IAM Identity Center view, and a live Coverage page
+- Checks itself: a benchmark against a public escalation catalog, hand-written and generated evaluator cases, and `cloudrift verify authz` against the AWS policy simulator
 - Read-only: no policy is changed and no secret value is read
 - `cloudrift demo generate` populates the UI with sample data (no AWS needed)
 - Neo4j is optional for advanced graph features (blast-radius, vector search, `cloudrift query`)
+
+![A tour of the Cloudrift dashboard: Dashboard, Findings, Inventory, Access Explorer, IAM Identity Center and Coverage](docs/assets/cloudrift-tour.gif)
+
+*A tour of the dashboard. The data is from a scan of a throwaway lab account with names and IDs replaced; the IAM Identity Center page uses sample data. To see the dashboard yourself without AWS: `cloudrift demo generate && cloudrift dashboard --open`.*
 
 ---
 
@@ -35,6 +40,10 @@ All guides now live in one place - pick the format you prefer:
 | Dashboard + REST API | Complete | Works from JSON on disk; Neo4j optional |
 | `cloudrift report` | Complete | Export findings as table, JSON, CSV, markdown, Excel, or SARIF |
 | `cloudrift query` | Complete | Vector search over Neo4j; optional LLM answer synthesis when a synthesis provider is configured |
+| `cloudrift verify authz` | Complete | Compares Cloudrift's IAM answers with `iam:SimulatePrincipalPolicy` on a stored scan; non-zero exit on a false allow or a bad deny |
+| Existing-resource collectors | Complete | 12 collectors for resources that run as a role (CloudFormation, CodeBuild, Step Functions, Glue, Batch, App Runner, SageMaker, AgentCore, launch templates, CodeDeploy). On by default; five types checked on real AWS |
+| CloudTrail assume-role history | Opt-in | Who actually assumed each role (up to 90 days, bounded); checked on real AWS |
+| IAM Identity Center | Opt-in | Permission sets, assignments, people and groups; tested with fakes and a synthetic scan, not yet against a real instance |
 | Neo4j integration | Optional | Adds blast-radius explorer, graph relationships, vector index. Populate it on demand from the dashboard ("Export latest scan to Neo4j") or `POST /api/scans/{id}/neo4j-export`. With the Neo4j GDS plugin installed, export also writes Louvain `community` + PageRank `centrality` (auto clustering); degrades cleanly without it |
 | Local embeddings | Stub | `provider=local` will error until implemented |
 
@@ -93,7 +102,10 @@ cloudrift version
 - **Escalation paths:** from a role session or a user, finds role hops, policy grants, trust rewrites, PassRole chains, group joins and user takeovers, and the S3 objects and secrets reachable at the end
 - **Who and what uses a role:** each role lists the workloads that run as it and the users and roles that can assume it
 - **Credential hygiene:** console access without MFA, and access keys that are old or unused, from the IAM credential report
-- **Honest coverage:** the Coverage page shows, live, what each part collected for the selected scan and what is not covered
+- **Existing resources that run as a role:** if a caller may change or run a CloudFormation stack, CodeBuild project, Step Functions state machine, launch template and so on, it gets that resource's role without `iam:PassRole`
+- **Used, not just allowed (opt-in):** CloudTrail history shows which callers actually assumed a role
+- **IAM Identity Center (opt-in):** who is assigned to which account, through which permission set, and which sets are administrative
+- **Honest coverage:** the Coverage page shows, live, what each part collected for the selected scan and what is not covered; anything opt-in says so and links to Settings
 - **Visibility:** Self-hosted dashboard and CLI reports over the same HTTP server - no cloud dependency
 
 ---
@@ -163,7 +175,7 @@ Optional TOML file (defaults work without it). Search order: `CLOUDRIFT_CONFIG` 
 Key sections:
 
 - `[aws]` - `org_role_name` (empty string = no-assume single-account mode), `scan_mode` (auto, organization or account), `management_profile`, regions to scan
-- `[scan]` - HTTP concurrency, role-assumption concurrency, timeouts
+- `[scan]` - HTTP concurrency, role-assumption concurrency, timeouts, and the collection settings: `iam_policy_inventory` and `service_resources` (on by default), and the opt-in `resource_policies`, `service_last_accessed`, `assume_role_activity`, `identity_center`, plus `escalation_search_seconds` (time budget for the escalation search). They are also on the dashboard Settings page. See [docs/cloudrift-docs.md](docs/cloudrift-docs.md#collection-settings-scan)
 - `[cost]` - `use_cur` flag for Cost Explorer enrichment
 - `[trust]` - approved external accounts, thresholds for stale/ghost roles
 - `[output]` - scan output directory (default: `./cloudrift-output`)
@@ -190,6 +202,7 @@ Global option: `--config <path>` to specify a TOML config file.
 | `report` | Export findings to table/JSON/CSV/markdown/excel/sarif | `--scan-id`, `--format`, `--output` |
 | `query` | Search findings via vector retrieval (Neo4j required); optional LLM synthesis | `--scan-id`, `--query`, `--format` |
 | `dashboard` | Start the web UI and REST API | `--port`, `--host`, `--open`, `--output-dir` |
+| `verify authz` | Check Cloudrift's IAM answers against the AWS policy simulator | `--scan-id`, `--output-dir`, `--max-probes`, `--json` |
 | `version` | Print version string | - |
 
 ---
@@ -213,6 +226,13 @@ The server binds `127.0.0.1` (loopback) by default. Use `--host` to opt into a n
 | Overview | Summary, high-signal findings, operations view |
 | Scan Control | Start scans, validate AWS profile, runtime status, and a live per-run scan log (stage progress + collector warnings) so failures are diagnosable in the browser |
 | Findings | Paginated findings table with filters and sorting |
+| Inventory | Every collected resource by service, related findings, changes since the previous scan, and collection coverage with links to Settings for opt-in collectors |
+| Users & Groups | Every IAM user and group, what applies to each, and credential findings |
+| Identities | Per-role permission matrix and "who and what uses this role", including who was seen assuming it |
+| Identity Center | IAM Identity Center permission sets, assignments and administrative access (opt-in) |
+| Access Explorer | Who can do an action to a chosen user, group or role, with the route drawn and a CSV export |
+| Coverage | What is covered, what is not, and the reference-catalog benchmark |
+| Settings | Every collection setting, including the opt-in collectors |
 | Triage | Findings in triage/review mode |
 | Accounts | Per-account risk breakdown |
 | Diff | Compare two scans side-by-side |
@@ -282,7 +302,12 @@ GET  /api/scans/{id}/principals
 GET  /api/scans/{id}/principals/policies
 GET  /api/scans/{id}/identities/usage
 GET  /api/scans/{id}/identities/who-can
+GET  /api/scans/{id}/identities/targets
+GET  /api/scans/{id}/identity-center
+GET  /api/scans/{id}/inventory/summary
+GET  /api/scans/{id}/inventory/resources
 GET  /api/coverage
+GET  /api/coverage/reference
 GET  /api/diff?old=<scan>&new=<scan>
 
 POST /api/runtime/validate-profile
