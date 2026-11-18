@@ -249,3 +249,74 @@ func TestIdentityAttack_CreatePolicyVersion(t *testing.T) {
 		t.Fatalf("unattached policy escalated: %#v", r.Escalations)
 	}
 }
+
+// Two actions map to one technique (AttachRolePolicy and PutRolePolicy are both GRANT_ROLE_POLICY on the same role).
+// When only the second is allowed, the transition listed for that technique and target must be the allowed one, so
+// Transitions and Escalations agree. Before this was fixed the first decision (not allowed) hid the second.
+func TestIdentityAttack_TransitionListShowsTheAllowedActionNotTheFirstUnknownOne(t *testing.T) {
+	caller := "arn:aws:iam::111111111111:role/A"
+	r := analyzeAttack(caller, []models.AssetNode{controlledRole(caller, allowDoc("iam:PutRolePolicy", caller), "")}, nil)
+	var escalation *schema.AttackEscalation
+	for i := range r.Escalations {
+		if r.Escalations[i].Kind == "SELF_POLICY_GRANT" && r.Escalations[i].TargetARN == caller {
+			escalation = &r.Escalations[i]
+		}
+	}
+	if escalation == nil {
+		t.Fatalf("setup: the self grant must be an escalation: %#v", r.Escalations)
+	}
+	listed := 0
+	for _, tr := range r.Transitions {
+		if tr.Technique == "GRANT_ROLE_POLICY" && tr.TargetARN == caller && tr.SourcePrincipal == caller {
+			listed++
+			if tr.TransitionID != escalation.TransitionID {
+				t.Fatalf("the listed transition (%s, %s) is not the one the escalation cites", tr.Status, tr.Reason)
+			}
+			if tr.Feasibility != string(ValidityValidatedPossible) {
+				t.Fatalf("an allowed action is hidden behind a %s one: %s", tr.Feasibility, tr.Reason)
+			}
+		}
+	}
+	if listed != 1 {
+		t.Fatalf("one transition per technique and target, got %d", listed)
+	}
+	// The counters describe the list: the validated count must include the escalation's hop.
+	validated := 0
+	for _, tr := range r.Transitions {
+		if tr.Feasibility == string(ValidityValidatedPossible) {
+			validated++
+		}
+	}
+	if validated != r.ValidatedTransitionCount {
+		t.Fatalf("validated count %d does not match the %d validated transitions listed", r.ValidatedTransitionCount, validated)
+	}
+}
+
+// Every escalation cites a transition, and that transition must be in the list the same report returns.
+func TestIdentityAttack_EveryEscalationCitesAListedTransition(t *testing.T) {
+	caller := "arn:aws:iam::111111111111:role/A"
+	target := "arn:aws:iam::111111111111:role/B"
+	grantOther := `{"Statement":[{"Effect":"Allow","Action":"iam:PutRolePolicy","Resource":"` + target + `"},{"Effect":"Allow","Action":"sts:AssumeRole","Resource":"` + target + `"}]}`
+	reports := map[string]schema.IdentityAttackReport{
+		"self grant":  analyzeAttack(caller, []models.AssetNode{controlledRole(caller, allowDoc("iam:PutRolePolicy", caller), "")}, nil),
+		"self attach": analyzeAttack(caller, []models.AssetNode{controlledRole(caller, allowDoc("iam:AttachRolePolicy", caller), "")}, nil),
+		"on reachable": analyzeAttack(caller, []models.AssetNode{
+			controlledRole(caller, grantOther, ""), controlledRole(target, "", trustAllow(caller))}, nil),
+		"trust rewrite": analyzeAttack(caller, []models.AssetNode{
+			controlledRole(caller, allowDoc("iam:UpdateAssumeRolePolicy", target), ""), controlledRole(target, "", "")}, nil),
+	}
+	for name, r := range reports {
+		if len(r.Escalations) == 0 {
+			t.Fatalf("%s: setup must produce an escalation", name)
+		}
+		listed := map[string]bool{}
+		for _, tr := range r.Transitions {
+			listed[tr.TransitionID] = true
+		}
+		for _, e := range r.Escalations {
+			if !listed[e.TransitionID] {
+				t.Errorf("%s: escalation %s cites a transition that is not listed", name, e.Kind)
+			}
+		}
+	}
+}

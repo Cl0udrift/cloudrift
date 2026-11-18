@@ -113,7 +113,7 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 	if when.IsZero() {
 		when = time.Now().UTC()
 	}
-	seenTransition := map[string]struct{}{}
+	seenTransition := map[string]int{} // key -> index in report.Transitions
 	seenPath := map[string]schema.BlastPathVariant{}
 	impacted := map[string]struct{}{}
 	reachable := map[string]struct{}{}
@@ -208,16 +208,39 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 			opensSession := technique == techniqueAssumeRole || technique == techniqueRewriteTrust || technique == techniqueTakeover || isChainSession(technique)
 			cycle := opensSession && containsRole(state.roles, decision.ResourceARN)
 			hop.Cycle = cycle
-			_, seen := seenTransition[key]
+			listedAt, seen := seenTransition[key]
+			replaced := false
+			// Several actions can map to one technique on one target (AttachRolePolicy and PutRolePolicy are both
+			// GRANT_ROLE_POLICY). The list keeps one transition for them, and it must be the best decided one: an
+			// allowed action must not hide behind an unknown one that happened to be evaluated first, or the list
+			// would disagree with the escalations built from the allowed action.
+			if seen && feasibilityRank(hop.Feasibility) > feasibilityRank(report.Transitions[listedAt].Feasibility) {
+				old := report.Transitions[listedAt]
+				switch old.Feasibility {
+				case string(ValidityConditional):
+					if opensSession {
+						report.ConditionalRoleTransitions--
+					}
+				case "DENIED":
+					report.DeniedTransitions--
+				case string(ValidityValidatedPossible):
+				default:
+					report.UnknownTransitions--
+				}
+				report.Transitions[listedAt] = hop
+				seen, replaced = false, true
+			}
 			// The list is bounded, but a validated hop is never dropped for it: with many services modeled, unknown hops
 			// alone can fill the list, and the validated escalations that follow are the reason for the search.
-			if !seen && len(report.Transitions) >= maxAttackTransitions && hop.Feasibility != string(ValidityValidatedPossible) {
+			if !seen && !replaced && len(report.Transitions) >= maxAttackTransitions && hop.Feasibility != string(ValidityValidatedPossible) {
 				report.Truncated = true
 				seen = true // not listed, and not counted again below
 			}
 			if !seen {
-				seenTransition[key] = struct{}{}
-				report.Transitions = append(report.Transitions, hop)
+				if !replaced {
+					seenTransition[key] = len(report.Transitions)
+					report.Transitions = append(report.Transitions, hop)
+				}
 				switch hop.Feasibility {
 				case string(ValidityValidatedPossible):
 					report.ValidatedTransitionCount++
@@ -756,4 +779,18 @@ func groupLooksAdministrative(group models.AssetNode, assets []models.AssetNode,
 		}
 	}
 	return false
+}
+
+// feasibilityRank orders how decided a transition is: an allowed hop beats a conditional one, which beats an
+// unknown one, which beats a denied one. It picks which of several actions on one technique and target is listed.
+func feasibilityRank(f string) int {
+	switch f {
+	case string(ValidityValidatedPossible):
+		return 3
+	case string(ValidityConditional):
+		return 2
+	case "DENIED":
+		return 0
+	}
+	return 1
 }
