@@ -305,6 +305,19 @@ type RoleAssumer struct {
 	AccountID string `json:"account_id"`
 	Status    string `json:"status"`
 	Reason    string `json:"reason"`
+	// ReasonText is Reason in plain language, when the code is known.
+	ReasonText string `json:"reason_text,omitempty"`
+}
+
+// UnknownCaller is a user or role the check could not decide. It is listed so a reviewer can see
+// what was not evaluated; it is never counted as allowed.
+type UnknownCaller struct {
+	ARN        string `json:"arn"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	AccountID  string `json:"account_id"`
+	Reason     string `json:"reason"`
+	ReasonText string `json:"reason_text"`
 }
 
 // WhoCanResponse answers "which users and roles can do this action on this target".
@@ -316,9 +329,11 @@ type WhoCanResponse struct {
 	Evaluated int           `json:"evaluated"`
 	Allowed   int           `json:"allowed"`
 	// Possible counts callers allowed by identity policies while organization controls were not checked.
-	Possible int      `json:"possible"`
-	Unknown  int      `json:"unknown"`
-	Notes    []string `json:"notes"`
+	Possible int `json:"possible"`
+	Unknown  int `json:"unknown"`
+	// UnknownCallers names the Unknown callers, with the reason each could not be decided.
+	UnknownCallers []UnknownCaller `json:"unknown_callers"`
+	Notes          []string        `json:"notes"`
 }
 
 // RoleUsageResponse answers "who and what can use this role".

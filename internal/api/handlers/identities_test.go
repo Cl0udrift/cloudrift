@@ -116,3 +116,57 @@ func TestWhoCanRejectsUnsupportedAction(t *testing.T) {
 		t.Fatalf("an action the explorer cannot decide must be rejected, got %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+func whoCanScan(t *testing.T, dir string, assets []models.AssetNode) {
+	t.Helper()
+	writeScan(t, dir, "wc2", time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), nil)
+	if err := os.MkdirAll(filepath.Join(dir, "wc2", "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONFile(t, filepath.Join(dir, "wc2", "assets", "iam.json"), assets)
+	writeJSONFile(t, filepath.Join(dir, "wc2", "relationships.json"), []models.Relationship{})
+}
+
+func TestWhoCanRejectsAnActionThatDoesNotFitTheTarget(t *testing.T) {
+	dir := t.TempDir()
+	user := models.AssetNode{ARN: "arn:aws:iam::1:user/u", Name: "u", AccountID: "1", AssetType: models.AssetIAMUser, ScanID: "wc2", Properties: map[string]any{}}
+	whoCanScan(t, dir, []models.AssetNode{user})
+	for _, tc := range []struct{ action string }{{"sts:AssumeRole"}, {"iam:AttachGroupPolicy"}} {
+		rr := httptest.NewRecorder()
+		GetWhoCan(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/wc2/identities/who-can?action="+tc.action+"&arn="+user.ARN, nil), "id", "wc2"))
+		if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "action_target_mismatch") {
+			t.Fatalf("%s on a user: %d %s", tc.action, rr.Code, rr.Body.String())
+		}
+	}
+	rr := httptest.NewRecorder()
+	GetWhoCan(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/wc2/identities/who-can?action=iam:AttachUserPolicy&arn="+user.ARN, nil), "id", "wc2"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("a fitting action must run: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestWhoCanNamesTheCallersItCouldNotDecide(t *testing.T) {
+	dir := t.TempDir()
+	role := models.AssetNode{ARN: "arn:aws:iam::1:role/target", Name: "target", AccountID: "1", AssetType: models.AssetIAMRole, ScanID: "wc2", Properties: map[string]any{}}
+	// A user with no collected policy documents cannot be decided; it must be listed, not dropped or allowed.
+	user := models.AssetNode{ARN: "arn:aws:iam::1:user/nodocs", Name: "nodocs", AccountID: "1", AssetType: models.AssetIAMUser, ScanID: "wc2", Properties: map[string]any{}}
+	whoCanScan(t, dir, []models.AssetNode{role, user})
+	rr := httptest.NewRecorder()
+	GetWhoCan(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/wc2/identities/who-can?action=sts:AssumeRole&arn="+role.ARN, nil), "id", "wc2"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("%d %s", rr.Code, rr.Body.String())
+	}
+	var got schema.WhoCanResponse
+	mustDecode(t, rr, &got)
+	if got.Allowed != 0 || got.Unknown != 1 || got.Unknown != len(got.UnknownCallers) {
+		t.Fatalf("unknown must be counted and listed, never allowed: %+v", got)
+	}
+	for _, c := range got.UnknownCallers {
+		if c.Name == "" || c.Reason == "" || c.ReasonText == "" {
+			t.Fatalf("an unknown caller needs a name and a reason: %+v", c)
+		}
+	}
+	if !strings.Contains(rr.Body.String(), `"unknown_callers":[`) {
+		t.Fatalf("unknown_callers must be a list, not null: %s", rr.Body.String())
+	}
+}

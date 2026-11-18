@@ -140,6 +140,47 @@ func GetRoleUsage(outputDir string) http.HandlerFunc {
 }
 
 // whoCanActions are the actions the explorer evaluates: role assumption and the identity-only IAM actions.
+// whoCanTargetType is the kind of identity an action is performed on. An action that is not listed
+// here is not checked against the target.
+func whoCanTargetType(action string) models.AssetType {
+	switch action {
+	case "sts:AssumeRole", "iam:PassRole", "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:UpdateAssumeRolePolicy":
+		return models.AssetIAMRole
+	case "iam:AttachUserPolicy", "iam:PutUserPolicy", "iam:CreateAccessKey", "iam:CreateLoginProfile", "iam:UpdateLoginProfile":
+		return models.AssetIAMUser
+	case "iam:AttachGroupPolicy", "iam:PutGroupPolicy", "iam:AddUserToGroup":
+		return models.AssetIAMGroup
+	}
+	return ""
+}
+
+// reasonText puts an evaluator reason code in plain language. An unrecognised code is returned as is.
+func reasonText(code string) string {
+	switch code {
+	case "":
+		return ""
+	case iamauth.ReasonAllowed:
+		return "The caller's policies allow it, and no collected boundary, organization control or explicit deny blocks it."
+	case iamauth.ReasonMissingIdentity:
+		return "No policy documents were collected for this caller, so its access cannot be decided."
+	case iamauth.ReasonMissingTrust:
+		return "The target role's trust policy was not collected."
+	case iamauth.ReasonMissingBoundary:
+		return "The caller's permissions boundary was not collected."
+	case iamauth.ReasonMissingSCP, iamauth.ReasonMissingRCP, iamauth.ReasonSCPHierarchy, iamauth.ReasonRCPHierarchy:
+		return "Organization controls (SCP/RCP) were not collected, so they could not be ruled out."
+	case iamauth.ReasonMissingContext:
+		return "A condition depends on request context (such as a tag or source IP) that stored policies cannot supply."
+	case iamauth.ReasonUnsupportedCondition:
+		return "A policy uses a condition the evaluator does not support."
+	case iamauth.ReasonUndecidableDeny:
+		return "An explicit Deny could not be ruled out."
+	case iamauth.ReasonMalformed:
+		return "A policy document could not be parsed."
+	}
+	return code
+}
+
 func whoCanAction(action string) bool {
 	if action == iamauth.ActionAssumeRole {
 		return true
@@ -177,9 +218,21 @@ func GetWhoCan(outputDir string) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "target_not_found", "that user, group or role was not collected in this scan", nil)
 			return
 		}
-		callers, evaluated, unknown := blastradius.WhoCan(scanID, action, target, assets, rels, time.Time{})
+		if want := whoCanTargetType(action); want != "" && want != target.AssetType {
+			writeError(w, http.StatusBadRequest, "action_target_mismatch",
+				"this action applies to a "+strings.TrimPrefix(string(want), "iam_")+", but the target is a "+strings.TrimPrefix(string(target.AssetType), "iam_")+"; choose an action that fits the target",
+				map[string]any{"action": action, "target_type": string(target.AssetType), "expected_target_type": string(want)})
+			return
+		}
+		callers, unknownCallers, evaluated := blastradius.WhoCanDetailed(scanID, action, target, assets, rels, time.Time{})
+		for i := range callers {
+			callers[i].ReasonText = reasonText(callers[i].Reason)
+		}
+		for i := range unknownCallers {
+			unknownCallers[i].ReasonText = reasonText(unknownCallers[i].Reason)
+		}
 		out := schema.WhoCanResponse{
-			ScanID: scanID, Action: action, TargetARN: target.ARN, Callers: callers, Evaluated: evaluated, Unknown: unknown,
+			ScanID: scanID, Action: action, TargetARN: target.ARN, Callers: callers, Evaluated: evaluated, Unknown: len(unknownCallers), UnknownCallers: unknownCallers,
 			Notes: []string{
 				"Callers are users and roles in this scan, checked against their own policies, permissions boundary and any collected SCPs. Principals in accounts that were not scanned are not listed.",
 				"This shows what stored policies allow, not what anyone did.",
@@ -187,6 +240,9 @@ func GetWhoCan(outputDir string) http.HandlerFunc {
 		}
 		if out.Callers == nil {
 			out.Callers = []schema.RoleAssumer{}
+		}
+		if out.UnknownCallers == nil {
+			out.UnknownCallers = []schema.UnknownCaller{}
 		}
 		for _, c := range callers {
 			if c.Status == iamauth.StatusAllowed {

@@ -1330,6 +1330,15 @@ export interface RoleAssumer {
   account_id: string;
   status: string;
   reason: string;
+  reason_text?: string;
+}
+export interface UnknownCaller {
+  arn: string;
+  name: string;
+  kind: "user" | "role";
+  account_id: string;
+  reason: string;
+  reason_text: string;
 }
 export interface WhoCanResponse {
   scan_id: string;
@@ -1340,6 +1349,7 @@ export interface WhoCanResponse {
   allowed: number;
   possible: number;
   unknown: number;
+  unknown_callers: UnknownCaller[];
   notes: string[];
 }
 

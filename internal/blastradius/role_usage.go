@@ -25,6 +25,13 @@ func RoleAssumers(scanID string, target models.AssetNode, assets []models.AssetN
 // the identity-only IAM actions in the catalog (those decided by the caller's own policies), and the
 // result says what stored policies allow, not what anyone did.
 func WhoCan(scanID, action string, target models.AssetNode, assets []models.AssetNode, rels []models.Relationship, when time.Time) (list []schema.RoleAssumer, evaluated, unknown int) {
+	list, unknownCallers, evaluated := WhoCanDetailed(scanID, action, target, assets, rels, when)
+	return list, evaluated, len(unknownCallers)
+}
+
+// WhoCanDetailed is WhoCan that also names the callers that could not be evaluated and why. An unknown
+// caller is never reported as allowed, and is never silently dropped.
+func WhoCanDetailed(scanID, action string, target models.AssetNode, assets []models.AssetNode, rels []models.Relationship, when time.Time) (list []schema.RoleAssumer, unknownCallers []schema.UnknownCaller, evaluated int) {
 	if when.IsZero() {
 		when = time.Unix(0, 0).UTC()
 	}
@@ -71,13 +78,13 @@ func WhoCan(scanID, action string, target models.AssetNode, assets []models.Asse
 		if status == iamauth.StatusDenied || reason == iamauth.ReasonNoAllow {
 			continue
 		}
-		if status == iamauth.StatusUnknown {
-			unknown++
-			continue
-		}
 		kind := "role"
 		if caller.AssetType == models.AssetIAMUser {
 			kind = "user"
+		}
+		if status == iamauth.StatusUnknown {
+			unknownCallers = append(unknownCallers, schema.UnknownCaller{ARN: caller.ARN, Name: caller.Name, Kind: kind, AccountID: caller.AccountID, Reason: reason})
+			continue
 		}
 		list = append(list, schema.RoleAssumer{
 			ARN: caller.ARN, Name: caller.Name, Kind: kind, AccountID: caller.AccountID,
@@ -91,7 +98,8 @@ func WhoCan(scanID, action string, target models.AssetNode, assets []models.Asse
 		}
 		return list[i].ARN < list[j].ARN
 	})
-	return list, evaluated, unknown
+	sort.Slice(unknownCallers, func(i, j int) bool { return unknownCallers[i].ARN < unknownCallers[j].ARN })
+	return list, unknownCallers, evaluated
 }
 
 // trustAloneAllows reports whether the call is allowed with no caller identity policy at all,
