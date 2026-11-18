@@ -12,7 +12,9 @@ import (
 	"github.com/Zero0x00/cloudrift/internal/models"
 )
 
-type fakeSim struct{ decide func(action, resource string) iamtypes.PolicyEvaluationDecisionType }
+type fakeSim struct {
+	decide func(action, resource string) iamtypes.PolicyEvaluationDecisionType
+}
 
 func (f fakeSim) SimulatePrincipalPolicy(_ context.Context, in *iam.SimulatePrincipalPolicyInput, _ ...func(*iam.Options)) (*iam.SimulatePrincipalPolicyOutput, error) {
 	d := f.decide(in.ActionNames[0], in.ResourceArns[0])
@@ -45,7 +47,9 @@ func TestVerifyAuthzAgreementAndDisagreement(t *testing.T) {
 	}
 
 	out.Reset()
-	denyAll := func(string, string) iamtypes.PolicyEvaluationDecisionType { return iamtypes.PolicyEvaluationDecisionTypeImplicitDeny }
+	denyAll := func(string, string) iamtypes.PolicyEvaluationDecisionType {
+		return iamtypes.PolicyEvaluationDecisionTypeImplicitDeny
+	}
 	failed, err = runVerifyAuthz(context.Background(), fakeSim{denyAll}, "s", verifyWorld(false), nil, 50, false, &out)
 	if err != nil || !failed || !strings.Contains(out.String(), "FALSE ALLOW") || !strings.Contains(out.String(), "CONFIRMED_DISAGREEMENT") {
 		t.Fatalf("a local allow the simulator does not give must fail: failed=%v\n%s", failed, out.String())
