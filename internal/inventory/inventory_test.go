@@ -88,7 +88,11 @@ func TestSummaryExcludesEvidenceAndBalancesServices(t *testing.T) {
 		t.Fatal(empty.TotalAssets)
 	}
 	for _, card := range empty.Services {
-		if card.Count != 0 || card.Coverage != "NOT_RECORDED" {
+		want := "NOT_RECORDED"
+		if noCollector[card.Service] {
+			want = "UNSUPPORTED" // no collector exists, so it is not a collector whose result is missing
+		}
+		if card.Count != 0 || card.Coverage != want {
 			t.Fatalf("empty shown as collected zero: %+v", card)
 		}
 	}

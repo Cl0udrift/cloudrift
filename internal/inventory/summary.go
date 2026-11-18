@@ -234,6 +234,9 @@ func coverageFor(serviceID string, filter Filter, observations []statusObservati
 		if count > 0 {
 			return coverageUnknown
 		}
+		if noCollector[serviceID] {
+			return coverageUnsupported // no collector exists for it, which is not the same as one that was not recorded
+		}
 		return coverageNotRecorded
 	}
 	var failed, partial, succeeded, unsupported, notExecuted bool

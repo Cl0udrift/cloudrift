@@ -114,6 +114,9 @@ export function InventoryPage() {
   const notRecordedNames = serviceCards.filter((c) => cov(c) === "not_recorded").map((c) => c.name);
   const notRecorded = notRecordedNames.length;
   const collectedCount = serviceCards.filter((c) => cov(c) === "collected").length;
+  // A service the account or Region does not offer, or that Cloudrift has no collector for, is not a gap in what was collected.
+  const unavailableNames = serviceCards.filter((c) => cov(c) === "unsupported").map((c) => c.name);
+  const collectableCount = serviceCards.length - unavailableNames.length;
   const notInventoried = summary.data?.not_inventoried ?? [];
   const totalFindings = serviceCards.reduce((n, c) => n + c.finding_count, 0);
   const shownBars = (summary.data?.distribution ?? []).filter((item) => item.count > 0);
@@ -167,10 +170,10 @@ export function InventoryPage() {
                 <p className="cr-kpi-label">Collection of supported services</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   {col ? <CollectionChip status={collectionProblem || regionProblem || notRecorded > 0 ? "partial" : "completed"} /> : null}
-                  <span className="text-xs text-slate-600 dark:text-slate-400">{collectedCount} of {serviceCards.length} services collected</span>
+                  <span className="text-xs text-slate-600 dark:text-slate-400">{collectedCount} of {collectableCount} services collected</span>
                 </div>
                 {notRecorded > 0 ? <p className="mt-2 hidden text-xs text-slate-600 dark:text-slate-400 sm:block"><span className="font-medium">Not recorded:</span> {notRecordedNames.join(", ")}. A missing asset is not evidence the service is empty.</p> : null}
-                {notInventoried.length > 0 ? <p className="mt-1 hidden text-xs text-slate-600 dark:text-slate-400 sm:block"><span className="font-medium">Not inventoried:</span> {notInventoried.join(", ")}.</p> : null}
+                {notInventoried.length + unavailableNames.length > 0 ? <p className="mt-1 hidden text-xs text-slate-600 dark:text-slate-400 sm:block"><span className="font-medium">Not inventoried:</span> {[...notInventoried, ...unavailableNames].join(", ")}.</p> : null}
                 <a href="#inventory-coverage" className="mt-2 block text-xs text-cyan-800 underline dark:text-cyan-300">Collection coverage ↓</a>
               </div>
             </div>
@@ -303,13 +306,13 @@ export function InventoryPage() {
               <summary className="hs-focus-ring cursor-pointer rounded text-sm font-semibold text-slate-900 dark:text-slate-100">
                 Collection coverage
                 <span className="ml-2 text-xs font-normal text-slate-500">
-                  {serviceCards.filter((c) => cov(c) === "collected").length} of {serviceCards.length} services collected
+                  {collectedCount} of {collectableCount} services collected
                   {notRecorded > 0 ? ` · ${notRecorded} not recorded` : ""}{regionProblem ? " · region issues" : ""}
                 </span>
               </summary>
               <div className="mt-4 space-y-4">
                 {notRecorded > 0 ? <p className="text-sm"><span className="font-medium">Not recorded:</span> {notRecordedNames.join(", ")}. A missing asset is not evidence the service is empty.</p> : null}
-                {notInventoried.length > 0 ? <p className="text-sm"><span className="font-medium">Not inventoried:</span> {notInventoried.join(", ")}.</p> : null}
+                {notInventoried.length + unavailableNames.length > 0 ? <p className="text-sm"><span className="font-medium">Not inventoried:</span> {[...notInventoried, ...unavailableNames].join(", ")}. {unavailableNames.length > 0 ? "Some of these are services this account or Region does not offer." : ""}</p> : null}
                 <p className="cr-helper">{summary.data.accounts_note} {summary.data.coverage_note} {col?.note}</p>
                 {col ? (
                   <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">

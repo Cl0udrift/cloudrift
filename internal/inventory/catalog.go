@@ -45,7 +45,7 @@ var catalog = []serviceDef{
 	{ID: "apprunner", Name: "App Runner", Types: []string{"apprunner_service"}},
 	{ID: "sagemaker", Name: "SageMaker", Types: []string{"sagemaker_notebook"}},
 	{ID: "agentcore", Name: "Bedrock AgentCore", Types: []string{"agentcore_runtime", "agentcore_code_interpreter", "agentcore_browser"}},
-	{ID: "launchtemplates", Name: "Launch templates", Types: []string{"ec2_launch_template"}},
+	{ID: "launch_templates", Name: "Launch templates", Types: []string{"ec2_launch_template"}},
 	{ID: "codedeploy", Name: "CodeDeploy", Types: []string{"codedeploy_deployment_group"}},
 	{ID: "route53", Name: "Route 53", Types: []string{"dns_record"}},
 	{ID: "cloudfront", Name: "CloudFront", Types: []string{"cloudfront_dist"}},
@@ -100,6 +100,10 @@ var categoryOrder = []struct{ ID, Name string }{
 	{categoryNetwork, "Networking/Edge"},
 	{categoryOther, "Other"},
 }
+
+// noCollector are listed services that Cloudrift has no collector for at all. They are reported as not inventoried, not as a
+// collector whose result was not recorded.
+var noCollector = map[string]bool{"apigateway": true, "acm": true}
 
 var serviceScope = map[string]string{
 	"ec2": "regional", "lambda": "regional", "ecs": "regional", "eks": "regional",
