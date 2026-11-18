@@ -199,8 +199,8 @@ func Modules() []Module {
 		{
 			ID: "accuracy", Name: "Accuracy validation", Area: AreaOperate, Status: StatusPartial,
 			Summary:     "Checks that decisions agree with known answers.",
-			Covers:      []string{"Golden corpus with a zero-false-allow gate", "Labeled synthetic dataset check", "A checker against the IAM policy simulator"},
-			Limitations: []string{"The simulator checker exists but is not wired into a command", "Synthetic data only; no production account validation", "The simulator ignores resource policies, SCPs and RCPs"},
+			Covers:      []string{"Golden corpus with a zero-false-allow gate", "Labeled synthetic dataset check", "`cloudrift verify authz`: compares identity-only IAM decisions with iam:SimulatePrincipalPolicy and reports agreement, disagreement, conservative answers and what was not comparable"},
+			Limitations: []string{"The simulator check covers identity-only IAM actions on identity policies and boundaries; callers with SCP/RCP in the scan are reported as not comparable, and it needs a live AWS account", "Synthetic data only; no production account validation", "The simulator ignores resource policies, SCPs and RCPs"},
 			Docs:        "docs/audits/phase-4f-final-entitlement-hardening.md",
 		},
 

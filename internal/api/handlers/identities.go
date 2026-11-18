@@ -205,17 +205,7 @@ func GetAccessTargets(outputDir string) http.HandlerFunc {
 
 // whoCanTargetType is the kind of identity an action is performed on. An action that is not listed
 // here is not checked against the target.
-func whoCanTargetType(action string) models.AssetType {
-	switch action {
-	case "sts:AssumeRole", "iam:PassRole", "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:UpdateAssumeRolePolicy":
-		return models.AssetIAMRole
-	case "iam:AttachUserPolicy", "iam:PutUserPolicy", "iam:CreateAccessKey", "iam:CreateLoginProfile", "iam:UpdateLoginProfile":
-		return models.AssetIAMUser
-	case "iam:AttachGroupPolicy", "iam:PutGroupPolicy", "iam:AddUserToGroup":
-		return models.AssetIAMGroup
-	}
-	return ""
-}
+func whoCanTargetType(action string) models.AssetType { return blastradius.TargetTypeFor(action) }
 
 // reasonText puts an evaluator reason code in plain language. An unrecognised code is returned as is.
 func reasonText(code string) string {

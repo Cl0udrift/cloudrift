@@ -45,20 +45,7 @@ func WhoCanDetailed(scanID, action string, target models.AssetNode, assets []mod
 		if caller.ARN == target.ARN || (caller.AssetType != models.AssetIAMRole && caller.AssetType != models.AssetIAMUser) {
 			continue
 		}
-		identity, _ := identitySlot(caller, assets, rels)
-		tagCtx, resourceTagsKnown, principalTagsKnown := tagContext(caller, target, nil)
-		req := iamauth.AuthorizationRequest{
-			ScanID: scanID, PrincipalARN: caller.ARN, Action: action,
-			RequestContext: tagCtx, ResourceTagsKnown: resourceTagsKnown, PrincipalTagsKnown: principalTagsKnown,
-			ResourceARN: target.ARN, ResourceAccountID: target.AccountID, EvaluatedAt: when,
-			Identity: identity, TrustPolicy: trust,
-			PermissionsBoundary: boundaryFromRole(caller),
-			// A session policy can only narrow access, so none is assumed for this question.
-			SessionPolicies: iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "no session policy assumed; session policies only narrow access"},
-			SCPs:            orgControlSlot(caller, "scp"),
-			RCPs:            rcpForResource(assets, caller, target, action, iamauth.PolicySlot{}),
-			ResourcePolicy:  iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: resourceEvidence},
-		}
+		req := whoCanRequest(scanID, action, caller, target, assets, rels, when, trust, resourceEvidence)
 		decision := iamauth.Evaluate(req)
 		evaluated++
 		status, reason := decision.Status, decision.Reason
@@ -109,4 +96,22 @@ func WhoCanDetailed(scanID, action string, target models.AssetNode, assets []mod
 func trustAloneAllows(req iamauth.AuthorizationRequest) bool {
 	req.Identity = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "ignored to test the trust policy alone"}
 	return iamauth.Evaluate(req).Status == iamauth.StatusAllowed
+}
+
+// whoCanRequest is the evaluation request for one caller doing one action on target, as the who-can question builds it.
+func whoCanRequest(scanID, action string, caller, target models.AssetNode, assets []models.AssetNode, rels []models.Relationship, when time.Time, trust iamauth.PolicySlot, resourceEvidence string) iamauth.AuthorizationRequest {
+	identity, _ := identitySlot(caller, assets, rels)
+	tagCtx, resourceTagsKnown, principalTagsKnown := tagContext(caller, target, nil)
+	return iamauth.AuthorizationRequest{
+		ScanID: scanID, PrincipalARN: caller.ARN, Action: action,
+		RequestContext: tagCtx, ResourceTagsKnown: resourceTagsKnown, PrincipalTagsKnown: principalTagsKnown,
+		ResourceARN: target.ARN, ResourceAccountID: target.AccountID, EvaluatedAt: when,
+		Identity: identity, TrustPolicy: trust,
+		PermissionsBoundary: boundaryFromRole(caller),
+		// A session policy can only narrow access, so none is assumed for this question.
+		SessionPolicies: iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "no session policy assumed; session policies only narrow access"},
+		SCPs:            orgControlSlot(caller, "scp"),
+		RCPs:            rcpForResource(assets, caller, target, action, iamauth.PolicySlot{}),
+		ResourcePolicy:  iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: resourceEvidence},
+	}
 }
