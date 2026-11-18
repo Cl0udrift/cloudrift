@@ -320,11 +320,15 @@ func firstNonEmptyStr(vs ...string) string {
 	return ""
 }
 
-// identityCenterRegions are the commercial Regions IAM Identity Center can run in. An instance lives in one of them.
+// identityCenterRegions are the commercial Regions an Identity Center instance can live in, including the opt-in ones. A Region the
+// account has not opted in to answers with an error that is classified as unsupported, so asking is safe. The China and GovCloud
+// partitions are not covered: a scan there records "no instance", and the page says that does not prove nobody can sign in.
 var identityCenterRegions = []string{
-	"us-east-1", "us-east-2", "us-west-1", "us-west-2", "ca-central-1", "sa-east-1",
-	"eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-north-1", "eu-south-1",
-	"ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
+	"us-east-1", "us-east-2", "us-west-1", "us-west-2", "ca-central-1", "ca-west-1", "sa-east-1", "mx-central-1",
+	"eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-central-2", "eu-north-1", "eu-south-1", "eu-south-2",
+	"ap-south-1", "ap-south-2", "ap-southeast-1", "ap-southeast-2", "ap-southeast-3", "ap-southeast-4", "ap-southeast-5", "ap-southeast-7",
+	"ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-east-1",
+	"me-south-1", "me-central-1", "il-central-1", "af-south-1",
 }
 
 // identityCenterClients is replaced in tests.
@@ -361,7 +365,7 @@ func CollectIdentityCenter(ctx context.Context, baseCfg awsv2.Config, now time.T
 	wg.Wait()
 	var assets []models.AssetNode
 	var rels []models.Relationship
-	instances, denied := 0, 0
+	instances, denied, unsupported := 0, 0, 0
 	var problem, firstDetail string
 	for _, res := range results {
 		assets, rels = append(assets, res.assets...), append(rels, res.rels...)
@@ -378,6 +382,8 @@ func CollectIdentityCenter(ctx context.Context, baseCfg awsv2.Config, now time.T
 		case status == "failed" && strings.HasPrefix(detail, "access_denied"):
 			denied++
 			firstDetail = detail
+		case status == "unsupported":
+			unsupported++ // a Region the account has not opted in to
 		}
 	}
 	status, detail := "succeeded", ""
@@ -386,7 +392,7 @@ func CollectIdentityCenter(ctx context.Context, baseCfg awsv2.Config, now time.T
 		status, detail = "partial", "an instance was found and part of it could not be read: "+problem
 	case instances > 0:
 		detail = "instances found: " + strconv.Itoa(instances)
-	case denied == len(identityCenterRegions):
+	case denied+unsupported == len(identityCenterRegions) && denied > 0:
 		status, detail = "failed", firstDetail+". The credential needs the sso and identitystore read actions and must be the organization management account or the delegated administrator."
 	default:
 		detail = "no IAM Identity Center instance was found. Identity Center is visible only from the organization management account or the delegated administrator."
