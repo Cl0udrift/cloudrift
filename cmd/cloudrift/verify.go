@@ -77,9 +77,14 @@ Read-only: the only AWS call is iam:SimulatePrincipalPolicy. Exits non-zero on a
 // verifyReport is what `verify authz` prints. Agreement, disagreement, conservative and not-comparable are kept
 // apart so a reviewer can see what was and was not checked.
 type verifyReport struct {
-	ScanID        string                   `json:"scan_id"`
-	Compared      int                      `json:"compared"`
-	Agree         int                      `json:"agree"`
+	ScanID   string `json:"scan_id"`
+	Compared int    `json:"compared"`
+	Agree    int    `json:"agree"`
+	// LocalAllowed, LocalDenied and LocalUnknown say what Cloudrift answered across the compared probes, so an
+	// agreement made only of "no" answers is visible as such.
+	LocalAllowed  int                      `json:"local_allowed"`
+	LocalDenied   int                      `json:"local_denied"`
+	LocalUnknown  int                      `json:"local_unknown"`
 	FalseAllows   []string                 `json:"false_allows"`
 	BadDenies     []string                 `json:"bad_denies"`
 	Conservative  []string                 `json:"conservative"`
@@ -96,7 +101,18 @@ func runVerifyAuthz(ctx context.Context, api collectors.SimulatorAPI, scanID str
 		agreement = append(agreement, collectors.AgreementProbe{PrincipalARN: p.PrincipalARN, Action: p.Action, ResourceARN: p.ResourceARN, Context: p.Context, Decision: p.Decision})
 	}
 	r := collectors.CompareWithSimulator(ctx, api, agreement)
-	rep := verifyReport{ScanID: scanID, Compared: r.Compared, Agree: r.Agree, FalseAllows: nz(r.FalseAllows), BadDenies: nz(r.BadDenies),
+	var allowed, denied, unknown int
+	for _, p := range agreement {
+		switch p.Decision.Status {
+		case "VALIDATED_ALLOWED":
+			allowed++
+		case "VALIDATED_DENIED":
+			denied++
+		default:
+			unknown++
+		}
+	}
+	rep := verifyReport{ScanID: scanID, Compared: r.Compared, Agree: r.Agree, LocalAllowed: allowed, LocalDenied: denied, LocalUnknown: unknown, FalseAllows: nz(r.FalseAllows), BadDenies: nz(r.BadDenies),
 		Conservative: nz(r.Conservative), NotComparable: skipped, Errors: nz(r.Errors),
 		Note: "The simulator evaluates identity policies and permissions boundaries only. It does not evaluate resource policies, trust policies, SCPs or RCPs."}
 	if rep.NotComparable == nil {
@@ -117,6 +133,7 @@ func runVerifyAuthz(ctx context.Context, api collectors.SimulatorAPI, scanID str
 		return failed, enc.Encode(rep)
 	}
 	fmt.Fprintf(out, "Result: %s (scan %s)\n", rep.Result, scanID)
+	fmt.Fprintf(out, "Cloudrift answered: %d allowed, %d denied, %d unknown\n", rep.LocalAllowed, rep.LocalDenied, rep.LocalUnknown)
 	fmt.Fprintf(out, "Compared %d: %d agree, %d false allows, %d bad denies, %d conservative (local unknown where the simulator allows), %d not comparable, %d errors\n",
 		rep.Compared, rep.Agree, len(rep.FalseAllows), len(rep.BadDenies), len(rep.Conservative), len(rep.NotComparable), len(rep.Errors))
 	for _, s := range rep.FalseAllows {
