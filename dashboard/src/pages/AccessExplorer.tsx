@@ -5,6 +5,8 @@ import { apiClient } from "../api/client";
 import { formatQueryError } from "../api/httpError";
 import { queryKeys } from "../api/queryKeys";
 import { TargetPicker } from "../components/access/TargetPicker";
+import { AccessFlow } from "../components/access/AccessFlow";
+import { accessSentence } from "../lib/accessSentence";
 import { whoCanCsv } from "../lib/accessExport";
 import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
@@ -34,6 +36,15 @@ const ACTION_HELP: Record<string, string> = {
   "iam:PutRolePolicy": "write an inline policy on this role",
   "iam:UpdateAssumeRolePolicy": "rewrite this role's trust policy"
 };
+
+function Tile({ label, value, tone, hint }: { label: string; value: number; tone: Tone; hint: string }) {
+  return (
+    <div className={`cr-tone-${tone} rounded-lg border p-3`} title={hint}>
+      <div className="text-2xl font-semibold tabular-nums">{value}</div>
+      <div className="text-xs font-medium">{label}</div>
+    </div>
+  );
+}
 
 /** "Who can do this to that?" asked of the stored policies. The reverse of looking at one identity. */
 export function AccessExplorerPage() {
@@ -110,58 +121,53 @@ export function AccessExplorerPage() {
             ) : result.isError || !result.data ? (
               <StatePanel intent="error" title="Could not run this check">{formatQueryError(result.error)}</StatePanel>
             ) : (
-              <div className="space-y-3 text-sm">
-                <p>
-                  <span className="font-semibold">{result.data.allowed}</span> can, <span className="font-semibold">{result.data.possible}</span> more are allowed by policies with organization controls not checked.{" "}
-                  {result.data.evaluated} users and roles were checked{result.data.unknown > 0 ? `; ${result.data.unknown} could not be decided (listed below)` : ""}.
-                </p>
+              <div className="space-y-4 text-sm">
+                <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  Who can {ACTION_HELP[action] ?? action}{targetItem ? <>: <span className="break-all">{targetItem.name}</span></> : null}?
+                </h2>
+                <div className="grid grid-cols-3 gap-3">
+                  <Tile label="Can" value={result.data.allowed} tone="info" hint="Allowed by stored policy" />
+                  <Tile label="Probably" value={result.data.possible} tone="hyp" hint="Allowed, but organization controls were not checked" />
+                  <Tile label="Not checked" value={result.data.unknown} tone="unk" hint="Could not be decided: not allowed, not ruled out" />
+                </div>
+                <p className="cr-helper">{result.data.evaluated} users and roles were checked against stored policies.</p>
                 {result.data.callers.length === 0 ? (
                   <p className="cr-helper">
                     No checked user or role was found able to do this.
                     {result.data.unknown > 0 ? ` ${result.data.unknown} could not be evaluated, so this is not a clear result.` : ""}
                   </p>
                 ) : (
-                  <ul className="space-y-2">
+                  <ul className="space-y-3">
                     {result.data.callers.map((c) => {
                       const [tone, glyph, label] = statusChip[c.status] ?? statusChip.CONDITIONAL;
+                      const verb = ACTION_HELP[action] ?? action;
                       return (
-                        <li key={c.arn} className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
+                        <li key={c.arn} className="hs-card space-y-3 p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <span className="text-xs uppercase text-slate-500">{c.kind}</span>{" "}
+                              {c.kind === "user" ? <Link className="break-all text-base font-semibold underline" to={`/principals?principal=${encodeURIComponent(c.arn)}`}>{c.name}</Link> : <span className="break-all text-base font-semibold">{c.name}</span>}
+                              <span className="ml-2 text-xs text-slate-500">{c.account_id}</span>
+                            </div>
                             <StateChip tone={tone} glyph={glyph} label={label} title={c.reason} />
-                            <span className="text-xs uppercase text-slate-500">{c.kind}</span>
-                            {c.kind === "user" ? <Link className="break-all font-mono text-xs underline" to={`/principals?principal=${encodeURIComponent(c.arn)}`}>{c.name}</Link> : <span className="break-all font-mono text-xs">{c.name}</span>}
-                            <span className="text-xs text-slate-500">{c.account_id}</span>
                           </div>
-                          {(c.paths ?? []).map((path, i) => (
-                            <p key={i} className="mt-1 flex flex-wrap items-center gap-x-1 text-xs" aria-label={`Access path: ${path.steps.map((s) => s.label).join(", then ")}`}>
-                              {path.steps.map((s, j) => (
-                                <span key={j} className="inline-flex items-center gap-1">
-                                  {j > 0 ? <span aria-hidden="true" className="text-slate-400">→</span> : null}
-                                  <span className={s.kind === "caller" || s.kind === "target" ? "font-medium" : "rounded border border-slate-300 px-1 dark:border-slate-700"} title={s.detail}>{s.label}</span>
-                                </span>
-                              ))}
-                            </p>
-                          ))}
-                          {c.reason_text || c.reason ? <p className="mt-0.5 text-xs text-slate-500">{c.reason_text || c.reason}</p> : null}
+                          <p className="text-sm">{accessSentence(c.name, verb, c.paths?.[0])}</p>
+                          {(c.paths ?? []).map((path, i) => <AccessFlow key={i} steps={path.steps} />)}
+                          {(c.paths?.length ?? 0) === 0 && (c.reason_text || c.reason) ? <p className="text-xs text-slate-500">{c.reason_text || c.reason}</p> : null}
                         </li>
                       );
                     })}
                   </ul>
                 )}
                 {result.data.unknown_callers.length > 0 ? (
-                  <details className="hs-card p-3" open={result.data.callers.length === 0}>
-                    <summary className="hs-focus-ring cursor-pointer rounded font-medium">Not evaluated ({result.data.unknown_callers.length})</summary>
-                    <p className="cr-helper mt-1">These could not be decided. They are not shown as allowed, and they are not ruled out.</p>
-                    <ul className="mt-2 space-y-2">
+                  <details className="hs-card p-4" open={result.data.callers.length === 0}>
+                    <summary className="hs-focus-ring cursor-pointer rounded font-medium">Not checked ({result.data.unknown_callers.length}): could not be decided</summary>
+                    <p className="cr-helper mt-1">They are not shown as allowed, and they are not ruled out.</p>
+                    <ul className="mt-2 divide-y divide-slate-200 dark:divide-slate-800">
                       {result.data.unknown_callers.map((c) => (
-                        <li key={c.arn} className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <StateChip tone="unk" glyph="?" label="Unknown" title={c.reason} />
-                            <span className="text-xs uppercase text-slate-500">{c.kind}</span>
-                            <span className="break-all font-mono text-xs">{c.name}</span>
-                            <span className="text-xs text-slate-500">{c.account_id}</span>
-                          </div>
-                          <p className="mt-0.5 text-xs text-slate-500">{c.reason_text}</p>
+                        <li key={c.arn} className="py-2">
+                          <span className="text-xs uppercase text-slate-500">{c.kind}</span> <span className="break-all font-medium">{c.name}</span> <span className="text-xs text-slate-500">{c.account_id}</span>
+                          <p className="text-xs text-slate-500">{c.reason_text}</p>
                         </li>
                       ))}
                     </ul>
@@ -179,7 +185,10 @@ export function AccessExplorerPage() {
                   }}>Download CSV</button>
                   <button type="button" className="hs-btn-default px-2 py-1" onClick={() => void navigator.clipboard?.writeText(window.location.href)}>Copy link</button>
                 </div>
-                {result.data.notes.map((n) => <p key={n} className="cr-helper">{n}</p>)}
+                <details className="text-xs text-slate-500">
+                  <summary className="cursor-pointer">About this result</summary>
+                  {result.data.notes.map((n) => <p key={n} className="mt-1">{n}</p>)}
+                </details>
               </div>
             )}
           </div>
