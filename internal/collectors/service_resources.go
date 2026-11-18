@@ -44,6 +44,15 @@ const maxStateMachines = 500
 func serviceStatus(err error) (status, detail string) {
 	var api smithy.APIError
 	if errors.As(err, &api) {
+		// A service that is switched off for this account or Region is not a permission problem. Seen on real AWS:
+		// SubscriptionRequiredException (App Runner, CodeDeploy), "currently disabled" (Glue development endpoints) and
+		// "not supported in <region>".
+		msg := strings.ToLower(api.ErrorMessage())
+		switch {
+		case api.ErrorCode() == "SubscriptionRequiredException", api.ErrorCode() == "OptInRequired",
+			strings.Contains(msg, "currently disabled"), strings.Contains(msg, "not supported in"):
+			return "unsupported", "the service is not available to this account or in this region: " + api.ErrorMessage()
+		}
 		switch api.ErrorCode() {
 		case "AccessDenied", "AccessDeniedException", "UnauthorizedOperation", "UnrecognizedClientException":
 			return "failed", "access_denied: " + api.ErrorMessage()

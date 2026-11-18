@@ -3,6 +3,7 @@ package ciem
 import (
 	"context"
 	"fmt"
+	"github.com/Zero0x00/cloudrift/internal/iamauth"
 	"sort"
 	"strings"
 	"sync"
@@ -244,7 +245,7 @@ func escalationFinding(p models.AssetNode, family string, g *escalationGroup, by
 	level := levelFor(e.Kind, e.Technique, steps)
 	extra := []string{}
 	if level == ExploitNeedsState {
-		extra = append(extra, "the agent, ECS Exec or network reachability it needs was not collected")
+		extra = append(extra, needsStateText(e.Technique))
 	}
 	ev["exploitability"] = exploitability(level, steps, p, extra...)
 	ev["severity_factors"] = append([]string{factorLine(level, steps)}, ev["severity_factors"].([]string)...)
@@ -407,4 +408,13 @@ func assumesARole(r schema.IdentityAttackReport) bool {
 		}
 	}
 	return false
+}
+
+// needsStateText names what a workload escalation depends on and the scan did not see: the technique's own precondition when it
+// has one (a stack policy, a job queue, a notebook's state), otherwise the generic agent and reachability note.
+func needsStateText(technique string) string {
+	if w, ok := iamauth.WorkloadEscalationFor(technique); ok && w.Precondition != "" {
+		return w.Precondition
+	}
+	return "the agent, ECS Exec or network reachability it needs was not collected"
 }

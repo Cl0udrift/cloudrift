@@ -134,7 +134,20 @@ func TestServiceStatusClassifiesErrors(t *testing.T) {
 	if s, _ := serviceStatus(errors.New("dial tcp: lookup states.xx-1.amazonaws.com: no such host")); s != "unsupported" {
 		t.Fatal("an endpoint that does not resolve is unsupported")
 	}
+	for _, e := range []error{coded{"SubscriptionRequiredException", "The AWS Access Key Id needs a subscription for the service"},
+		coded{"AccessDeniedException", "GetDevEndpoints operation is currently disabled."}, coded{"InvalidInputException", "Operation is not supported in <ap-south-2> region"}} {
+		if s, _ := serviceStatus(e); s != "unsupported" {
+			t.Fatalf("%v must be unsupported, got %s", e, s)
+		}
+	}
 	if s, _ := serviceStatus(errors.New("boom")); s != "failed" {
 		t.Fatal("anything else is failed")
 	}
 }
+
+type coded struct{ code, msg string }
+
+func (c coded) Error() string                 { return c.code + ": " + c.msg }
+func (c coded) ErrorCode() string             { return c.code }
+func (c coded) ErrorMessage() string          { return c.msg }
+func (c coded) ErrorFault() smithy.ErrorFault { return smithy.FaultClient }
