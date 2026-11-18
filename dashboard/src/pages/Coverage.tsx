@@ -5,6 +5,7 @@ import { apiClient } from "../api/client";
 import { formatQueryError } from "../api/httpError";
 import { queryKeys } from "../api/queryKeys";
 import type { CoverageModule, CoverageReport } from "../api/types";
+import { ReferenceCoverage } from "../components/coverage/ReferenceCoverage";
 import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
 import { StateChip, type Tone } from "../components/ui/StatusChip";
@@ -84,6 +85,7 @@ export function CoveragePage() {
           </button>
         </p>
       ) : null}
+      <ReferenceCoverage />
       {query.isLoading ? (
         <StatePanel>Loading coverage…</StatePanel>
       ) : query.isError && !query.data ? (

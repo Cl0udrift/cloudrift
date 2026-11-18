@@ -3,6 +3,12 @@
 // (evaluated actions, attack techniques) are computed at request time, not written here.
 package coverage
 
+import (
+	"fmt"
+
+	"github.com/Zero0x00/cloudrift/internal/verified"
+)
+
 // Status values.
 const (
 	StatusReady   = "ready"   // works, tested, on by default
@@ -119,7 +125,7 @@ func Modules() []Module {
 			Covers:      []string{"Identity, resource, trust, boundary, session, SCP and RCP policies together", "Explicit deny wins; unknown is never treated as deny", "Policy variables and extended condition operators", "Tag conditions (aws:ResourceTag, aws:PrincipalTag) from the collected tags of users, roles and EC2 instances; a call blocked only by a tag is reported as possible after the tag is set, changed or removed, by whichever principal on the path may do it", "Plain-language explanation for every decision"},
 			Limitations: []string{"Only the actions in the catalog are evaluated", "Tag-based escalation covers StringEquals, StringLike and their negations on aws:ResourceTag for users, roles and EC2 instances, with iam:TagUser/UntagUser/TagRole/UntagRole and ec2:CreateTags/DeleteTags; other tagged resources, tag-policy and SCP tag rules, and aws:RequestTag conditions on the target call are not modeled", "VPC endpoint policies are shown but not applied, and KMS grants with an encryption-context constraint give a conditional result", "S3 ACLs and Block Public Access unless declared", "API-level checks such as termination protection"},
 			Docs:        "docs/audits/resource-policy-collection.md", Page: "/blast-explorer",
-			Evidence: []string{"Golden corpus of hand-written cases tied to AWS documentation, with a zero-false-allow gate", "Synthetic dataset check: 27 of 27 administrative roles found, no false escalations", "No production-account validation yet (documented no-go)"},
+			Evidence: []string{fmt.Sprintf("Golden corpus of %d hand-written cases tied to AWS documentation, with a zero-false-allow gate", verified.Load().GoldenCases), "Synthetic dataset check: 27 of 27 administrative roles found, no false escalations", "No production-account validation yet (documented no-go)"},
 		},
 		{
 			ID: "attack-paths", Name: "Attack and privilege-escalation search", Area: AreaEvaluate, Status: StatusPartial,

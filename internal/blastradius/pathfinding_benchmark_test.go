@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Zero0x00/cloudrift/internal/models"
+	"github.com/Zero0x00/cloudrift/internal/referencecov"
 )
 
 type pfPath struct {
@@ -533,6 +534,7 @@ func pfAssert(t *testing.T, out []pfCase, paths []pfPath) {
 		r = float64(tp) / float64(tp+fn)
 	}
 	t.Logf("pathfinding benchmark: %d paths, detected %d, missed %d, false positives %d, true negatives %d; precision %.2f recall %.2f (simulated, minimal reference permissions)", tp+fn, tp, fn, fp, tn, p, r)
+	pfCheckReferenceCoverage(t, out, paths, fp, tn, p, r)
 }
 
 // pfKeyService maps the service key in a data-driven plan's kind (PASS_ROLE_<KEY>_<n>) to the service name the
@@ -576,4 +578,114 @@ func anyIn(a, b []string) bool {
 		}
 	}
 	return false
+}
+
+var pfCategoryName = map[string]string{
+	"new-passrole":      "Pass a role to a new resource",
+	"existing-passrole": "Use a resource that already exists",
+	"principal-access":  "Take over an identity",
+	"self-escalation":   "Change your own permissions",
+}
+
+// pfCheckReferenceCoverage builds the report the Coverage page shows from this benchmark's own results and
+// compares it with the checked-in file. Run with UPDATE_REFERENCE_COVERAGE=1 to rewrite the file.
+func pfCheckReferenceCoverage(t *testing.T, out []pfCase, paths []pfPath, fp, tn int, precision, recall float64) {
+	t.Helper()
+	status := map[string]string{}
+	for _, c := range out {
+		if c.Variant != "positive" {
+			continue
+		}
+		switch c.Outcome {
+		case "detected":
+			status[c.ID] = referencecov.Detected
+		case "partial":
+			status[c.ID] = referencecov.Partial
+		default:
+			status[c.ID] = referencecov.NotDetected
+		}
+	}
+	rep := referencecov.Report{
+		Source: referencecov.Source{
+			Name: "pathfinding.cloud", URL: "https://pathfinding.cloud", License: "Apache-2.0 (Datadog Security Labs)",
+			Commit: "b3f449e50cb7f06a881a4703237d4ce7be627683", Snapshot: "2026-11-16", AWSRecords: len(paths),
+			Excluded: "6 GCP records are not counted: Cloudrift covers AWS only.",
+			Method:   "Simulated: a fixture is built from each record's minimal required permissions and checked against the attack search. Not a test on a live account.",
+		},
+	}
+	byCat, bySvc := map[string]*referencecov.Group{}, map[string]*referencecov.Group{}
+	bump := func(m map[string]*referencecov.Group, key, name, st string) {
+		g := m[key]
+		if g == nil {
+			g = &referencecov.Group{Key: key, Name: name}
+			m[key] = g
+		}
+		g.Total++
+		switch st {
+		case referencecov.Detected:
+			g.Detected++
+		case referencecov.Partial:
+			g.Partial++
+		default:
+			g.NotDetected++
+		}
+	}
+	for _, p := range paths {
+		st := status[p.ID]
+		svc := strings.SplitN(p.ID, "-", 2)[0]
+		reason := ""
+		if st != referencecov.Detected {
+			reason = "No technique models this path yet."
+			if p.Cat == "existing-passrole" {
+				reason = "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision."
+			}
+			if st == referencecov.Partial {
+				reason = "Part of the path is modeled."
+			}
+		}
+		rep.Paths = append(rep.Paths, referencecov.Path{ID: p.ID, Category: p.Cat, Service: svc, Status: st, Required: p.Required, Reason: reason, URL: "https://pathfinding.cloud/paths/" + p.ID})
+		bump(byCat, p.Cat, pfCategoryName[p.Cat], st)
+		bump(bySvc, svc, svc, st)
+		rep.Totals.Paths++
+		switch st {
+		case referencecov.Detected:
+			rep.Totals.Detected++
+		case referencecov.Partial:
+			rep.Totals.Partial++
+		default:
+			rep.Totals.NotDetected++
+		}
+	}
+	rep.Totals.FalsePositives, rep.Totals.TrueNegatives = fp, tn
+	rep.Totals.Precision, rep.Totals.Recall = float64(int(precision*100+0.5))/100, float64(int(recall*100+0.5))/100
+	flatten := func(m map[string]*referencecov.Group) []referencecov.Group {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var res []referencecov.Group
+		for _, k := range keys {
+			res = append(res, *m[k])
+		}
+		return res
+	}
+	rep.Categories, rep.Services = flatten(byCat), flatten(bySvc)
+	sort.Slice(rep.Paths, func(i, j int) bool { return rep.Paths[i].ID < rep.Paths[j].ID })
+	want, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, '\n')
+	file := "../referencecov/reference_coverage.json"
+	if os.Getenv("UPDATE_REFERENCE_COVERAGE") == "1" {
+		if err := os.WriteFile(file, want, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	have, err := os.ReadFile(file)
+	if err != nil || string(have) != string(want) {
+		t.Errorf("internal/referencecov/reference_coverage.json is out of date with the benchmark. Run: UPDATE_REFERENCE_COVERAGE=1 go test ./internal/blastradius -run TestPathfindingBenchmark")
+	}
 }

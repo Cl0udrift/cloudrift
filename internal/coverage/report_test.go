@@ -1,10 +1,13 @@
 package coverage
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/Zero0x00/cloudrift/internal/config"
 	"github.com/Zero0x00/cloudrift/internal/models"
+	"github.com/Zero0x00/cloudrift/internal/verified"
 )
 
 func TestRegistryIsConsistent(t *testing.T) {
@@ -80,4 +83,19 @@ func TestBuildLiveState(t *testing.T) {
 	if none := Build(cfg, "", nil); none.Modules[0].Live.State != "not_recorded" {
 		t.Fatalf("no scan state %+v", none.Modules[0].Live)
 	}
+}
+
+func TestRegistryPrintsTheGoldenCaseCountFromTheTests(t *testing.T) {
+	want := fmt.Sprintf("%d hand-written cases", verified.Load().GoldenCases)
+	for _, m := range Modules() {
+		for _, e := range m.Evidence {
+			if strings.Contains(e, "Golden corpus of") {
+				if !strings.Contains(e, want) || verified.Load().GoldenCases == 0 {
+					t.Fatalf("%q must contain %q", e, want)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("no module cites the golden corpus")
 }

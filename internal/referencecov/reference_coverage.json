@@ -1,0 +1,1313 @@
+{
+  "source": {
+    "name": "pathfinding.cloud",
+    "url": "https://pathfinding.cloud",
+    "license": "Apache-2.0 (Datadog Security Labs)",
+    "commit": "b3f449e50cb7f06a881a4703237d4ce7be627683",
+    "snapshot_date": "2026-11-16",
+    "aws_records": 91,
+    "excluded": "6 GCP records are not counted: Cloudrift covers AWS only.",
+    "method": "Simulated: a fixture is built from each record's minimal required permissions and checked against the attack search. Not a test on a live account."
+  },
+  "totals": {
+    "paths": 91,
+    "detected": 76,
+    "partial": 0,
+    "not_detected": 15,
+    "false_positives": 0,
+    "true_negatives": 516,
+    "precision": 1,
+    "recall": 0.84
+  },
+  "categories": [
+    {
+      "key": "existing-passrole",
+      "name": "Use a resource that already exists",
+      "total": 22,
+      "detected": 8,
+      "partial": 0,
+      "not_detected": 14
+    },
+    {
+      "key": "new-passrole",
+      "name": "Pass a role to a new resource",
+      "total": 47,
+      "detected": 46,
+      "partial": 0,
+      "not_detected": 1
+    },
+    {
+      "key": "principal-access",
+      "name": "Take over an identity",
+      "total": 14,
+      "detected": 14,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "self-escalation",
+      "name": "Change your own permissions",
+      "total": 8,
+      "detected": 8,
+      "partial": 0,
+      "not_detected": 0
+    }
+  ],
+  "services": [
+    {
+      "key": "apprunner",
+      "name": "apprunner",
+      "total": 2,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 1
+    },
+    {
+      "key": "batch",
+      "name": "batch",
+      "total": 3,
+      "detected": 2,
+      "partial": 0,
+      "not_detected": 1
+    },
+    {
+      "key": "bedrock",
+      "name": "bedrock",
+      "total": 7,
+      "detected": 4,
+      "partial": 0,
+      "not_detected": 3
+    },
+    {
+      "key": "braket",
+      "name": "braket",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "cloudformation",
+      "name": "cloudformation",
+      "total": 5,
+      "detected": 3,
+      "partial": 0,
+      "not_detected": 2
+    },
+    {
+      "key": "codebuild",
+      "name": "codebuild",
+      "total": 4,
+      "detected": 2,
+      "partial": 0,
+      "not_detected": 2
+    },
+    {
+      "key": "codedeploy",
+      "name": "codedeploy",
+      "total": 1,
+      "detected": 0,
+      "partial": 0,
+      "not_detected": 1
+    },
+    {
+      "key": "cognitoidentity",
+      "name": "cognitoidentity",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "datapipeline",
+      "name": "datapipeline",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "ec2",
+      "name": "ec2",
+      "total": 4,
+      "detected": 3,
+      "partial": 0,
+      "not_detected": 1
+    },
+    {
+      "key": "ec2instanceconnect",
+      "name": "ec2instanceconnect",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "ecs",
+      "name": "ecs",
+      "total": 9,
+      "detected": 9,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "emr",
+      "name": "emr",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "emrserverless",
+      "name": "emrserverless",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "gamelift",
+      "name": "gamelift",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "glue",
+      "name": "glue",
+      "total": 7,
+      "detected": 6,
+      "partial": 0,
+      "not_detected": 1
+    },
+    {
+      "key": "iam",
+      "name": "iam",
+      "total": 21,
+      "detected": 21,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "imagebuilder",
+      "name": "imagebuilder",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "kinesisanalytics",
+      "name": "kinesisanalytics",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "lambda",
+      "name": "lambda",
+      "total": 6,
+      "detected": 6,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "omics",
+      "name": "omics",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "sagemaker",
+      "name": "sagemaker",
+      "total": 5,
+      "detected": 3,
+      "partial": 0,
+      "not_detected": 2
+    },
+    {
+      "key": "scheduler",
+      "name": "scheduler",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "ssm",
+      "name": "ssm",
+      "total": 3,
+      "detected": 3,
+      "partial": 0,
+      "not_detected": 0
+    },
+    {
+      "key": "stepfunctions",
+      "name": "stepfunctions",
+      "total": 2,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 1
+    },
+    {
+      "key": "sts",
+      "name": "sts",
+      "total": 1,
+      "detected": 1,
+      "partial": 0,
+      "not_detected": 0
+    }
+  ],
+  "paths": [
+    {
+      "id": "apprunner-001",
+      "category": "new-passrole",
+      "service": "apprunner",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "apprunner:CreateService"
+      ],
+      "url": "https://pathfinding.cloud/paths/apprunner-001"
+    },
+    {
+      "id": "apprunner-002",
+      "category": "existing-passrole",
+      "service": "apprunner",
+      "status": "not_detected",
+      "required": [
+        "apprunner:UpdateService"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/apprunner-002"
+    },
+    {
+      "id": "batch-001",
+      "category": "new-passrole",
+      "service": "batch",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "batch:RegisterJobDefinition",
+        "batch:SubmitJob"
+      ],
+      "url": "https://pathfinding.cloud/paths/batch-001"
+    },
+    {
+      "id": "batch-002",
+      "category": "existing-passrole",
+      "service": "batch",
+      "status": "not_detected",
+      "required": [
+        "batch:SubmitJob"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/batch-002"
+    },
+    {
+      "id": "batch-003",
+      "category": "new-passrole",
+      "service": "batch",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "batch:CreateComputeEnvironment",
+        "batch:CreateJobQueue",
+        "batch:RegisterJobDefinition",
+        "batch:SubmitJob"
+      ],
+      "url": "https://pathfinding.cloud/paths/batch-003"
+    },
+    {
+      "id": "bedrock-001",
+      "category": "new-passrole",
+      "service": "bedrock",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "bedrock-agentcore:CreateCodeInterpreter",
+        "bedrock-agentcore:StartCodeInterpreterSession",
+        "bedrock-agentcore:InvokeCodeInterpreter"
+      ],
+      "url": "https://pathfinding.cloud/paths/bedrock-001"
+    },
+    {
+      "id": "bedrock-002",
+      "category": "existing-passrole",
+      "service": "bedrock",
+      "status": "not_detected",
+      "required": [
+        "bedrock-agentcore:StartCodeInterpreterSession",
+        "bedrock-agentcore:InvokeCodeInterpreter"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/bedrock-002"
+    },
+    {
+      "id": "bedrock-003",
+      "category": "new-passrole",
+      "service": "bedrock",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "bedrock-agentcore:CreateAgentRuntime",
+        "bedrock-agentcore:CreateAgentRuntimeEndpoint",
+        "bedrock-agentcore:CreateWorkloadIdentity",
+        "bedrock-agentcore:InvokeAgentRuntimeCommand"
+      ],
+      "url": "https://pathfinding.cloud/paths/bedrock-003"
+    },
+    {
+      "id": "bedrock-004",
+      "category": "existing-passrole",
+      "service": "bedrock",
+      "status": "not_detected",
+      "required": [
+        "bedrock-agentcore:InvokeAgentRuntimeCommand"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/bedrock-004"
+    },
+    {
+      "id": "bedrock-005",
+      "category": "new-passrole",
+      "service": "bedrock",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "bedrock-agentcore:CreateHarness",
+        "bedrock-agentcore:CreateAgentRuntime",
+        "bedrock-agentcore:CreateAgentRuntimeEndpoint",
+        "bedrock-agentcore:CreateWorkloadIdentity",
+        "bedrock-agentcore:GetAgentRuntime",
+        "bedrock-agentcore:GetHarness",
+        "bedrock-agentcore:InvokeAgentRuntimeCommand"
+      ],
+      "url": "https://pathfinding.cloud/paths/bedrock-005"
+    },
+    {
+      "id": "bedrock-006",
+      "category": "new-passrole",
+      "service": "bedrock",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "bedrock-agentcore:CreateBrowser",
+        "bedrock-agentcore:StartBrowserSession",
+        "bedrock-agentcore:ConnectBrowserAutomationStream"
+      ],
+      "url": "https://pathfinding.cloud/paths/bedrock-006"
+    },
+    {
+      "id": "bedrock-007",
+      "category": "existing-passrole",
+      "service": "bedrock",
+      "status": "not_detected",
+      "required": [
+        "bedrock-agentcore:StartBrowserSession",
+        "bedrock-agentcore:ConnectBrowserAutomationStream"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/bedrock-007"
+    },
+    {
+      "id": "braket-001",
+      "category": "new-passrole",
+      "service": "braket",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "braket:CreateJob"
+      ],
+      "url": "https://pathfinding.cloud/paths/braket-001"
+    },
+    {
+      "id": "cloudformation-001",
+      "category": "new-passrole",
+      "service": "cloudformation",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "cloudformation:CreateStack"
+      ],
+      "url": "https://pathfinding.cloud/paths/cloudformation-001"
+    },
+    {
+      "id": "cloudformation-002",
+      "category": "existing-passrole",
+      "service": "cloudformation",
+      "status": "not_detected",
+      "required": [
+        "cloudformation:UpdateStack"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/cloudformation-002"
+    },
+    {
+      "id": "cloudformation-003",
+      "category": "new-passrole",
+      "service": "cloudformation",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "cloudformation:CreateStackSet",
+        "cloudformation:CreateStackInstances"
+      ],
+      "url": "https://pathfinding.cloud/paths/cloudformation-003"
+    },
+    {
+      "id": "cloudformation-004",
+      "category": "new-passrole",
+      "service": "cloudformation",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "cloudformation:UpdateStackSet"
+      ],
+      "url": "https://pathfinding.cloud/paths/cloudformation-004"
+    },
+    {
+      "id": "cloudformation-005",
+      "category": "new-passrole",
+      "service": "cloudformation",
+      "status": "not_detected",
+      "required": [
+        "cloudformation:CreateChangeSet",
+        "cloudformation:ExecuteChangeSet"
+      ],
+      "reason": "No technique models this path yet.",
+      "url": "https://pathfinding.cloud/paths/cloudformation-005"
+    },
+    {
+      "id": "codebuild-001",
+      "category": "new-passrole",
+      "service": "codebuild",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "codebuild:CreateProject",
+        "codebuild:StartBuild"
+      ],
+      "url": "https://pathfinding.cloud/paths/codebuild-001"
+    },
+    {
+      "id": "codebuild-002",
+      "category": "existing-passrole",
+      "service": "codebuild",
+      "status": "not_detected",
+      "required": [
+        "codebuild:StartBuild"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/codebuild-002"
+    },
+    {
+      "id": "codebuild-003",
+      "category": "existing-passrole",
+      "service": "codebuild",
+      "status": "not_detected",
+      "required": [
+        "codebuild:StartBuildBatch"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/codebuild-003"
+    },
+    {
+      "id": "codebuild-004",
+      "category": "new-passrole",
+      "service": "codebuild",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "codebuild:CreateProject",
+        "codebuild:StartBuildBatch"
+      ],
+      "url": "https://pathfinding.cloud/paths/codebuild-004"
+    },
+    {
+      "id": "codedeploy-001",
+      "category": "existing-passrole",
+      "service": "codedeploy",
+      "status": "not_detected",
+      "required": [
+        "codedeploy:CreateDeployment",
+        "codedeploy:RegisterApplicationRevision",
+        "codedeploy:GetDeploymentConfig"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/codedeploy-001"
+    },
+    {
+      "id": "cognitoidentity-001",
+      "category": "new-passrole",
+      "service": "cognitoidentity",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "cognito-identity:SetIdentityPoolRoles"
+      ],
+      "url": "https://pathfinding.cloud/paths/cognitoidentity-001"
+    },
+    {
+      "id": "datapipeline-001",
+      "category": "new-passrole",
+      "service": "datapipeline",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "datapipeline:CreatePipeline",
+        "datapipeline:PutPipelineDefinition",
+        "datapipeline:ActivatePipeline"
+      ],
+      "url": "https://pathfinding.cloud/paths/datapipeline-001"
+    },
+    {
+      "id": "ec2-001",
+      "category": "new-passrole",
+      "service": "ec2",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ec2:RunInstances"
+      ],
+      "url": "https://pathfinding.cloud/paths/ec2-001"
+    },
+    {
+      "id": "ec2-002",
+      "category": "existing-passrole",
+      "service": "ec2",
+      "status": "detected",
+      "required": [
+        "ec2:ModifyInstanceAttribute",
+        "ec2:StopInstances",
+        "ec2:StartInstances"
+      ],
+      "url": "https://pathfinding.cloud/paths/ec2-002"
+    },
+    {
+      "id": "ec2-003",
+      "category": "new-passrole",
+      "service": "ec2",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ec2:RequestSpotInstances"
+      ],
+      "url": "https://pathfinding.cloud/paths/ec2-003"
+    },
+    {
+      "id": "ec2-005",
+      "category": "existing-passrole",
+      "service": "ec2",
+      "status": "not_detected",
+      "required": [
+        "ec2:CreateLaunchTemplateVersion",
+        "ec2:ModifyLaunchTemplate"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/ec2-005"
+    },
+    {
+      "id": "ec2instanceconnect-003",
+      "category": "existing-passrole",
+      "service": "ec2instanceconnect",
+      "status": "detected",
+      "required": [
+        "ec2-instance-connect:SendSSHPublicKey",
+        "ec2:DescribeInstances"
+      ],
+      "url": "https://pathfinding.cloud/paths/ec2instanceconnect-003"
+    },
+    {
+      "id": "ecs-001",
+      "category": "new-passrole",
+      "service": "ecs",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ecs:CreateCluster",
+        "ecs:RegisterTaskDefinition",
+        "ecs:CreateService"
+      ],
+      "url": "https://pathfinding.cloud/paths/ecs-001"
+    },
+    {
+      "id": "ecs-002",
+      "category": "new-passrole",
+      "service": "ecs",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ecs:CreateCluster",
+        "ecs:RegisterTaskDefinition",
+        "ecs:RunTask"
+      ],
+      "url": "https://pathfinding.cloud/paths/ecs-002"
+    },
+    {
+      "id": "ecs-003",
+      "category": "new-passrole",
+      "service": "ecs",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ecs:RegisterTaskDefinition",
+        "ecs:CreateService"
+      ],
+      "url": "https://pathfinding.cloud/paths/ecs-003"
+    },
+    {
+      "id": "ecs-004",
+      "category": "new-passrole",
+      "service": "ecs",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ecs:RegisterTaskDefinition",
+        "ecs:RunTask"
+      ],
+      "url": "https://pathfinding.cloud/paths/ecs-004"
+    },
+    {
+      "id": "ecs-005",
+      "category": "new-passrole",
+      "service": "ecs",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ecs:RegisterTaskDefinition",
+        "ecs:StartTask"
+      ],
+      "url": "https://pathfinding.cloud/paths/ecs-005"
+    },
+    {
+      "id": "ecs-006",
+      "category": "existing-passrole",
+      "service": "ecs",
+      "status": "detected",
+      "required": [
+        "ecs:ExecuteCommand",
+        "ecs:DescribeTasks"
+      ],
+      "url": "https://pathfinding.cloud/paths/ecs-006"
+    },
+    {
+      "id": "ecs-007",
+      "category": "new-passrole",
+      "service": "ecs",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ecs:RegisterContainerInstance",
+        "ecs:StartTask"
+      ],
+      "url": "https://pathfinding.cloud/paths/ecs-007"
+    },
+    {
+      "id": "ecs-008",
+      "category": "new-passrole",
+      "service": "ecs",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ecs:RunTask"
+      ],
+      "url": "https://pathfinding.cloud/paths/ecs-008"
+    },
+    {
+      "id": "ecs-009",
+      "category": "new-passrole",
+      "service": "ecs",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ecs:StartTask"
+      ],
+      "url": "https://pathfinding.cloud/paths/ecs-009"
+    },
+    {
+      "id": "emr-001",
+      "category": "new-passrole",
+      "service": "emr",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "elasticmapreduce:RunJobFlow"
+      ],
+      "url": "https://pathfinding.cloud/paths/emr-001"
+    },
+    {
+      "id": "emrserverless-001",
+      "category": "new-passrole",
+      "service": "emrserverless",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "emr-serverless:CreateApplication",
+        "emr-serverless:StartJobRun"
+      ],
+      "url": "https://pathfinding.cloud/paths/emrserverless-001"
+    },
+    {
+      "id": "gamelift-001",
+      "category": "new-passrole",
+      "service": "gamelift",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "gamelift:CreateBuild",
+        "gamelift:CreateFleet",
+        "gamelift:RequestUploadCredentials"
+      ],
+      "url": "https://pathfinding.cloud/paths/gamelift-001"
+    },
+    {
+      "id": "glue-001",
+      "category": "new-passrole",
+      "service": "glue",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "glue:CreateDevEndpoint"
+      ],
+      "url": "https://pathfinding.cloud/paths/glue-001"
+    },
+    {
+      "id": "glue-002",
+      "category": "existing-passrole",
+      "service": "glue",
+      "status": "not_detected",
+      "required": [
+        "glue:UpdateDevEndpoint"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/glue-002"
+    },
+    {
+      "id": "glue-003",
+      "category": "new-passrole",
+      "service": "glue",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "glue:CreateJob",
+        "glue:StartJobRun"
+      ],
+      "url": "https://pathfinding.cloud/paths/glue-003"
+    },
+    {
+      "id": "glue-004",
+      "category": "new-passrole",
+      "service": "glue",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "glue:CreateJob",
+        "glue:CreateTrigger"
+      ],
+      "url": "https://pathfinding.cloud/paths/glue-004"
+    },
+    {
+      "id": "glue-005",
+      "category": "new-passrole",
+      "service": "glue",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "glue:UpdateJob",
+        "glue:StartJobRun"
+      ],
+      "url": "https://pathfinding.cloud/paths/glue-005"
+    },
+    {
+      "id": "glue-006",
+      "category": "new-passrole",
+      "service": "glue",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "glue:UpdateJob",
+        "glue:CreateTrigger"
+      ],
+      "url": "https://pathfinding.cloud/paths/glue-006"
+    },
+    {
+      "id": "glue-007",
+      "category": "new-passrole",
+      "service": "glue",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "glue:CreateSession",
+        "glue:RunStatement"
+      ],
+      "url": "https://pathfinding.cloud/paths/glue-007"
+    },
+    {
+      "id": "iam-001",
+      "category": "self-escalation",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:CreatePolicyVersion"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-001"
+    },
+    {
+      "id": "iam-002",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:CreateAccessKey"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-002"
+    },
+    {
+      "id": "iam-003",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:CreateAccessKey",
+        "iam:DeleteAccessKey"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-003"
+    },
+    {
+      "id": "iam-004",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:CreateLoginProfile"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-004"
+    },
+    {
+      "id": "iam-005",
+      "category": "self-escalation",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:PutRolePolicy"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-005"
+    },
+    {
+      "id": "iam-006",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:UpdateLoginProfile"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-006"
+    },
+    {
+      "id": "iam-007",
+      "category": "self-escalation",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:PutUserPolicy"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-007"
+    },
+    {
+      "id": "iam-008",
+      "category": "self-escalation",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:AttachUserPolicy"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-008"
+    },
+    {
+      "id": "iam-009",
+      "category": "self-escalation",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:AttachRolePolicy"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-009"
+    },
+    {
+      "id": "iam-010",
+      "category": "self-escalation",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:AttachGroupPolicy"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-010"
+    },
+    {
+      "id": "iam-011",
+      "category": "self-escalation",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:PutGroupPolicy"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-011"
+    },
+    {
+      "id": "iam-012",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-012"
+    },
+    {
+      "id": "iam-013",
+      "category": "self-escalation",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:AddUserToGroup"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-013"
+    },
+    {
+      "id": "iam-014",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:AttachRolePolicy",
+        "sts:AssumeRole"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-014"
+    },
+    {
+      "id": "iam-015",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:AttachUserPolicy",
+        "iam:CreateAccessKey"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-015"
+    },
+    {
+      "id": "iam-016",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:CreatePolicyVersion",
+        "sts:AssumeRole"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-016"
+    },
+    {
+      "id": "iam-017",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:PutRolePolicy",
+        "sts:AssumeRole"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-017"
+    },
+    {
+      "id": "iam-018",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:PutUserPolicy",
+        "iam:CreateAccessKey"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-018"
+    },
+    {
+      "id": "iam-019",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:AttachRolePolicy",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-019"
+    },
+    {
+      "id": "iam-020",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:CreatePolicyVersion",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-020"
+    },
+    {
+      "id": "iam-021",
+      "category": "principal-access",
+      "service": "iam",
+      "status": "detected",
+      "required": [
+        "iam:PutRolePolicy",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "url": "https://pathfinding.cloud/paths/iam-021"
+    },
+    {
+      "id": "imagebuilder-001",
+      "category": "new-passrole",
+      "service": "imagebuilder",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "imagebuilder:CreateComponent",
+        "imagebuilder:CreateImageRecipe",
+        "imagebuilder:CreateInfrastructureConfiguration",
+        "imagebuilder:CreateImage"
+      ],
+      "url": "https://pathfinding.cloud/paths/imagebuilder-001"
+    },
+    {
+      "id": "kinesisanalytics-001",
+      "category": "new-passrole",
+      "service": "kinesisanalytics",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "kinesisanalytics:CreateApplication",
+        "kinesisanalytics:StartApplication"
+      ],
+      "url": "https://pathfinding.cloud/paths/kinesisanalytics-001"
+    },
+    {
+      "id": "lambda-001",
+      "category": "new-passrole",
+      "service": "lambda",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "lambda:CreateFunction",
+        "lambda:InvokeFunction"
+      ],
+      "url": "https://pathfinding.cloud/paths/lambda-001"
+    },
+    {
+      "id": "lambda-002",
+      "category": "new-passrole",
+      "service": "lambda",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "lambda:CreateFunction",
+        "lambda:CreateEventSourceMapping"
+      ],
+      "url": "https://pathfinding.cloud/paths/lambda-002"
+    },
+    {
+      "id": "lambda-003",
+      "category": "existing-passrole",
+      "service": "lambda",
+      "status": "detected",
+      "required": [
+        "lambda:UpdateFunctionCode"
+      ],
+      "url": "https://pathfinding.cloud/paths/lambda-003"
+    },
+    {
+      "id": "lambda-004",
+      "category": "existing-passrole",
+      "service": "lambda",
+      "status": "detected",
+      "required": [
+        "lambda:UpdateFunctionCode",
+        "lambda:InvokeFunction"
+      ],
+      "url": "https://pathfinding.cloud/paths/lambda-004"
+    },
+    {
+      "id": "lambda-005",
+      "category": "existing-passrole",
+      "service": "lambda",
+      "status": "detected",
+      "required": [
+        "lambda:UpdateFunctionCode",
+        "lambda:AddPermission"
+      ],
+      "url": "https://pathfinding.cloud/paths/lambda-005"
+    },
+    {
+      "id": "lambda-006",
+      "category": "new-passrole",
+      "service": "lambda",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "lambda:CreateFunction",
+        "lambda:AddPermission"
+      ],
+      "url": "https://pathfinding.cloud/paths/lambda-006"
+    },
+    {
+      "id": "omics-001",
+      "category": "new-passrole",
+      "service": "omics",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "omics:CreateWorkflow",
+        "omics:StartRun",
+        "s3:GetObject"
+      ],
+      "url": "https://pathfinding.cloud/paths/omics-001"
+    },
+    {
+      "id": "sagemaker-001",
+      "category": "new-passrole",
+      "service": "sagemaker",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "sagemaker:CreateNotebookInstance"
+      ],
+      "url": "https://pathfinding.cloud/paths/sagemaker-001"
+    },
+    {
+      "id": "sagemaker-002",
+      "category": "new-passrole",
+      "service": "sagemaker",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "sagemaker:CreateTrainingJob"
+      ],
+      "url": "https://pathfinding.cloud/paths/sagemaker-002"
+    },
+    {
+      "id": "sagemaker-003",
+      "category": "new-passrole",
+      "service": "sagemaker",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "sagemaker:CreateProcessingJob"
+      ],
+      "url": "https://pathfinding.cloud/paths/sagemaker-003"
+    },
+    {
+      "id": "sagemaker-004",
+      "category": "existing-passrole",
+      "service": "sagemaker",
+      "status": "not_detected",
+      "required": [
+        "sagemaker:CreatePresignedNotebookInstanceUrl"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/sagemaker-004"
+    },
+    {
+      "id": "sagemaker-005",
+      "category": "existing-passrole",
+      "service": "sagemaker",
+      "status": "not_detected",
+      "required": [
+        "sagemaker:CreateNotebookInstanceLifecycleConfig",
+        "sagemaker:StopNotebookInstance",
+        "sagemaker:UpdateNotebookInstance",
+        "sagemaker:StartNotebookInstance"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/sagemaker-005"
+    },
+    {
+      "id": "scheduler-001",
+      "category": "new-passrole",
+      "service": "scheduler",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "scheduler:CreateSchedule"
+      ],
+      "url": "https://pathfinding.cloud/paths/scheduler-001"
+    },
+    {
+      "id": "ssm-001",
+      "category": "existing-passrole",
+      "service": "ssm",
+      "status": "detected",
+      "required": [
+        "ssm:StartSession"
+      ],
+      "url": "https://pathfinding.cloud/paths/ssm-001"
+    },
+    {
+      "id": "ssm-002",
+      "category": "existing-passrole",
+      "service": "ssm",
+      "status": "detected",
+      "required": [
+        "ssm:SendCommand"
+      ],
+      "url": "https://pathfinding.cloud/paths/ssm-002"
+    },
+    {
+      "id": "ssm-003",
+      "category": "new-passrole",
+      "service": "ssm",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "ssm:CreateDocument",
+        "ssm:StartAutomationExecution"
+      ],
+      "url": "https://pathfinding.cloud/paths/ssm-003"
+    },
+    {
+      "id": "stepfunctions-001",
+      "category": "new-passrole",
+      "service": "stepfunctions",
+      "status": "detected",
+      "required": [
+        "iam:PassRole",
+        "states:CreateStateMachine",
+        "states:StartExecution"
+      ],
+      "url": "https://pathfinding.cloud/paths/stepfunctions-001"
+    },
+    {
+      "id": "stepfunctions-002",
+      "category": "existing-passrole",
+      "service": "stepfunctions",
+      "status": "not_detected",
+      "required": [
+        "states:UpdateStateMachine",
+        "states:StartExecution"
+      ],
+      "reason": "Needs an existing resource the scan does not collect yet. Whether to collect it is a product decision.",
+      "url": "https://pathfinding.cloud/paths/stepfunctions-002"
+    },
+    {
+      "id": "sts-001",
+      "category": "principal-access",
+      "service": "sts",
+      "status": "detected",
+      "required": [
+        "sts:AssumeRole"
+      ],
+      "url": "https://pathfinding.cloud/paths/sts-001"
+    }
+  ]
+}

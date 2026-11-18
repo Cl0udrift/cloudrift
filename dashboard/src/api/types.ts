@@ -1222,6 +1222,31 @@ export interface CoverageLive {
   detail?: string;
 }
 
+export interface ReferenceGroup {
+  key: string;
+  name: string;
+  total: number;
+  detected: number;
+  partial: number;
+  not_detected: number;
+}
+export interface ReferencePath {
+  id: string;
+  category: string;
+  service: string;
+  status: "detected" | "partial" | "not_detected";
+  required: string[];
+  reason?: string;
+  url: string;
+}
+export interface ReferenceCoverage {
+  source: { name: string; url: string; license: string; commit: string; snapshot_date: string; aws_records: number; excluded: string; method: string };
+  totals: { paths: number; detected: number; partial: number; not_detected: number; false_positives: number; true_negatives: number; precision: number; recall: number };
+  categories: ReferenceGroup[];
+  services: ReferenceGroup[];
+  paths: ReferencePath[];
+}
+
 export interface CoverageModule {
   id: string;
   name: string;

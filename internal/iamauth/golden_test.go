@@ -1,6 +1,10 @@
 package iamauth
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"testing"
+)
 
 // The golden corpus pins evaluator results to behavior AWS documents. A case names its source.
 // The suite fails on any mismatch and, separately, on any false allow: a request expected to
@@ -236,6 +240,16 @@ func TestGoldenCorpus(t *testing.T) {
 		}
 	}
 	t.Logf("golden corpus: %d cases, expected allows %d, evaluator allows %d, false allows %d", len(cases), expectedAllow, gotAllow, falseAllow)
+	// The Coverage page prints this count. Run with UPDATE_VERIFIED_COUNTS=1 to rewrite the file after adding a case.
+	want := fmt.Sprintf("{\n  \"golden_cases\": %d\n}\n", len(cases))
+	const countsFile = "../verified/counts.json"
+	if os.Getenv("UPDATE_VERIFIED_COUNTS") == "1" {
+		if err := os.WriteFile(countsFile, []byte(want), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	} else if have, err := os.ReadFile(countsFile); err != nil || string(have) != want {
+		t.Errorf("internal/verified/counts.json is out of date with the golden corpus. Run: UPDATE_VERIFIED_COUNTS=1 go test ./internal/iamauth -run TestGoldenCorpus")
+	}
 	if falseAllow != 0 {
 		t.Fatalf("%d false allows: the evaluator must never validate access that AWS would not grant", falseAllow)
 	}

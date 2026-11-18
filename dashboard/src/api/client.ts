@@ -6,6 +6,7 @@ import type {
   RoleUsageResponse,
   WhoCanResponse,
   AccessTargetList,
+  ReferenceCoverage,
   PrincipalPoliciesResponse,
   AccountsBreakdownResponse,
   DiffResponse,
@@ -114,6 +115,9 @@ export const apiClient = {
   },
   getPrincipalPolicies(scanId: string, arn: string): Promise<PrincipalPoliciesResponse> {
     return fetchJSON<PrincipalPoliciesResponse>(`/scans/${encodeURIComponent(scanId)}/principals/policies${makeQueryString({ arn })}`);
+  },
+  getReferenceCoverage(): Promise<ReferenceCoverage> {
+    return fetchJSON<ReferenceCoverage>("/coverage/reference");
   },
   getCoverage(scanId: string | null): Promise<CoverageReport> {
     return fetchJSON<CoverageReport>(`/coverage${makeQueryString({ scan_id: scanId ?? undefined })}`);

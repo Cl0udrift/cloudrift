@@ -81,6 +81,7 @@ func apiRouter(outputDir, configPath string) http.Handler {
 	r.Get("/scans/{id}/inventory/resources", handlers.InventoryResources(outputDir))
 	r.Get("/scans/{id}/inventory/resource", handlers.InventoryResource(outputDir))
 	r.Get("/coverage", handlers.GetCoverage(outputDir, configPath))
+	r.Get("/coverage/reference", handlers.GetReferenceCoverage())
 	r.Get("/config", handlers.GetConfig(configPath))
 	r.Put("/config", handlers.PutConfig(configPath))
 	r.Post("/scans/{id}/neo4j-export", control.ExportToNeo4j())

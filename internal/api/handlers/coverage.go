@@ -7,6 +7,7 @@ import (
 	"github.com/Zero0x00/cloudrift/internal/config"
 	"github.com/Zero0x00/cloudrift/internal/coverage"
 	"github.com/Zero0x00/cloudrift/internal/models"
+	"github.com/Zero0x00/cloudrift/internal/referencecov"
 	"github.com/Zero0x00/cloudrift/internal/scans"
 )
 
@@ -31,5 +32,13 @@ func GetCoverage(outputDir, configPath string) http.HandlerFunc {
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, coverage.Build(cfg, scanID, assets))
+	}
+}
+
+// GetReferenceCoverage returns Cloudrift's coverage of the pinned outside reference catalog. It is measured by the
+// benchmark, checked in, and does not depend on a scan.
+func GetReferenceCoverage() http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, referencecov.Load())
 	}
 }
