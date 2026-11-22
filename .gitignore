@@ -9,3 +9,7 @@ graphify-out/
 CLAUDE.md
 gapplan.md 
 codereview.md
+
+# Written by the dashboard Settings page (backup of the previous config) and by tsc (incremental build cache)
+cloudrift.toml.bak
+dashboard/tsconfig.tsbuildinfo
