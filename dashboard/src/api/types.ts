@@ -315,7 +315,15 @@ export interface InventoryCategory {
   count: number;
 }
 
+export interface InventoryChange {
+  previous_scan_id: string;
+  added: number;
+  removed: number;
+  removed_names?: string[];
+}
+
 export interface InventorySummary {
+  change?: InventoryChange;
   scan_id: string;
   timestamp?: string;
   synthetic: boolean;
@@ -395,6 +403,12 @@ export interface InventoryResource {
   related_finding_count?: number;
   related_max_severity?: string;
   related_to?: string[];
+  internet_facing?: boolean;
+  exposure_kind?: string;
+  exposure_detail?: string;
+  owner?: string;
+  tags?: Record<string, string>;
+  is_new?: boolean;
   relationship_count: number;
   identity_associated: boolean;
 }
@@ -416,6 +430,9 @@ export interface InventoryDetail {
   findings: { id: string; title: string; severity: string; module: string }[];
   relationships: { rel_type: string; direction: string; other_id: string; other_type?: string; semantic: string; note?: string }[];
   identity_links: { role_arn: string; mechanism?: string; label: string }[];
+  runs_on?: { id: string; name: string; type: string; label: string }[];
+  facts: { label: string; value: string }[];
+  inbound_rules?: { protocol: string; ports: string; sources: string[]; world: boolean }[];
   evidence: Record<string, unknown>;
   evidence_note: string;
 }

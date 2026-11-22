@@ -50,6 +50,12 @@ Resources:
                   - ec2:DescribeInstances
                   - ec2:DescribeIamInstanceProfileAssociations
                   - ec2:DescribeRegions
+                  - ec2:DescribeSecurityGroups
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - elasticloadbalancing:DescribeTags
+                  - rds:DescribeDBInstances
                   - lambda:ListFunctions
                   - ecs:ListClusters
                   - ecs:ListServices

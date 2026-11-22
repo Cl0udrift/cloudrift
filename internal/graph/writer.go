@@ -292,6 +292,10 @@ func cypherRelType(rt models.RelType) (string, error) {
 		return "IDENTITY_CENTER_MEMBER_OF", nil
 	case models.RelObservedAssumeRole:
 		return "OBSERVED_ASSUME_ROLE", nil
+	case models.RelUsesSecurityGroup:
+		return "USES_SECURITY_GROUP", nil
+	case models.RelRoutesTo:
+		return "LOAD_BALANCER_ROUTES_TO", nil
 	case models.RelECSTaskDefUsesTaskRole:
 		return "ECS_TASK_DEFINITION_USES_TASK_ROLE", nil
 	case models.RelECSTaskDefUsesExecutionRole:

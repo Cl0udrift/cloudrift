@@ -99,9 +99,9 @@ func compare(a, b schema.InventoryResource, key string) bool {
 }
 
 // Detail returns one counted asset. Evidence nodes and unknown IDs are not found.
-func Detail(scanID, id string, assets []models.AssetNode, rels []models.Relationship, findings []models.Finding) (schema.InventoryDetail, bool) {
+func Detail(scanID, id string, assets []models.AssetNode, rels []models.Relationship, findings []models.Finding, ownerKeys ...string) (schema.InventoryDetail, bool) {
 	id = strings.TrimSpace(id)
-	items := Build(assets, rels, findings, Filter{})
+	items := Build(assets, rels, findings, Filter{OwnerKeys: ownerKeys})
 	var resource schema.InventoryResource
 	var asset models.AssetNode
 	found := false
@@ -157,6 +157,12 @@ func Detail(scanID, id string, assets []models.AssetNode, rels []models.Relation
 	if links == nil {
 		links = []schema.InventoryIdentityLink{}
 	}
+	runsOn := workloadsRunningAs(id, assets, rels)
+	facts := factsOf(asset, rels)
+	var rules []schema.InventoryRule
+	if asset.AssetType == models.AssetSecurityGroup {
+		rules = inboundRules(asset)
+	}
 	var foundFindings []schema.InventoryFinding
 	for _, finding := range findings {
 		if finding.AffectedARN != id {
@@ -171,7 +177,7 @@ func Detail(scanID, id string, assets []models.AssetNode, rels []models.Relation
 	}
 	return schema.InventoryDetail{
 		ScanID: scanID, Resource: resource, Findings: foundFindings, Relationships: edges,
-		IdentityLinks: links, Evidence: redact(asset.Properties),
+		IdentityLinks: links, RunsOn: runsOn, Facts: facts, InboundRules: rules, Evidence: redact(asset.Properties),
 		EvidenceNote: "Evidence is the collected properties for this asset with credential-like keys removed. Missing attributes were not collected. This view does not evaluate IAM authorization.",
 	}, true
 }
@@ -289,4 +295,35 @@ func runsAsLabel(mechanism string) string {
 		return "Bedrock AgentCore execution role"
 	}
 	return "Role this resource runs as"
+}
+
+// workloadsRunningAs lists the resources that run as the role: the inverse of identityLinks, so the
+// two views can never disagree. An instance profile is a container, not a workload, and is skipped.
+func workloadsRunningAs(roleARN string, assets []models.AssetNode, rels []models.Relationship) []schema.InventoryRunsOn {
+	byARN := map[string]models.AssetNode{}
+	for _, a := range assets {
+		byARN[a.ARN] = a
+	}
+	seen := map[string]bool{}
+	out := []schema.InventoryRunsOn{}
+	for _, rel := range rels {
+		src := byARN[rel.SourceARN]
+		if src.AssetType == models.AssetInstanceProfile || src.AssetType == models.AssetIAMRole {
+			continue
+		}
+		for _, link := range identityLinks(rel.SourceARN, rel, rels) {
+			key := rel.SourceARN + "|" + link.Mechanism
+			if link.RoleARN != roleARN || seen[key] {
+				continue
+			}
+			seen[key] = true
+			name := src.Name
+			if name == "" {
+				name = rel.SourceARN
+			}
+			out = append(out, schema.InventoryRunsOn{ID: rel.SourceARN, Name: name, Type: string(src.AssetType), Label: link.Label})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }

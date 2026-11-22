@@ -352,9 +352,12 @@ export const apiClient = {
   },
   inventoryResources(
     scanId: string,
-    params: { account_id?: string; region?: string; service?: string; resource_type?: string; category?: string; q?: string; has_findings?: string; severity?: string; new_only?: string; page?: number; page_size?: number; sort?: string }
+    params: { account_id?: string; region?: string; service?: string; resource_type?: string; category?: string; q?: string; has_findings?: string; hide_aws?: string; internet_facing?: string; owner?: string; new_resources?: string; severity?: string; new_only?: string; page?: number; page_size?: number; sort?: string }
   ): Promise<InventoryListResponse> {
     return fetchJSON<InventoryListResponse>(`/scans/${encodeURIComponent(scanId)}/inventory/resources${makeQueryString(params)}`);
+  },
+  inventoryExportUrl(scanId: string, params: Record<string, string | undefined>): string {
+    return `${API_BASE}/scans/${encodeURIComponent(scanId)}/inventory/export.csv${makeQueryString(params)}`;
   },
   inventoryResource(scanId: string, id: string): Promise<InventoryDetail> {
     return fetchJSON<InventoryDetail>(`/scans/${encodeURIComponent(scanId)}/inventory/resource${makeQueryString({ id })}`);

@@ -31,6 +31,8 @@ const (
 	AssetRDSInstance              AssetType = "rds_instance"
 	AssetKMSKey                   AssetType = "kms_key"
 	AssetVPCEndpoint              AssetType = "vpc_endpoint"
+	AssetSecurityGroup            AssetType = "ec2_security_group"
+	AssetLoadBalancer             AssetType = "load_balancer"
 	AssetIRSATrust                AssetType = "irsa_trust"
 	// Existing resources that run as an IAM role (the role is on a WORKLOAD_RUNS_AS_ROLE edge).
 	AssetCloudFormationStack AssetType = "cloudformation_stack"

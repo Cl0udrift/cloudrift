@@ -40,6 +40,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.295.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.100.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/eks v1.104.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.65.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/glue v1.176.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/identitystore v1.50.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.23 // indirect

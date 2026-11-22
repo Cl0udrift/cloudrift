@@ -33,6 +33,10 @@ const (
 	// RelObservedAssumeRole links a caller to a role it was seen assuming in CloudTrail event history. It is evidence that
 	// the call happened, not an authorization decision and not an attacker transition.
 	RelObservedAssumeRole RelType = "OBSERVED_ASSUME_ROLE"
+	// RelUsesSecurityGroup links an instance, load balancer or database to a security group it is attached to.
+	RelUsesSecurityGroup RelType = "USES_SECURITY_GROUP"
+	// RelRoutesTo links a load balancer to a registered target instance (through a target group).
+	RelRoutesTo RelType = "LOAD_BALANCER_ROUTES_TO"
 	// Container identity edges are configuration. They are not attacker transitions.
 	RelECSTaskDefUsesTaskRole      RelType = "ECS_TASK_DEFINITION_USES_TASK_ROLE"
 	RelECSTaskDefUsesExecutionRole RelType = "ECS_TASK_DEFINITION_USES_EXECUTION_ROLE"

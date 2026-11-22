@@ -17,6 +17,17 @@ type Filter struct {
 	Category     string
 	Query        string
 	HasFindings  bool
+	// InternetFacing keeps resources reachable from the internet. Owner keeps resources whose owner tag has this
+	// value ("none" keeps resources with no owner). OwnerKeys are the tag keys read as the owner.
+	InternetFacing bool
+	Owner          string
+	OwnerKeys      []string
+	// PreviousARNs are the previous scan's counted resource IDs, nil when there is no previous scan. NewResources
+	// keeps resources it lacks.
+	PreviousARNs map[string]bool
+	NewResources bool
+	// HideAWSManaged drops AWS-owned objects: AWS managed policies and service-linked roles.
+	HideAWSManaged bool
 	// Severities keeps resources whose worst finding is one of these (critical, high, medium, low, info).
 	Severities []string
 	// NewOnly keeps resources with a finding the previous scan did not have. PreviousKnown says a
@@ -35,17 +46,24 @@ type indexed struct {
 	related  related
 	rels     int
 	identity bool
+	exposure Exposure
+	owner    string
+	isNew    bool
 }
 
 // Build returns counted assets for the filter. Duplicate identities are reconciled first.
 func Build(assets []models.AssetNode, rels []models.Relationship, findings []models.Finding, filter Filter) []schema.InventoryResource {
 	findingCount := map[string]int{}
+	actionable := map[string]int{} // findings above Info: an Info note does not make a resource risky
 	worst := map[string]string{}
 	newCount := map[string]int{}
 	rollup := relatedFindings(assets, rels, findings)
 	for _, finding := range findings {
 		if finding.AffectedARN != "" {
 			findingCount[finding.AffectedARN]++
+			if finding.Severity != models.SeverityInfo {
+				actionable[finding.AffectedARN]++
+			}
 			if filter.PreviousKnown && filter.NewFindingIDs[finding.ID] {
 				newCount[finding.AffectedARN]++
 			}
@@ -67,10 +85,11 @@ func Build(assets []models.AssetNode, rels []models.Relationship, findings []mod
 			identity[rel.SourceARN] = true
 		}
 	}
+	exposures := exposureIndex(assets, rels)
 	var items []indexed
 	for _, asset := range reconcileAssets(assets) {
 		svc := serviceOf(asset)
-		if !match(asset, svc, filter) || (filter.HasFindings && findingCount[asset.ARN] == 0) {
+		if !match(asset, svc, filter) || (filter.HasFindings && actionable[asset.ARN] == 0) || (filter.HideAWSManaged && isAWSOwned(asset)) {
 			continue
 		}
 		if len(filter.Severities) > 0 && !contains(filter.Severities, worst[asset.ARN]) {
@@ -80,7 +99,18 @@ func Build(assets []models.AssetNode, rels []models.Relationship, findings []mod
 			continue
 		}
 		id := publicID(asset)
-		items = append(items, indexed{asset: asset, service: svc, findings: findingCount[asset.ARN], severity: worst[asset.ARN], new: newCount[asset.ARN], related: rollup[asset.ARN], rels: relCount[asset.ARN], identity: identity[id]})
+		owner := ownerOf(asset, filter.OwnerKeys)
+		if filter.InternetFacing && !exposures[asset.ARN].Internet {
+			continue
+		}
+		if filter.Owner != "" && !strings.EqualFold(owner, filter.Owner) && !(filter.Owner == "none" && owner == "") {
+			continue
+		}
+		isNew := filter.PreviousARNs != nil && !filter.PreviousARNs[id]
+		if filter.NewResources && !isNew {
+			continue
+		}
+		items = append(items, indexed{exposure: exposures[asset.ARN], owner: owner, isNew: isNew, asset: asset, service: svc, findings: findingCount[asset.ARN], severity: worst[asset.ARN], new: newCount[asset.ARN], related: rollup[asset.ARN], rels: relCount[asset.ARN], identity: identity[id]})
 	}
 	return resources(items)
 }
@@ -149,6 +179,7 @@ func toResource(item indexed) schema.InventoryResource {
 		CollectionStatus: collectionStatus(asset), FindingCount: item.findings, MaxSeverity: item.severity, NewFindingCount: item.new,
 		RelatedFindingCount: item.related.count, RelatedMaxSeverity: item.related.severity, RelatedTo: item.related.names,
 		RelationshipCount: item.rels, IdentityAssociated: item.identity,
+		InternetFacing: item.exposure.Internet, ExposureKind: item.exposure.Kind, ExposureDetail: item.exposure.Detail, Owner: item.owner, Tags: tagsOf(asset), IsNew: item.isNew,
 	}
 }
 
@@ -226,4 +257,16 @@ func severityRank(s string) int {
 		return 1
 	}
 	return 0
+}
+
+// isAWSOwned is true for objects AWS creates and maintains: AWS managed policies (account "aws" in the
+// ARN) and service-linked roles (path /aws-service-role/). Customer-managed objects are never matched.
+func isAWSOwned(asset models.AssetNode) bool {
+	switch asset.AssetType {
+	case models.AssetIAMPolicy:
+		return strings.HasPrefix(asset.ARN, "arn:aws:iam::aws:policy/")
+	case models.AssetIAMRole:
+		return strings.Contains(asset.ARN, ":role/aws-service-role/") || strings.Contains(asset.ARN, ":role/service-role/AWSServiceRole")
+	}
+	return false
 }

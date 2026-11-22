@@ -22,6 +22,16 @@ type InventorySummary struct {
 	NotInventoried []string `json:"not_inventoried"`
 	Accounts       []string `json:"accounts"`
 	Regions        []string `json:"regions"`
+	// Change is how the resource set differs from the previous scan; nil when there is no previous scan.
+	Change *InventoryChange `json:"change,omitempty"`
+}
+
+// InventoryChange counts resources added and removed since the previous scan. RemovedNames is capped.
+type InventoryChange struct {
+	PreviousScanID string   `json:"previous_scan_id"`
+	Added          int      `json:"added"`
+	Removed        int      `json:"removed"`
+	RemovedNames   []string `json:"removed_names,omitempty"`
 }
 
 // InventoryCollectionStatus separates account reach from collector completion.
@@ -141,6 +151,14 @@ type InventoryResource struct {
 	RelatedTo           []string `json:"related_to,omitempty"`
 	RelationshipCount   int      `json:"relationship_count"`
 	IdentityAssociated  bool     `json:"identity_associated"`
+	// InternetFacing is derived from collected facts; ExposureDetail says which ones. Owner is the value of the
+	// first configured owner tag. IsNew is true when the previous scan did not have this resource.
+	InternetFacing bool              `json:"internet_facing,omitempty"`
+	ExposureKind   string            `json:"exposure_kind,omitempty"`
+	ExposureDetail string            `json:"exposure_detail,omitempty"`
+	Owner          string            `json:"owner,omitempty"`
+	Tags           map[string]string `json:"tags,omitempty"`
+	IsNew          bool              `json:"is_new,omitempty"`
 }
 
 // InventoryDetail is one resource plus directly evidenced relationships and findings.
@@ -150,8 +168,14 @@ type InventoryDetail struct {
 	Findings      []InventoryFinding      `json:"findings"`
 	Relationships []InventoryRelationship `json:"relationships"`
 	IdentityLinks []InventoryIdentityLink `json:"identity_links"`
-	Evidence      map[string]any          `json:"evidence"`
-	EvidenceNote  string                  `json:"evidence_note"`
+	// Facts are the type-specific attributes worth reading first (a load balancer's scheme, a database's engine).
+	Facts []InventoryFact `json:"facts"`
+	// InboundRules lists a security group's inbound rules. World is true when a source is anywhere (0.0.0.0/0 or ::/0).
+	InboundRules []InventoryRule `json:"inbound_rules,omitempty"`
+	// RunsOn lists the workloads that run as this role (an EC2 instance through its profile, a function, a stack).
+	RunsOn       []InventoryRunsOn `json:"runs_on"`
+	Evidence     map[string]any    `json:"evidence"`
+	EvidenceNote string            `json:"evidence_note"`
 }
 
 // InventoryFinding is an existing finding whose affected ARN is this resource.
@@ -172,9 +196,31 @@ type InventoryRelationship struct {
 	Note      string `json:"note,omitempty"`
 }
 
+// InventoryRunsOn is a workload that runs as the role being viewed. It is configuration, not an attack path.
+type InventoryRunsOn struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Label string `json:"label"`
+}
+
 // InventoryIdentityLink points at an IAM role profile. It is configuration, not an attack path.
 type InventoryIdentityLink struct {
 	RoleARN   string `json:"role_arn"`
 	Mechanism string `json:"mechanism,omitempty"`
 	Label     string `json:"label"`
+}
+
+// InventoryFact is one labelled attribute of a resource.
+type InventoryFact struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// InventoryRule is one inbound security group rule.
+type InventoryRule struct {
+	Protocol string   `json:"protocol"`
+	Ports    string   `json:"ports"`
+	Sources  []string `json:"sources"`
+	World    bool     `json:"world"`
 }

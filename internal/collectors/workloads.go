@@ -1,6 +1,8 @@
 package collectors
 
 import (
+	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -66,6 +68,10 @@ type WorkloadClients struct {
 	CodeDeploy     CodeDeployAPI
 	AutoScaling    AutoScalingAPI
 	LaunchTemplate LaunchTemplateAPI
+	// Network exposure. Nil skips the collector (scan.network_resources off).
+	SecurityGroups SecurityGroupAPI
+	ELBv2          ELBv2API
+	RDS            RDSAPI
 }
 
 // OrganizationAccountNodes records discovered organization membership.
@@ -107,6 +113,7 @@ var regionalWorkloadClients = func(cfg awsv2.Config) WorkloadClients {
 		CloudFormation: cloudformation.NewFromConfig(cfg), CodeBuild: codebuild.NewFromConfig(cfg), StepFunctions: sfn.NewFromConfig(cfg),
 		Glue: glue.NewFromConfig(cfg), Batch: batch.NewFromConfig(cfg), AppRunner: apprunner.NewFromConfig(cfg), SageMaker: sagemaker.NewFromConfig(cfg),
 		AgentCore: bedrockagentcorecontrol.NewFromConfig(cfg), CodeDeploy: codedeploy.NewFromConfig(cfg), AutoScaling: autoscaling.NewFromConfig(cfg), LaunchTemplate: ec2.NewFromConfig(cfg),
+		SecurityGroups: ec2.NewFromConfig(cfg), ELBv2: elasticloadbalancingv2.NewFromConfig(cfg), RDS: rds.NewFromConfig(cfg),
 	}
 }
 
@@ -179,6 +186,9 @@ func CollectWorkloads(ctx context.Context, cfg *config.Config, accounts []Accoun
 				clients.Glue, clients.Batch, clients.AppRunner, clients.SageMaker, clients.AgentCore = nil, nil, nil, nil, nil
 				clients.CodeDeploy, clients.AutoScaling, clients.LaunchTemplate = nil, nil, nil
 			}
+			if cfg != nil && !cfg.Scan.NetworkResources {
+				clients.SecurityGroups, clients.ELBv2, clients.RDS = nil, nil, nil
+			}
 			nodes, edges, err := CollectRegionalWorkloads(ctx, job.account.ID, job.region, clients, time.Now().UTC())
 			mu.Lock()
 			defer mu.Unlock()
@@ -242,6 +252,9 @@ func CollectRegionalWorkloads(ctx context.Context, accountID, region string, cli
 			rels = append(rels, edges...)
 		}
 	}
+	netAssets, netRels := collectNetwork(ctx, accountID, region, clients.SecurityGroups, clients.ELBv2, clients.RDS, collectedAt, assets)
+	assets = append(assets, netAssets...)
+	rels = append(rels, netRels...)
 	svcAssets, svcRels := collectServiceResources(ctx, accountID, region, clients, collectedAt, assets, rels)
 	assets = append(assets, svcAssets...)
 	rels = append(rels, svcRels...)
@@ -301,6 +314,15 @@ func collectEC2(ctx context.Context, accountID, region string, api EC2API, profi
 		if tags := ec2TagMap(instance.Tags); len(tags) > 0 {
 			node.Properties["tags"] = tags
 		}
+		node.Properties["vpc_id"] = awsv2.ToString(instance.VpcId)
+		if ip := awsv2.ToString(instance.PublicIpAddress); ip != "" {
+			node.Properties["public_ip"] = ip
+		}
+		var groupIDs []string
+		for _, g := range instance.SecurityGroups {
+			groupIDs = append(groupIDs, awsv2.ToString(g.GroupId))
+		}
+		node.Properties["security_group_ids"] = groupIDs
 		assoc, ok := assocByInstance[id]
 		if !ok || assoc.IamInstanceProfile == nil || awsv2.ToString(assoc.IamInstanceProfile.Arn) == "" {
 			node.Properties["attachment_status"] = "none"

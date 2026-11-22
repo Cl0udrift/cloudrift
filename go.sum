@@ -60,6 +60,8 @@ github.com/aws/aws-sdk-go-v2/service/ecs v1.100.3 h1:GjuFwluSUe4XNiZjFpKvQI3te7P
 github.com/aws/aws-sdk-go-v2/service/ecs v1.100.3/go.mod h1:6SgP8Uxeur6i0CsNeRBZQspNH5R8atwoG1+To27rkmQ=
 github.com/aws/aws-sdk-go-v2/service/eks v1.104.1 h1:kwU0i0Sg1eNRl0gSPNIXqRCcwTJDdtrlsshSK536SiA=
 github.com/aws/aws-sdk-go-v2/service/eks v1.104.1/go.mod h1:7Z9oc7QnBWbdizy5Zj5Ba0XKLlfO8eyGRSNeqyH1eZY=
+github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.65.0 h1:uSptE/uhZImKHU8XuJQs+eE451Fc8wWlkvUnZqqYeGQ=
+github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.65.0/go.mod h1:KBzMXNBXsVqVRQykh9z7GlsKHB2+IhLGYlBU303OAX0=
 github.com/aws/aws-sdk-go-v2/service/glue v1.176.0 h1:TtBq8o+YaGNzEGLl7fBE9YYKEl7aLX+E1N1oIHRScVY=
 github.com/aws/aws-sdk-go-v2/service/glue v1.176.0/go.mod h1:34rxTS3Y1PWu3ClPMnt6Xr+M93Nixt0wXxpoIAEnugc=
 github.com/aws/aws-sdk-go-v2/service/iam v1.53.8 h1:p0oB4eZfBfBAOasnKvHJOlNcuHVE/ieuWs7uIZgQlyQ=

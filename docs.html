@@ -1090,7 +1090,7 @@ For the full `dashboard` flag reference, see [CLI Commands](#cli-commands). For 
 | Accounts | Per-account risk breakdown |
 | Diff | Compare two scans side-by-side |
 | Trust Report | IAM trust findings, external principals |
-| Inventory | Every collected resource by service, with related findings, what changed since the previous scan, and collection coverage. Opt-in collectors that are off say so and link to Settings |
+| Inventory | Every collected resource by service, with related findings, collection coverage, and what changed since the previous scan (resources added and removed, and new findings). Marks what is reachable from the internet (a world-open security group rule plus a public address, load balancer scheme or database flag), shows an owner from configurable tag keys, hides AWS-managed objects by default, runs on to workloads that run as a role, and exports the filtered list as CSV. Opt-in collectors that are off say so and link to Settings |
 | Users & Groups | Every IAM user and group, which policies apply directly or through a group, explicit Deny markers, and console, MFA and access-key findings |
 | Identities | Per-role and per-account permission matrix, an IAM users table beside it, and a "who and what uses this role" section on each role, including workloads of every collected type and, with the CloudTrail opt-in, who was seen assuming it |
 | Identity Center | IAM Identity Center: people and groups with the accounts they reach, permission sets (administrative ones flagged, linked to the IAM role each creates), and accounts. Opt-in |
@@ -1645,6 +1645,8 @@ These are also on the dashboard **Settings** page, which writes them to `cloudri
 
 | Key | Default | What it does |
 |---|---|---|
+| `network_resources` | `true` | Collects security groups, load balancers (with the instances behind them) and RDS instances. Read-only; needs `ec2:DescribeSecurityGroups`, `elasticloadbalancing:Describe*` and `rds:DescribeDBInstances`. Internet-facing needs a world-open rule: a public scheme or flag on its own is shown as "public, restricted" |
+| `inventory.owner_tag_keys` | `["owner", "team"]` | Tag keys read as a resource's owner, first match wins, case-insensitive |
 | `iam_policy_inventory` | `true` | Collects every IAM role, user, group and policy document. The base of permission analysis |
 | `service_resources` | `true` | Collects existing CloudFormation stacks, CodeBuild projects, Step Functions state machines, Glue development endpoints, Batch job definitions, App Runner services, SageMaker notebooks, AgentCore resources, launch templates and CodeDeploy groups, and the role each runs as. Needs extra read permissions; a Region without them reports a failed collector, never "no resources" |
 | `resource_policies` | `false` | Secrets Manager secrets and policies, KMS key policies and grants, Lambda policies, RDS instances, VPC endpoints. Never reads a secret value |
@@ -2062,7 +2064,7 @@ The **`internal/`** packages implement a full pipeline (collectors → validator
 
 ### 3. API documentation
 
-> **Newer endpoints** (all `GET`, under `/api/scans/{id}` unless noted): `/inventory/summary`, `/inventory/resources`, `/inventory/resource`; `/identities/usage` (who and what uses a role, with who was seen assuming it), `/identities/who-can` (who can do an action to a target, with the route drawn as steps), `/identities/targets` (search for a target); `/identity-center` (permission sets, people and groups, accounts); `/api/coverage` and `/api/coverage/reference` (module status and the reference-catalog benchmark). The scan setting keys are served and saved by `/api/config`.
+> **Newer endpoints** (all `GET`, under `/api/scans/{id}` unless noted): `/inventory/summary`, `/inventory/resources`, `/inventory/resource`, `/inventory/export.csv` (the same filters as the list: `internet_facing`, `owner`, `new_resources`, `hide_aws`); `/identities/usage` (who and what uses a role, with who was seen assuming it), `/identities/who-can` (who can do an action to a target, with the route drawn as steps), `/identities/targets` (search for a target); `/identity-center` (permission sets, people and groups, accounts); `/api/coverage` and `/api/coverage/reference` (module status and the reference-catalog benchmark). The scan setting keys are served and saved by `/api/config`.
 
 Base URL: same host as the dashboard (default `http://127.0.0.1:8080` — loopback by default; `--host` opts into a non-loopback bind). JSON only for REST. Authentication is optional and off by default: setting `CLOUDRIFT_API_TOKEN` gates the entire server (REST + UI) behind HTTP Basic auth (see [Security review](#9-security-review)).
 

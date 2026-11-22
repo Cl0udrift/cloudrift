@@ -49,6 +49,8 @@ type Config struct {
 		// Without the read actions in the audit role a region reports a failed collector and the resource type is not
 		// searched; see docs/audits/service-resource-collection.md.
 		ServiceResources bool `toml:"service_resources"`
+		// NetworkResources collects security groups, load balancers and RDS instances with how they reach the instances.
+		NetworkResources bool `toml:"network_resources"`
 		// IdentityCenter collects IAM Identity Center (SSO) permission sets, account assignments, users and groups, so the
 		// Identity Center page can show who reaches which account with which permissions. Opt-in, default false. It works
 		// only with the organization management account or the delegated administrator, and needs sso and identitystore
@@ -82,6 +84,10 @@ type Config struct {
 		RiskMultiplierDangling    float64 `toml:"risk_multiplier_dangling"`
 		UseCUR                    bool    `toml:"use_cur"`
 	} `toml:"cost"`
+	Inventory struct {
+		// OwnerTagKeys are the resource tag keys read as the owner, in priority order, matched case-insensitively.
+		OwnerTagKeys []string `toml:"owner_tag_keys"`
+	} `toml:"inventory"`
 	Trust struct {
 		ApprovedExternalAccounts []string `toml:"approved_external_accounts"`
 		StaleThresholdDays       int      `toml:"stale_threshold_days"`
@@ -140,6 +146,8 @@ func Default() *Config {
 	c.Scan.UserAgent = "github.com/Zero0x00/cloudrift/0.1"
 	c.Scan.IAMPolicyInventory = true
 	c.Scan.ServiceResources = true
+	c.Scan.NetworkResources = true
+	c.Inventory.OwnerTagKeys = []string{"owner", "team"}
 	c.Scan.EscalationSearchSeconds = 120
 	c.Cost.Currency = "USD"
 	c.Cost.RiskMultiplierReclaimable = 5.0
