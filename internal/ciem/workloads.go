@@ -259,3 +259,34 @@ func AttachmentNote(role models.AssetNode, rels []models.Relationship, workloads
 	}
 	return ""
 }
+
+// AttachWorkloadsToEntitlements adds the workloads that run as a role to that role's declared-entitlement
+// findings, so a reviewer sees which compute inherits the permission. It changes no severity.
+func AttachWorkloadsToEntitlements(findings []models.Finding, assets []models.AssetNode, rels []models.Relationship) {
+	for i := range findings {
+		f := &findings[i]
+		if f.Module != models.ModuleIAMEntitlement {
+			continue
+		}
+		workloads := WorkloadsForRole(f.AffectedARN, assets, rels)
+		if len(workloads) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(workloads))
+		for _, w := range workloads {
+			name := w.WorkloadName
+			if name == "" {
+				name = w.WorkloadARN
+			}
+			names = append(names, w.WorkloadType+" "+name)
+		}
+		sort.Strings(names)
+		f.Evidence["workloads"] = names
+		f.Evidence["track"] = "toxic_combination"
+		f.Evidence["path"] = []PathNode{
+			{Kind: "workload", Label: workloadSummary(f.Evidence), Risk: "warn"},
+			{Kind: "edge", Label: "runs as"},
+			{Kind: "role", Label: roleNameOf(f.AffectedARN), Detail: "broad declared entitlement", Risk: "warn"},
+		}
+	}
+}

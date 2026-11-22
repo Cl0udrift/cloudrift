@@ -621,3 +621,23 @@ func TestReachIsSkippedAndSaidSoWhenTheBudgetEnds(t *testing.T) {
 		t.Fatalf("the finding must say the callers were not computed: %v", factors)
 	}
 }
+
+func TestEntitlementFindingNamesTheInstanceThatRunsAsTheRole(t *testing.T) {
+	assets, rels := ec2World(false, false)
+	role := "arn:aws:iam::" + escAcct + ":role/ec2admin"
+	other := "arn:aws:iam::" + escAcct + ":role/mgmt"
+	fs := []models.Finding{
+		{Module: models.ModuleIAMEntitlement, AffectedARN: role, Evidence: map[string]any{}},
+		{Module: models.ModuleIAMEntitlement, AffectedARN: other, Evidence: map[string]any{}},
+	}
+	AttachWorkloadsToEntitlements(fs, assets, rels)
+	if names, _ := fs[0].Evidence["workloads"].([]string); len(names) != 1 || !strings.Contains(names[0], "i-0123456789abcdef0") {
+		t.Fatalf("want the instance on the role it runs as, got %v", fs[0].Evidence["workloads"])
+	}
+	if _, ok := fs[0].Evidence["path"]; !ok {
+		t.Fatal("want a path so the finding panel shows it")
+	}
+	if _, ok := fs[1].Evidence["workloads"]; ok {
+		t.Fatal("a role no workload runs as must get none")
+	}
+}

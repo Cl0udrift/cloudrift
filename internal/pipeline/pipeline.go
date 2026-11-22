@@ -154,7 +154,9 @@ func Run(ctx context.Context, cfg *config.Config, outputDir, toolVersion string,
 		findings = append(findings, scorers.ScoreVPCEndpoints(res.Assets)...)
 		if cfg.Scan.IAMPolicyInventory {
 			progress("scoring", "recording broad IAM entitlement candidates")
-			findings = append(findings, scorers.ScoreEntitlements(res.Assets, res.Rels)...)
+			entitlements := scorers.ScoreEntitlements(res.Assets, res.Rels)
+			ciem.AttachWorkloadsToEntitlements(entitlements, res.Assets, res.Rels)
+			findings = append(findings, entitlements...)
 			findings = append(findings, ciem.ScoreIdentityHygiene(res.Assets, res.Rels, time.Now().UTC())...)
 			if cfg.Scan.EscalationSearchSeconds > 0 {
 				progress("scoring", "searching for privilege-escalation paths")
