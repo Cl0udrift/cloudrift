@@ -37,6 +37,8 @@ func TestScoreResourceExposure_Severities(t *testing.T) {
 		{"public read", map[string]any{"source_kind": "s3_bucket_policy", "is_public": true}, models.SeverityHigh, "public_read"},
 		{"external write", map[string]any{"source_kind": "s3_bucket_policy", "write_access": true, "external_account_id": "222222222222"}, models.SeverityHigh, "external_write"},
 		{"external read", map[string]any{"source_kind": "s3_bucket_policy", "external_account_id": "222222222222"}, models.SeverityMedium, "external_read"},
+		{"aws elb log delivery", map[string]any{"source_kind": "s3_bucket_policy", "write_access": true, "external_account_id": "127311923021", "actions": []string{"s3:putobject"}}, models.SeverityInfo, "aws_log_delivery"},
+		{"aws elb account with broader grant", map[string]any{"source_kind": "s3_bucket_policy", "write_access": true, "external_account_id": "127311923021", "actions": []string{"s3:putobject", "s3:deleteobject"}}, models.SeverityHigh, "external_write"},
 		{"approved vendor", map[string]any{"source_kind": "s3_bucket_policy", "external_account_id": "333333333333"}, models.SeverityLow, "approved_vendor_grant"},
 	}
 	for _, tc := range cases {

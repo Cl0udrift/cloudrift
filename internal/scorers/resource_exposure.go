@@ -47,6 +47,15 @@ func ScoreResourceExposure(assets []models.AssetNode, rels []models.Relationship
 
 		approvedVendor := account != "" && approved[account]
 		severity, verdict := classifyResourceExposure(isPublic, write, approvedVendor)
+		if !isPublic && isAWSLogDelivery(account, actions) {
+			severity, verdict = models.SeverityInfo, "aws_log_delivery"
+		}
+
+		impact, rec := resourceExposureImpact(isPublic, write), resourceExposureRecommendation(isPublic)
+		if verdict == "aws_log_delivery" {
+			impact = "Bucket policy lets an AWS-owned Elastic Load Balancing account write load balancer access logs (s3:PutObject only). This is the documented AWS log-delivery grant, not a third-party account."
+			rec = "No action if this bucket receives load balancer access logs. Otherwise remove the grant, and scope it to your load balancers' prefix."
+		}
 
 		title := fmt.Sprintf("S3 bucket policy exposes %s (%s)", bucket.Name, verdict)
 		hash := sha256.Sum256([]byte(string(models.ModuleExternalAccess) + "|" + bucket.ARN + "|" + rel.TargetARN))
@@ -59,8 +68,8 @@ func ScoreResourceExposure(assets []models.AssetNode, rels []models.Relationship
 			AffectedARN:    bucket.ARN,
 			AccountID:      bucket.AccountID,
 			Hostname:       bucket.Name,
-			Impact:         resourceExposureImpact(isPublic, write),
-			Recommendation: resourceExposureRecommendation(isPublic),
+			Impact:         impact,
+			Recommendation: rec,
 			Evidence: map[string]any{
 				"resource_type":       "s3_bucket",
 				"grant_kind":          "resource_policy",
