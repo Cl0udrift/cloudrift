@@ -40,6 +40,9 @@ Resources:
                   - iam:GetAccountAuthorizationDetails
                   - iam:GenerateCredentialReport
                   - iam:GetCredentialReport
+                  - iam:ListAccessKeys
+                  - iam:GetAccessKeyLastUsed
+                  - iam:GetUser
                   - iam:ListAttachedRolePolicies
                   - iam:ListRolePolicies
                   - iam:GetRolePolicy

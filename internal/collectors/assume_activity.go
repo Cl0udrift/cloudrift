@@ -27,6 +27,24 @@ type ObservedAssumption struct {
 	Caller, CallerType, Role string
 	Count                    int
 	First, Last              time.Time
+	// SourceIPs are the distinct addresses the calls came from, in first-seen order, capped at maxSourceIPs.
+	SourceIPs []string
+}
+
+const maxSourceIPs = 10
+
+// addIP appends ip when it is new and the cap is not reached. Service callers report a service name, not an address;
+// those are kept too, since they say the call came from the service.
+func addIP(list []string, ip string) []string {
+	if ip == "" || len(list) >= maxSourceIPs {
+		return list
+	}
+	for _, have := range list {
+		if have == ip {
+			return list
+		}
+	}
+	return append(list, ip)
 }
 
 type cloudTrailEvent struct {
@@ -39,7 +57,8 @@ type cloudTrailEvent struct {
 	RequestParameters struct {
 		RoleArn string `json:"roleArn"`
 	} `json:"requestParameters"`
-	ErrorCode string `json:"errorCode"`
+	ErrorCode       string `json:"errorCode"`
+	SourceIPAddress string `json:"sourceIPAddress"`
 }
 
 // callerOf names the caller of an AssumeRole event. A role session is reported as its role, so a caller can be matched to the
@@ -90,6 +109,7 @@ func ParseAssumeEvents(events []cttypes.Event) []ObservedAssumption {
 			agg[k] = o
 		}
 		o.Count++
+		o.SourceIPs = addIP(o.SourceIPs, e.SourceIPAddress)
 		if at.Before(o.First) {
 			o.First = at
 		}
@@ -209,6 +229,9 @@ func ObservedAssumptionEdges(obs []ObservedAssumption, days int, collected time.
 			continue
 		}
 		m.Count += o.Count
+		for _, ip := range o.SourceIPs {
+			m.SourceIPs = addIP(m.SourceIPs, ip)
+		}
 		if o.First.Before(m.First) {
 			m.First = o.First
 		}
@@ -223,8 +246,8 @@ func ObservedAssumptionEdges(obs []ObservedAssumption, days int, collected time.
 			Properties: map[string]any{
 				"count": o.Count, "first_seen": o.First.UTC().Format(time.RFC3339), "last_seen": o.Last.UTC().Format(time.RFC3339),
 				"caller_type": o.CallerType, "window_days": days, "collected_at": collected.UTC().Format(time.RFC3339),
-				"source_api": "cloudtrail:LookupEvents",
-				"note":       "Seen in CloudTrail management event history inside the window. It shows the call was made; it is not an authorization decision, and a missing edge does not show the call was never made.",
+				"source_api": "cloudtrail:LookupEvents", "source_ips": o.SourceIPs,
+				"note": "Seen in CloudTrail management event history inside the window. It shows the call was made; it is not an authorization decision, and a missing edge does not show the call was never made.",
 			},
 		})
 	}

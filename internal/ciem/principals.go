@@ -6,6 +6,7 @@ import (
 
 	"github.com/Zero0x00/cloudrift/internal/api/schema"
 	"github.com/Zero0x00/cloudrift/internal/models"
+	"github.com/Zero0x00/cloudrift/internal/scorers"
 )
 
 func isUserOrGroup(a models.AssetNode) bool {
@@ -38,12 +39,33 @@ func ListPrincipals(scanID string, assets []models.AssetNode, rels []models.Rela
 			item.Tags = tags
 		}
 		if c := view.Credentials; c != nil {
-			item.CredentialsCollected, item.Console, item.MFA, item.CredentialFindings = true, c.Console, c.MFA, len(c.Findings)
+			item.CredentialsCollected, item.Console, item.MFA, item.CredentialFindings, item.KeyIssues = true, c.Console, c.MFA, len(c.Findings), c.KeyIssues
 			for _, k := range c.Keys {
 				if k.Active {
 					item.ActiveKeys++
 				}
 			}
+		}
+		for _, src := range view.Sources {
+			if src.PolicyType != models.PolicyTypeInline {
+				continue
+			}
+			name := src.PolicyName
+			if src.Via == "group" {
+				name += " (from group " + src.GroupName + ")"
+			}
+			item.Inline = append(item.Inline, name)
+		}
+		item.Usage = usageOf(a, view.Credentials, item.ActiveKeys)
+		item.LastActivity = lastActivity(view.Credentials)
+		if c := view.Credentials; c != nil {
+			item.ActivityAsOf, item.ActivityLive = c.ReportGeneratedAt, false
+			if c.LiveCheckedAt != "" {
+				item.ActivityAsOf, item.ActivityLive = c.LiveCheckedAt, true
+			}
+		}
+		if a.AssetType == models.AssetIAMGroup {
+			item.Members = len(groupMembers(a, rels, byARN))
 		}
 		items = append(items, item)
 	}
@@ -114,6 +136,28 @@ func PrincipalPolicies(scanID string, principal models.AssetNode, byARN map[stri
 	out.Credentials = CredentialSummaryFor(principal, now)
 	out.CredentialNote = credentialReportNote(principal)
 	out.Broad = principalBroad(scanID, principal, byARN, rels)
+	out.LastActivity = lastActivity(out.Credentials)
+	if principal.AssetType == models.AssetIAMGroup {
+		out.Members = groupMembers(principal, rels, byARN)
+	}
+	var stmts []scorers.RoleStatement
+	var unread []string
+	for _, src := range out.Sources {
+		if src.RetrievalStatus != models.PolicyRetrievalOK {
+			unread = append(unread, src.PolicyName)
+			continue
+		}
+		for _, st := range src.Statements {
+			stmts = append(stmts, scorers.RoleStatement{PolicyARN: src.PolicyARN, PolicyType: src.PolicyType, Effect: st.Effect, Actions: st.Actions, Resources: st.Resources, NotAction: st.NotAction, Conditional: st.HasCondition})
+		}
+	}
+	out.Capabilities, out.CapabilityNote = CapabilitiesFromStatements(stmts, unread)
+	out.Capabilities, out.CapabilityNote = ApplyBoundary(out.Capabilities, out.CapabilityNote, principal)
+	all := make([]models.AssetNode, 0, len(byARN))
+	for _, a := range byARN {
+		all = append(all, a)
+	}
+	out.Reach = Reach(principal.AccountID, out.Capabilities, all)
 	sort.SliceStable(out.Sources, func(i, j int) bool {
 		if out.Sources[i].Via != out.Sources[j].Via {
 			return out.Sources[i].Via < out.Sources[j].Via
@@ -228,4 +272,51 @@ func credentialReportNote(u models.AssetNode) string {
 		}
 	}
 	return note + ". AWS caches the report for up to four hours, so this user's console, MFA and key data will appear once it is refreshed."
+}
+
+// usageOf says how a user signs in. A user the credential report did not cover is unknown, never "no credentials".
+func usageOf(a models.AssetNode, c *schema.CredentialSummary, activeKeys int) string {
+	switch {
+	case a.AssetType == models.AssetIAMGroup:
+		return ""
+	case c == nil:
+		return "unknown"
+	case c.Console:
+		return "person"
+	case activeKeys > 0:
+		return "programmatic"
+	}
+	return "no_credentials"
+}
+
+// lastActivity is the latest console sign-in or access key use in the credential report, as an RFC 3339 time.
+func lastActivity(c *schema.CredentialSummary) string {
+	if c == nil {
+		return ""
+	}
+	latest := ""
+	consider := func(t string) {
+		if _, err := time.Parse(time.RFC3339, t); err == nil && t > latest {
+			latest = t
+		}
+	}
+	consider(c.PasswordLastUsed)
+	for _, k := range c.Keys {
+		consider(k.LastUsed)
+	}
+	return latest
+}
+
+// groupMembers returns the users that belong to a group, by name.
+func groupMembers(group models.AssetNode, rels []models.Relationship, byARN map[string]models.AssetNode) []string {
+	var out []string
+	for _, rel := range rels {
+		if rel.RelType == models.RelMemberOf && rel.TargetARN == group.ARN {
+			if u, ok := byARN[rel.SourceARN]; ok {
+				out = append(out, u.Name)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }

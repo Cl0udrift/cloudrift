@@ -65,3 +65,16 @@ func TestListRoles_DoesNotRequireExternalTrust(t *testing.T) {
 		t.Fatal(filtered)
 	}
 }
+
+func TestClassifyRole_TrustOnlyAServiceIsNotUnresolved(t *testing.T) {
+	doc := `{"Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}`
+	role := models.AssetNode{ARN: "arn:aws:iam::111111111111:role/Instance", AssetType: models.AssetIAMRole, AccountID: "111111111111", Properties: map[string]any{"trust_policy_document": doc}}
+	if labels := ClassifyRole(role, nil, []models.AssetNode{role}); !containsFold(labels, ClassAWSServiceRole) || containsFold(labels, ClassUnresolved) {
+		t.Fatal(labels)
+	}
+	mixed := role
+	mixed.Properties = map[string]any{"trust_policy_document": `{"Statement":[{"Principal":{"Service":"ec2.amazonaws.com","AWS":"arn:aws:iam::999999999999:root"}}]}`}
+	if labels := ClassifyRole(mixed, nil, []models.AssetNode{mixed}); containsFold(labels, ClassAWSServiceRole) {
+		t.Fatalf("an outside account principal must not read as service-only: %v", labels)
+	}
+}

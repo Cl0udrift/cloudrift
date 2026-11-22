@@ -17,11 +17,10 @@ export function RoleUsage({ scanId, roleArn }: { scanId: string; roleArn: string
         <p className="cr-helper">{formatQueryError(q.error)}</p>
       ) : (
         <div className="space-y-4 text-sm">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-3 gap-3">
             <CountTile label="Can assume" value={q.data.allowed} tone="info" hint="Allowed by stored policy" />
-            <CountTile label="Probably" value={q.data.possible} tone="hyp" hint="Allowed, but organization controls were not checked" />
-            <CountTile label="Not checked" value={q.data.unknown} tone="unk" hint="Could not be decided: not allowed, not ruled out" />
-            <CountTile label="Workloads" value={(q.data.workloads ?? []).length} tone="unk" hint="Workloads configured to run as this role" />
+            <CountTile label="Likely" value={q.data.possible} tone="hyp" hint="Allowed by policy, but organization rules (SCPs) were not checked" />
+            <CountTile label="Undecided" value={q.data.unknown} tone="unk" hint="Could not be decided: not allowed, not ruled out" />
           </div>
           <p className="cr-helper">{q.data.evaluated} users and roles were checked against stored policies.</p>
           {(q.data.assumers ?? []).length > 0 ? (
@@ -42,9 +41,9 @@ export function RoleUsage({ scanId, roleArn }: { scanId: string; roleArn: string
               <ul className="flex flex-wrap gap-2">
                 {(q.data.workloads ?? []).map((w) => (
                   <li key={`${w.workload_arn}-${w.mechanism}`} className="flex items-center gap-2 rounded-lg border border-slate-300 px-2 py-1 dark:border-slate-700">
-                    <StateChip tone="info" glyph="▣" label={w.workload_type} />
+                    <StateChip tone="info" glyph="▣" label={w.workload_type.replace(/_/g, " ")} />
                     <span className="break-all text-xs font-medium">{w.workload_name || w.workload_arn}</span>
-                    <span className="text-xs text-slate-500">{w.mechanism}</span>
+                    <span className="text-xs text-slate-500">{w.mechanism.replace(/_/g, " ")}</span>
                   </li>
                 ))}
               </ul>

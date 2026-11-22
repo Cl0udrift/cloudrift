@@ -2,8 +2,9 @@ import { TagList } from "../components/ui/TagList";
 import { UserMatrix } from "../components/identities/UserMatrix";
 import { RoleUsage } from "../components/identities/RoleUsage";
 import { AccountPermissionMatrix, type MatrixSelection } from "../components/identities/AccountPermissionMatrix";
-import { AttackStatusChip, AuthorizationChip, EvidenceChip, StateChip, SectionHeader } from "../components/ui/StatusChip";
+import { EvidenceChip, StateChip, SectionHeader } from "../components/ui/StatusChip";
 import { lastUsedLabel } from "../lib/lastUsed";
+import { ageLabel, capitalize, categoryLabel, LEVEL, serviceLabel, severityTone } from "../lib/identityLabels";
 import { IDLE_DAYS } from "../lib/lastUsedConstants";
 import { CopyIdentifier } from "../components/ui/CopyIdentifier";
 import { useMemo, useState } from "react";
@@ -13,6 +14,8 @@ import { apiClient } from "../api/client";
 import { formatQueryError } from "../api/httpError";
 import type { RoleEntitlementProfile, WorkloadListResponse } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
+import { EntityDrawer } from "../components/ui/EntityDrawer";
+import { SeverityBadge } from "../components/SeverityBadge";
 import { ScanRequired } from "../components/ScanRequired";
 import { PolicyInventoryNotice } from "../components/identities/PolicyInventoryNotice";
 import { StatePanel } from "../components/StatePanel";
@@ -21,7 +24,7 @@ import { useScanContext } from "../hooks/useScanContext";
 const CLASS_LABEL: Record<string, string> = {
   SERVICE_LINKED_ROLE: "Service-linked",
   SAME_ACCOUNT: "Same account",
-  AWS_SERVICE_ROLE: "AWS service role",
+  AWS_SERVICE_ROLE: "Assumed by an AWS service",
   EXTERNAL_DELEGATED: "Trusts an outside account",
   INTERNAL_CROSS_ACCOUNT: "Trusts another of your accounts",
   INTERNAL_NOT_SCANNED: "Trusts an account not scanned",
@@ -33,34 +36,44 @@ const CLASS_LABEL: Record<string, string> = {
 };
 const humanize = (c: string) => CLASS_LABEL[c] ?? c.toLowerCase().replace(/_/g, " ");
 
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+function TogglePill({ on, onClick, title, children }: { on: boolean; onClick: () => void; title?: string; children: React.ReactNode }) {
   return (
-    <button type="button" aria-pressed={on} onClick={onClick} className={`rounded-full border px-3 py-1 text-xs transition-colors hover:border-cyan-500 ${on ? "border-cyan-500 bg-cyan-500/15 font-medium" : "border-slate-300 dark:border-slate-700"}`}>
+    <button type="button" aria-pressed={on} title={title} onClick={onClick} className={`hs-action-pill ${on ? "!border-cyan-500 !bg-cyan-500/10 text-cyan-900 dark:text-cyan-100" : ""}`}>
       {children}
     </button>
   );
 }
 
-/** The four numbers a reviewer wants first. Each is a filter on the list below. */
-function RoleTiles({ scanId, idleDays, active, onPick }: { scanId: string; idleDays: number; active: { idle: boolean; broad: boolean; unknown: boolean; none: boolean }; onPick: (key: "all" | "idle" | "broad" | "unknown") => void }) {
+type TileKey = "all" | "findings" | "internet" | "external" | "powerful_idle";
+
+/** The numbers a reviewer wants first. Each is a filter on the list below. */
+function RoleTiles({ scanId, idleDays, hideAws, active, onPick }: { scanId: string; idleDays: number; hideAws: boolean; active: TileKey | null; onPick: (key: TileKey) => void }) {
+  const base: Record<string, string> = hideAws ? { hide_aws_managed: "true" } : {};
   const useCount = (key: string, extra: Record<string, string>) =>
-    useQuery({ queryKey: ["identities-count", scanId, key, extra], queryFn: () => apiClient.listIdentities(scanId, { page: 1, page_size: 1, ...extra }), enabled: Boolean(scanId) });
-  const all = useCount("all", {});
-  const idle = useCount("idle", { idle: "true", idle_days: String(idleDays) });
-  const broad = useCount("broad", { broad: "candidate" });
-  const unknown = useCount("unknown", { unknown: "true" });
-  const tile = (key: "all" | "idle" | "broad" | "unknown", label: string, q: { data?: { total_items: number } }, on: boolean, hint: string) => (
-    <button type="button" aria-pressed={on} title={hint} onClick={() => onPick(key)} className={`hs-card p-3 text-left ${on ? "ring-1 ring-cyan-500" : ""}`}>
-      <span className="block text-2xl font-semibold tabular-nums">{q.data ? q.data.total_items : "…"}</span>
-      <span className="block text-xs font-medium">{label}</span>
-    </button>
-  );
+    useQuery({ queryKey: ["identities-count", scanId, key, hideAws, extra], queryFn: () => apiClient.listIdentities(scanId, { page: 1, page_size: 1, ...base, ...extra }), enabled: Boolean(scanId) });
+  const counts: Record<TileKey, ReturnType<typeof useCount>> = {
+    all: useCount("all", {}),
+    findings: useCount("findings", { findings: "true" }),
+    internet: useCount("internet", { internet: "true" }),
+    external: useCount("external", { trust: "external" }),
+    powerful_idle: useCount("powerful_idle", { powerful_idle: "true", idle_days: String(idleDays) })
+  };
+  const defs: [TileKey, string, string][] = [
+    ["all", hideAws ? "Your roles" : "Roles", hideAws ? "Without the roles AWS creates and owns" : "Every IAM role in this scan"],
+    ["findings", "With findings", "At least one finding above Info"],
+    ["internet", "Reachable from the internet", "A workload running as it is open to the world"],
+    ["external", "Trust an outside account", "Trust names an account that is not yours"],
+    ["powerful_idle", `Powerful and idle ${idleDays}d+`, "Broad permission, no recent use"]
+  ];
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {tile("all", "Roles", all, active.none, "All IAM roles in this scan")}
-      {tile("idle", `Idle ${idleDays}+ days`, idle, active.idle, "No recent use reported by IAM, or none in its tracking window")}
-      {tile("broad", "Declared broad permission", broad, active.broad, "A policy document declares a broad permission. Declared is not evaluated access.")}
-      {tile("unknown", "Unknown evidence", unknown, active.unknown, "Policy documents were not collected, so nothing can be said either way")}
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      {defs.map(([key, label, hint]) => (
+        <button key={key} type="button" aria-pressed={active === key} onClick={() => onPick(key)} className={`hs-card hs-interactive-card flex h-full flex-col gap-1 p-4 text-left ${active === key ? "border-cyan-500 ring-1 ring-cyan-500" : ""}`}>
+          <p className="cr-kpi-label">{label}</p>
+          <p className="cr-kpi-value">{counts[key].data ? counts[key].data!.total_items : "…"}</p>
+          <p className="cr-helper">{hint}</p>
+        </button>
+      ))}
     </div>
   );
 }
@@ -79,16 +92,18 @@ export function IdentitiesPage() {
   const q = params.get("q") ?? "";
   const category = params.get("category") ?? "";
   const unknownOnly = params.get("unknown") === "true";
+  const findingsOnly = params.get("findings") === "true";
+  const internetOnly = params.get("internet") === "true";
+  const powerfulIdle = params.get("powerful_idle") === "true";
+  const showAws = params.get("aws") === "show";
   const idleOnly = params.get("idle") === "true";
   const idleDays = Number(params.get("idle_days")) > 0 ? Number(params.get("idle_days")) : IDLE_DAYS;
   const selected = params.get("role") ?? "";
   const page = Number(params.get("page") || "1");
-  const [impact, setImpact] = useState(false);
-  const [impactWorkload, setImpactWorkload] = useState("");
 
   const filters = useMemo(
-    () => ({ account_id: accountID, region, purpose, trust, broad, evidence, workload, type: workloadType, q, category, unknown: unknownOnly ? "true" : "", idle: idleOnly ? "true" : "", idle_days: idleOnly ? String(idleDays) : "", page, page_size: 25 }),
-    [accountID, region, purpose, trust, broad, evidence, workload, workloadType, q, category, unknownOnly, idleOnly, idleDays, page]
+    () => ({ account_id: accountID, region, purpose, trust, broad, evidence, workload, type: workloadType, q, category, unknown: unknownOnly ? "true" : "", idle: idleOnly ? "true" : "", idle_days: idleOnly || powerfulIdle ? String(idleDays) : "", findings: findingsOnly ? "true" : "", internet: internetOnly ? "true" : "", powerful_idle: powerfulIdle ? "true" : "", hide_aws_managed: showAws ? "" : "true", page, page_size: 25 }),
+    [accountID, region, purpose, trust, broad, evidence, workload, workloadType, q, category, unknownOnly, idleOnly, idleDays, findingsOnly, internetOnly, powerfulIdle, showAws, page]
   );
   const list = useQuery({
     queryKey: ["identities", selectedScanId, filters],
@@ -96,8 +111,8 @@ export function IdentitiesPage() {
     enabled: Boolean(selectedScanId)
   });
   const profile = useQuery({
-    queryKey: ["identity-profile", selectedScanId, selected, impact, impactWorkload],
-    queryFn: () => apiClient.getIdentityProfile(selectedScanId!, selected, impact, impactWorkload),
+    queryKey: ["identity-profile", selectedScanId, selected],
+    queryFn: () => apiClient.getIdentityProfile(selectedScanId!, selected, true),
     enabled: Boolean(selectedScanId && selected)
   });
   const workloadList = useQuery({
@@ -119,7 +134,6 @@ export function IdentitiesPage() {
     else next.delete("idle");
     next.delete("role");
     next.delete("page");
-    setImpact(false);
     setParams(next);
   };
 
@@ -129,16 +143,15 @@ export function IdentitiesPage() {
     else next.delete(key);
     if (key !== "role") next.delete("role");
     if (key !== "page") next.delete("page");
-    setImpact(false);
     setParams(next);
   };
 
   return (
     <section className="space-y-6">
       <PageHeader
-        title="IAM roles"
-        description="IAM roles stored in this scan."
-        details="A trust relationship is configuration, not proof a caller can assume the role. Hypothetical impact runs only after you select a role."
+        title="Identities"
+        description="IAM roles in this scan, riskiest first. Users and groups are on the Users & Groups page."
+        details="Roles are ordered by their worst finding, then by a workload reachable from the internet, then by declared broad permissions. A trust relationship is configuration, not proof a caller can assume the role. Hypothetical impact runs only after you select a role."
       />
       <PolicyInventoryNotice scanId={selectedScanId} />
       {!selectedScanId ? (
@@ -148,14 +161,15 @@ export function IdentitiesPage() {
         <RoleTiles
           scanId={selectedScanId}
           idleDays={idleDays}
-          active={{ idle: idleOnly, broad: broad === "candidate", unknown: unknownOnly, none: !idleOnly && broad !== "candidate" && !unknownOnly && !category }}
+          hideAws={!showAws}
+          active={findingsOnly ? "findings" : internetOnly ? "internet" : powerfulIdle ? "powerful_idle" : trust === "external" ? "external" : !idleOnly && broad !== "candidate" && !unknownOnly && !category ? "all" : null}
           onPick={(key) => {
             const n = new URLSearchParams(params);
-            for (const k of ["idle", "idle_days", "broad", "unknown", "category", "role", "page"]) n.delete(k);
-            if (key === "idle") { n.set("idle", "true"); n.set("idle_days", String(idleDays)); }
-            if (key === "broad") n.set("broad", "candidate");
-            if (key === "unknown") n.set("unknown", "true");
-            setImpact(false);
+            for (const k of ["idle", "idle_days", "broad", "unknown", "category", "role", "page", "findings", "internet", "trust", "powerful_idle"]) n.delete(k);
+            if (key === "findings") n.set("findings", "true");
+            if (key === "internet") n.set("internet", "true");
+            if (key === "external") n.set("trust", "external");
+            if (key === "powerful_idle") { n.set("powerful_idle", "true"); n.set("idle_days", String(idleDays)); }
             setParams(n);
           }}
         />
@@ -172,170 +186,162 @@ export function IdentitiesPage() {
             <button type="button" className="hs-btn-default px-2 py-0.5 text-xs" onClick={() => { const n = new URLSearchParams(params); n.delete("category"); n.delete("unknown"); n.delete("idle"); n.delete("account_id"); n.delete("page"); setParams(n); }}>Clear</button>
           </p>
         ) : null}
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-          <div className="space-y-3">
-            <input className="hs-input" placeholder="Search role or account" value={q} onChange={(e) => patch("q", e.target.value)} aria-label="Search role or account" />
-            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Quick filters">
-              <Chip on={trust === "external"} onClick={() => patch("trust", trust === "external" ? "" : "external")}>Trusts outside accounts</Chip>
-              <Chip on={workload === "attached"} onClick={() => patch("workload", workload === "attached" ? "" : "attached")}>Runs a workload</Chip>
-              <Chip on={purpose === "SERVICE_LINKED_ROLE"} onClick={() => patch("purpose", purpose === "SERVICE_LINKED_ROLE" ? "" : "SERVICE_LINKED_ROLE")}>Service-linked</Chip>
-              {idleOnly ? (
-                <span className="flex flex-wrap items-center gap-1" role="group" aria-label="Idle after">
-                  <span className="text-xs text-slate-500">Idle after</span>
-                  {[30, 60, 90, 180, 365].map((d) => (
-                    <Chip key={d} on={idleDays === d} onClick={() => { const n = new URLSearchParams(params); if (d === IDLE_DAYS) n.delete("idle_days"); else n.set("idle_days", String(d)); n.delete("page"); setParams(n); }}>{d}d</Chip>
-                  ))}
-                </span>
-              ) : null}
-            </div>
-            <details open={Boolean(accountID || category || unknownOnly || idleOnly || region || purpose || params.get("trust") || params.get("broad") || params.get("evidence") || params.get("workload") || params.get("type"))}>
-              <summary className="hs-focus-ring w-fit cursor-pointer rounded text-xs font-medium text-cyan-800 dark:text-cyan-300">More filters</summary>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              <input className="hs-input" placeholder="Account ID" value={accountID} onChange={(e) => patch("account_id", e.target.value)} />
-              <input className="hs-input" placeholder="Region" value={region} onChange={(e) => patch("region", e.target.value)} />
-              <select className="hs-input" value={purpose} onChange={(e) => patch("purpose", e.target.value)}>
-                <option value="">All purposes</option>
-                {["EXTERNAL_DELEGATED", "INTERNAL_CROSS_ACCOUNT", "INTERNAL_NOT_SCANNED", "UNKNOWN_ORG_MEMBERSHIP", "SAME_ACCOUNT", "AWS_SERVICE_ROLE", "SERVICE_LINKED_ROLE", "FEDERATED_ROLE", "MIXED_TRUST", "UNRESOLVED"].map((item) => (
-                  <option key={item} value={item}>{item}</option>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filters">
+            <input className="hs-input !w-auto min-w-[16rem] flex-1" placeholder="Search role or account" value={q} onChange={(e) => patch("q", e.target.value)} aria-label="Search role or account" />
+            <TogglePill on={trust === "external"} onClick={() => patch("trust", trust === "external" ? "" : "external")}>Trusts outside accounts</TogglePill>
+            <TogglePill on={workload === "attached"} onClick={() => patch("workload", workload === "attached" ? "" : "attached")}>Runs a workload</TogglePill>
+            <TogglePill on={!showAws} title="Service-linked roles that AWS creates and owns" onClick={() => patch("aws", showAws ? "" : "show")}>Hide AWS-managed</TogglePill>
+            {idleOnly ? (
+              <span className="flex flex-wrap items-center gap-1" role="group" aria-label="Idle after">
+                <span className="text-xs text-slate-500">Idle after</span>
+                {[30, 60, 90, 180, 365].map((d) => (
+                  <TogglePill key={d} on={idleDays === d} onClick={() => { const n = new URLSearchParams(params); if (d === IDLE_DAYS) n.delete("idle_days"); else n.set("idle_days", String(d)); n.delete("page"); setParams(n); }}>{d}d</TogglePill>
                 ))}
-              </select>
-              <select className="hs-input" value={trust} onChange={(e) => patch("trust", e.target.value)}>
-                <option value="">All trust scopes</option>
-                <option value="internal">Internal trust</option>
-                <option value="external">External trust</option>
-              </select>
-              <select className="hs-input" value={broad} onChange={(e) => patch("broad", e.target.value)}>
-                <option value="">All entitlement breadth</option>
-                <option value="candidate">Broad permission candidates</option>
-              </select>
-              <select className="hs-input" value={evidence} onChange={(e) => patch("evidence", e.target.value)}>
-                <option value="">All evidence states</option>
-                <option value="recorded">Recorded controls</option>
-                <option value="incomplete">Incomplete evidence</option>
-              </select>
-              <select className="hs-input" value={workload} onChange={(e) => patch("workload", e.target.value)}>
-                <option value="">All workload attachments</option>
-                <option value="attached">Configured workload</option>
-                <option value="unattached">No collected workload</option>
-              </select>
-              <select className="hs-input" value={params.get("type") ?? ""} onChange={(e) => patch("type", e.target.value)}>
-                <option value="">All workload types</option>
-                <option value="ec2_instance">EC2 instance</option>
-                <option value="lambda_function">Lambda function</option>
-                <option value="ecs_task">ECS task</option>
-                <option value="ecs_service">ECS service</option>
-                <option value="ecs_task_definition">ECS task definition</option>
-                <option value="eks_pod_identity_association">EKS Pod Identity</option>
-                <option value="irsa_trust">IRSA trust</option>
-              </select>
-            </div>
-            </details>
-            {list.isLoading ? <StatePanel>Loading roles…</StatePanel> : null}
-            {list.isError ? (
-              <StatePanel intent="error" title="Failed to load roles">
-                <pre className="whitespace-pre-wrap font-sans text-xs">{formatQueryError(list.error)}</pre>
-              </StatePanel>
+              </span>
             ) : null}
-            {list.data && list.data.items.length === 0 ? (
-              <StatePanel intent="empty" title="No IAM roles match">
-                {list.data.coverage_note}
-              </StatePanel>
-            ) : null}
-            {unresolved.length > 0 ? (
-              <section className="hs-card space-y-2 p-3">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Unresolved role references</h3>
-                <ul className="space-y-2">
-                  {unresolved.map((item) => (
-                    <li key={item.relationship_id || item.workload_arn} className="text-sm">
-                      <span className="font-medium">{item.workload_type}</span>
-                      <span className="block break-all font-mono text-xs">{item.workload_arn}</span>
-                      <span className="block break-all font-mono text-xs text-slate-500">{item.role_arn}</span>
-                      <span className="text-xs text-slate-500">{item.note}</span>
-                    </li>
+            <details className="relative" open={Boolean(accountID || region || purpose || broad || evidence || workloadType) || undefined}>
+              <summary className="hs-action-pill cursor-pointer list-none">More filters{[accountID, region, purpose, broad, evidence, workloadType].filter(Boolean).length ? ` (${[accountID, region, purpose, broad, evidence, workloadType].filter(Boolean).length})` : ""}</summary>
+              <div className="absolute right-0 z-20 mt-2 grid w-80 gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                <input className="hs-input" placeholder="Account ID" value={accountID} onChange={(e) => patch("account_id", e.target.value)} />
+                <input className="hs-input" placeholder="Region" value={region} onChange={(e) => patch("region", e.target.value)} />
+                <select className="hs-input" value={purpose} onChange={(e) => patch("purpose", e.target.value)} aria-label="Who the role trusts">
+                  <option value="">Any trust</option>
+                  {["EXTERNAL_DELEGATED", "INTERNAL_CROSS_ACCOUNT", "INTERNAL_NOT_SCANNED", "UNKNOWN_ORG_MEMBERSHIP", "SAME_ACCOUNT", "AWS_SERVICE_ROLE", "SERVICE_LINKED_ROLE", "FEDERATED_ROLE", "MIXED_TRUST", "UNRESOLVED"].map((item) => (
+                    <option key={item} value={item}>{humanize(item)}</option>
                   ))}
-                </ul>
-              </section>
-            ) : null}
-            <ul className="space-y-2">
-              {(list.data?.items ?? []).map((role) => (
-                <li key={role.role_arn}>
-                  <button
-                    type="button"
-                    className={`hs-card w-full p-3 text-left ${selected === role.role_arn ? "ring-1 ring-cyan-500" : ""}`}
-                    onClick={() => {
-                      setImpact(false);
-                      patch("role", role.role_arn);
-                    }}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="break-all text-base font-semibold text-slate-900 dark:text-slate-100" title={role.role_arn}>{role.name}</p>
-                      <span className="text-xs text-slate-500">{role.account_id}</span>
-                    </div>
-                    <p className="mt-2 flex flex-wrap gap-1.5 text-xs">
-                      {(role.classifications.length ? role.classifications : ["UNCLASSIFIED"]).map((c) => <span key={c} className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">{humanize(c)}</span>)}
-                      <span className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">{lastUsedLabel(role.last_used_status, role.days_since_used, role.last_used_region).text}</span>
-                      {role.workload_count > 0 ? <span className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">{role.workload_count} workload{role.workload_count === 1 ? "" : "s"}</span> : null}
-                    </p>
-                    {role.broad_candidates && role.broad_candidates.length > 0 ? (
-                      <p className="mt-2 flex flex-wrap gap-1">{role.broad_candidates.map((c) => <StateChip key={c} tone="warn" glyph="◆" label={`Declared: ${c}`} title="Declared in a policy document. Not evaluated access." />)}</p>
-                    ) : null}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {list.data ? (
-              <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
-                <p>{list.data.coverage_note} Showing {list.data.items.length} of {list.data.total_items}.</p>
-                <div className="flex gap-2">
-                  <button type="button" className="hs-input px-2 py-1" disabled={page <= 1} onClick={() => patch("page", String(page - 1))}>Previous</button>
-                  <button type="button" className="hs-input px-2 py-1" disabled={page >= list.data.total_pages} onClick={() => patch("page", String(page + 1))}>Next</button>
-                </div>
+                </select>
+                <select className="hs-input" value={broad} onChange={(e) => patch("broad", e.target.value)} aria-label="Permission breadth">
+                  <option value="">Any permissions</option>
+                  <option value="candidate">Declares a broad permission</option>
+                </select>
+                <select className="hs-input" value={evidence} onChange={(e) => patch("evidence", e.target.value)} aria-label="Evidence">
+                  <option value="">Any evidence</option>
+                  <option value="recorded">Controls recorded</option>
+                  <option value="incomplete">Evidence incomplete</option>
+                </select>
+                <select className="hs-input" value={workloadType} onChange={(e) => patch("type", e.target.value)} aria-label="Workload type">
+                  <option value="">Any workload</option>
+                  <option value="ec2_instance">EC2 instance</option>
+                  <option value="lambda_function">Lambda function</option>
+                  <option value="ecs_task">ECS task</option>
+                  <option value="ecs_service">ECS service</option>
+                  <option value="eks_pod_identity_association">EKS Pod Identity</option>
+                  <option value="irsa_trust">IRSA trust</option>
+                </select>
               </div>
-            ) : null}
+            </details>
           </div>
-          <RoleDetail
-            scanId={selectedScanId || ""}
-            profile={profile.data}
-            loading={profile.isLoading}
-            error={profile.error}
-            impact={impact}
-            impactWorkload={impactWorkload}
-            onImpactWorkload={setImpactWorkload}
-            onImpact={(arn) => {
-              setImpactWorkload(arn);
-              setImpact(true);
-            }}
-          />
+          {list.isLoading ? <StatePanel>Loading roles…</StatePanel> : null}
+          {list.isError ? (
+            <StatePanel intent="error" title="Failed to load roles">
+              <pre className="whitespace-pre-wrap font-sans text-xs">{formatQueryError(list.error)}</pre>
+            </StatePanel>
+          ) : null}
+          {list.data && list.data.items.length === 0 ? (
+            <StatePanel intent="empty" title="No roles match">
+              {list.data.coverage_note}
+            </StatePanel>
+          ) : null}
+          {unresolved.length > 0 ? (
+            <section className="hs-card space-y-2 p-3">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Roles named by a workload but not collected</h3>
+              <ul className="space-y-2">
+                {unresolved.map((item) => (
+                  <li key={item.relationship_id || item.workload_arn} className="text-sm">
+                    <span className="font-medium">{humanize(item.workload_type)}</span>
+                    <span className="block break-all font-mono text-xs">{item.workload_arn}</span>
+                    <span className="block break-all font-mono text-xs text-slate-500">{item.role_arn}</span>
+                    <span className="text-xs text-slate-500">{item.note}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {(list.data?.items ?? []).length > 0 ? (
+            <div className="hs-card max-h-[70vh] overflow-auto !p-0">
+              <table className="w-full text-left text-sm">
+                <thead className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    {["Role", "Findings", "Exposure", "Can do", "Owner", "Last used"].map((h, i) => (
+                      <th key={h} scope="col" className={`sticky top-0 z-10 bg-slate-50 px-3 py-2.5 dark:bg-slate-900 ${i >= 4 ? "hidden lg:table-cell" : i >= 2 ? "hidden sm:table-cell" : ""}`}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(list.data?.items ?? []).map((role) => (
+                    <tr key={role.role_arn} onClick={() => patch("role", role.role_arn)} className={`hs-interactive-row border-t border-slate-200 dark:border-slate-800 ${selected === role.role_arn ? "bg-cyan-500/10" : ""}`}>
+                      <td className="max-w-[16rem] px-3 py-2.5">
+                        <button type="button" title={role.role_arn} aria-current={selected === role.role_arn} className="hs-focus-ring block max-w-full truncate text-left font-medium text-slate-900 hover:underline dark:text-slate-100" onClick={(e) => { e.stopPropagation(); patch("role", role.role_arn); }}>{role.name}</button>
+                        <span className="block truncate text-xs text-slate-500">
+                          {(role.classifications.length ? role.classifications : ["UNCLASSIFIED"]).map(humanize).join(" · ")}
+                          {role.workload_count > 0 ? ` · ${role.workload_count} workload${role.workload_count === 1 ? "" : "s"}` : ""}
+                          {(role.inline_policy_count ?? 0) > 0 ? ` · ${role.inline_policy_count} inline polic${role.inline_policy_count === 1 ? "y" : "ies"}` : ""}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {role.finding_count > 0 ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <SeverityBadge severity={role.max_severity ?? "info"} />
+                            <span className="text-xs tabular-nums text-slate-600 dark:text-slate-400">{role.finding_count}</span>
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-500" title="No finding above Info names this role. That does not mean it was assessed as safe.">none</span>
+                        )}
+                      </td>
+                      <td className="hidden px-3 py-2.5 sm:table-cell">
+                        {role.exposure_state === "reachable" ? <span className="cr-chip-state cr-tone-bad" title={role.exposure_detail}>Internet-facing</span>
+                          : role.exposure_state === "restricted" ? <span className="cr-chip-state cr-tone-warn" title={role.exposure_detail}>Specific addresses</span>
+                          : role.exposure_state === "not_checked" ? <span className="cr-chip-state cr-tone-unk" title={role.exposure_detail}>Not checked</span>
+                          : role.exposure_state === "not_reachable" ? <span className="text-xs text-slate-500" title={role.exposure_detail}>Not reachable</span>
+                          : <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="hidden max-w-[16rem] px-3 py-2.5 sm:table-cell">
+                        {(role.broad_candidates ?? []).length === 0 ? <span className="text-slate-400">—</span> : (
+                          <span className="flex flex-wrap gap-1">
+                            {Array.from(new Set(role.broad_candidates)).slice(0, 2).map((c) => <span key={c} className="cr-chip-state cr-tone-warn" title="Declared in a policy document. Not evaluated access.">{categoryLabel(c)}</span>)}
+                            {new Set(role.broad_candidates).size > 2 ? <span className="text-xs text-slate-500">+{new Set(role.broad_candidates).size - 2}</span> : null}
+                          </span>
+                        )}
+                      </td>
+                      <td className="hidden px-3 py-2.5 lg:table-cell">{role.owner || <span className="text-slate-400">—</span>}</td>
+                      <td className="hidden whitespace-nowrap px-3 py-2.5 text-xs lg:table-cell">{lastUsedLabel(role.last_used_status, role.days_since_used, role.last_used_region).text}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {list.data ? (
+            <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+              <p>{list.data.coverage_note} Showing {list.data.items.length} of {list.data.total_items}.</p>
+              <div className="flex gap-2">
+                <button type="button" className="hs-btn-default px-2 py-1" disabled={page <= 1} onClick={() => patch("page", String(page - 1))}>Previous</button>
+                <button type="button" className="hs-btn-default px-2 py-1" disabled={page >= list.data.total_pages} onClick={() => patch("page", String(page + 1))}>Next</button>
+              </div>
+            </div>
+          ) : null}
         </div>
+        {selected ? (
+          <EntityDrawer title={profile.data?.name ?? "Role"} onClose={() => patch("role", "")}>
+            <RoleDetail scanId={selectedScanId || ""} profile={profile.data} loading={profile.isLoading} error={profile.error} />
+          </EntityDrawer>
+        ) : null}
         </div>
       )}
     </section>
   );
 }
 
-function RoleDetail({
-  scanId,
-  profile,
-  loading,
-  error,
-  impact,
-  impactWorkload,
-  onImpactWorkload,
-  onImpact
-}: {
-  scanId: string;
-  profile?: RoleEntitlementProfile;
-  loading: boolean;
-  error: unknown;
-  impact: boolean;
-  impactWorkload: string;
-  onImpactWorkload: (arn: string) => void;
-  onImpact: (workloadArn: string) => void;
-}) {
+const REASON: Record<string, string> = { missing_session_policy: "no session policy was recorded for the role" };
+const escalationText = (v?: string) =>
+  !v || v === "NOT_ASSESSED" ? "Escalation was not assessed." : v === "NONE_FOUND_IN_MODELED_TECHNIQUES" ? "No way to gain more access was found among the techniques Cloudrift models." : `Escalation: ${humanize(v)}.`;
+
+function RoleDetail({ scanId, profile, loading, error }: { scanId: string; profile?: RoleEntitlementProfile; loading: boolean; error: unknown }) {
   if (!profile && !loading && !error) {
-    return <StatePanel intent="empty" title="Select a role">Entitlement evidence and hypothetical impact appear here.</StatePanel>;
+    return <StatePanel intent="empty" title="Select a role">What it can do, who can become it and what to change appear here.</StatePanel>;
   }
-  if (loading) return <StatePanel>Loading entitlement profile…</StatePanel>;
+  if (loading) return <StatePanel>Loading the role…</StatePanel>;
   if (error || !profile) {
     return (
       <StatePanel intent="error" title="Failed to load the role">
@@ -343,247 +349,287 @@ function RoleDetail({
       </StatePanel>
     );
   }
+  const recs = profile.recommendations ?? [];
   return (
-    <article className="hs-card space-y-4 p-5">
+    <article className="space-y-5 [&>section]:border-t [&>section]:border-slate-200 [&>section]:pt-5 dark:[&>section]:border-slate-800">
       <header>
-        <h2 className="break-all text-lg font-semibold text-slate-900 dark:text-slate-100">{profile.role_arn.split("/").pop()}</h2>
-        <p className="mt-2 flex flex-wrap gap-1.5 text-xs">
+        <p className="flex flex-wrap gap-1.5 text-xs">
           {(profile.classifications ?? []).map((c) => <span key={c} className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">{humanize(c)}</span>)}
-          <span className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">collection {profile.collection_status}</span>
+          {profile.collection_status !== "collected" ? <span className="rounded-full border border-slate-300 px-2 py-0.5 dark:border-slate-700">Collection: {humanize(profile.collection_status)}</span> : null}
         </p>
         <div className="mt-2"><CopyIdentifier value={profile.role_arn} /></div>
-        <details className="mt-2 text-xs text-slate-500">
-          <summary className="cursor-pointer">About this role's analysis</summary>
-          <p className="mt-1">{profile.assumption}</p>
-        </details>
+        <RoleSummary profile={profile} scanId={scanId} />
       </header>
-      <RoleUsage scanId={scanId} roleArn={profile.role_arn} />
+
+      <RoleCapabilities profile={profile} />
+      <RoleContext profile={profile} />
+      <RoleImpact profile={profile} />
+
+      <section aria-label="Who can become this role" className="space-y-3">
+        <SectionHeader title="Who can become this role" hint="The trust policy names who may assume the role. Trust is configuration; whether a caller can use it also depends on that caller's own permissions." />
+        {(profile.trust_statements ?? []).length > 0 ? (
+          <ul className="space-y-2">
+            {(profile.trust_statements ?? []).map((t, i) => (
+              <li key={`${t.kind}-${i}`} className="hs-card-soft space-y-1 p-3 text-sm">
+                <p className="flex flex-wrap items-center gap-2">
+                  {t.kind === "wildcard" ? <StateChip tone="bad" glyph="◉" label="Open to any AWS account" /> : t.outside ? <StateChip tone="warn" glyph="◆" label="Outside account" /> : <StateChip tone="info" glyph="○" label={t.kind === "service" ? "AWS service" : t.kind === "federated" ? "Federated sign-in" : "Inside your accounts"} />}
+                  {(t.guards ?? []).map((g) => <StateChip key={g} tone="ok" glyph="✓" label={g} />)}
+                </p>
+                <p>{t.summary}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (profile.trusts ?? []).length > 0 ? (
+          <ul className="space-y-1 text-sm">
+            {(profile.trusts ?? []).map((t) => <li key={`${t.kind}-${t.principal_arn}`}>{humanize(t.scope)}: <span className="break-all font-mono text-xs">{t.principal_arn || t.principal_type}</span></li>)}
+          </ul>
+        ) : (
+          <p className="text-sm">No trust principal was read from stored evidence.</p>
+        )}
+        <RoleUsage scanId={scanId} roleArn={profile.role_arn} />
+      </section>
+
       <section aria-label="Role activity">
-        <SectionHeader title="Role activity" hint="Reported by IAM for the whole role, not per permission. It does not show which individual permissions are used." />
+        <SectionHeader title="Is it used?" hint="Reported by IAM for the whole role, not per permission." />
         <p className="mt-1 text-sm">
           {lastUsedLabel(profile.last_used_status, profile.days_since_used, profile.last_used_region).text}
-          {profile.last_used ? ` · ${profile.last_used}` : ""}
+          {profile.last_used ? ` · ${profile.last_used.slice(0, 10)}` : ""}
         </p>
         <p className="cr-helper mt-1">
-          {!profile.service_last_accessed_status
-            ? "Service-level last access was not collected for this scan (opt-in)."
-            : profile.service_last_accessed_status === "complete"
-              ? `Service last-accessed collected${profile.service_last_accessed_completed ? ` ${profile.service_last_accessed_completed}` : ""}: ${(profile.service_access ?? []).filter((s) => s.last_authenticated).length} of ${(profile.service_access ?? []).length} listed services used.`
-              : `Service last-accessed is ${profile.service_last_accessed_status.replace(/_/g, " ")}. Treat service use as unknown.`}
+          {!profile.service_last_accessed_status ? (
+            <>Which services it uses was not collected. <Link className="underline" to="/settings#cfg-scan.service_last_accessed">Turn on service last accessed</Link> to see unused permissions.</>
+          ) : profile.service_last_accessed_status === "complete" ? (
+            `${(profile.service_access ?? []).filter((s) => s.last_authenticated).length} of ${(profile.service_access ?? []).length} listed services were used${profile.service_last_accessed_completed ? ` (collected ${profile.service_last_accessed_completed})` : ""}.`
+          ) : (
+            `Service last accessed is ${profile.service_last_accessed_status.replace(/_/g, " ")}. Treat service use as unknown.`
+          )}
         </p>
       </section>
-      <section aria-label="Configuration chain">
-        <SectionHeader title="Configuration chain" hint="How this role is wired. Configuration and declared evidence, not an attacker path." />
-        <ol className="mt-2 flex flex-col gap-2 text-xs lg:flex-row lg:items-stretch">
-          {[
-            ["Workload", (profile.workloads ?? []).length > 0 ? (profile.workloads ?? []).slice(0, 3).map((w) => `${w.workload_type} ${w.workload_name || ""}`.trim()).join(", ") + ((profile.workloads ?? []).length > 3 ? ` +${(profile.workloads ?? []).length - 3}` : "") : "None collected"],
-            ["IAM role", profile.role_arn.split("/").pop() || profile.role_arn],
-            ["Attached policy", (profile.attached_policies ?? []).length + profile.inline_policy_count > 0 ? [...(profile.attached_policies ?? []).slice(0, 3), ...(profile.inline_policy_count > 0 ? [`${profile.inline_policy_count} inline`] : [])].join(", ") : "None recorded"],
-            ["Declared permission", Array.from(new Set((profile.permission_candidates ?? []).filter((c) => c.category && (c.outcome === "DECLARED" || c.outcome === "CONDITIONAL")).map((c) => c.category))).join(", ") || "No sensitive candidate (not a safety claim)"]
-          ].map(([label, value], i, all) => (
-            <li key={label} className="flex min-w-0 flex-1 flex-col items-stretch gap-1 lg:flex-row lg:items-center lg:gap-2">
-              <div className="hs-card-soft min-w-0 flex-1 p-2">
-                <p className="cr-kpi-label">{label}</p>
-                <p className="mt-1 break-words">{value}</p>
-              </div>
-              {i < all.length - 1 ? <span aria-hidden="true" className="text-center text-slate-400"><span className="lg:hidden">↓</span><span className="hidden lg:inline">→</span></span> : null}
-            </li>
-          ))}
-        </ol>
-      </section>
-      <section aria-label="Conclusion levels">
-        <SectionHeader title="What is known" hint="Each level is a separate conclusion. Earlier levels do not imply later ones." />
-        <ol className="mt-2 grid gap-2 sm:grid-cols-2 2xl:grid-cols-5">
-          <li className="hs-card-soft min-w-0 break-words p-2 text-xs">
-            <p className="cr-kpi-label">1 Policy attached</p>
-            <p className="mt-1 tabular-nums">{(profile.attached_policies ?? []).length} managed · {profile.inline_policy_count} inline</p>
-          </li>
-          <li className="hs-card-soft min-w-0 break-words p-2 text-xs">
-            <p className="cr-kpi-label">2 Permission declared</p>
-            <p className="mt-1 tabular-nums">{profile.candidate_count} declared · {profile.conditional_count} conditional</p>
-            <p className="cr-helper">Zero is not a safety claim.</p>
-          </li>
-          <li className="hs-card-soft min-w-0 break-words p-2 text-xs">
-            <p className="cr-kpi-label">3 Access evaluated</p>
-            <div className="mt-1">
-              {impact ? <StateChip tone="info" glyph="✓" label="Evaluated (supported scope)" /> : <AuthorizationChip status="not_assessed" />}
-            </div>
-            <p className="cr-helper">{impact ? `${profile.impact?.validated_allowed ?? 0} allowed · ${profile.impact?.unknown ?? 0} unknown` : "Not requested"}</p>
-          </li>
-          <li className="hs-card-soft min-w-0 break-words p-2 text-xs">
-            <p className="cr-kpi-label">4 Hypothetical impact</p>
-            <div className="mt-1">{impact ? <AttackStatusChip kind="hypothetical" /> : <StateChip tone="unk" glyph="–" label="Not requested" />}</div>
-          </li>
-          <li className="hs-card-soft min-w-0 break-words p-2 text-xs">
-            <p className="cr-kpi-label">5 Validated transitions</p>
-            <p className="mt-1 tabular-nums">{impact ? profile.impact?.validated_transitions ?? 0 : "Not assessed"}</p>
-          </li>
-        </ol>
-      </section>
-      <section>
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Permission evidence</h3>
-        <p className="text-sm text-slate-700 dark:text-slate-300">{profile.candidate_note}</p>
-        <ul className="mt-2 space-y-1 text-sm">
-          <li>Declared exposure assessment: {profile.entitlement_assessment} · eligible {profile.eligible_exposure_count} · source {profile.assessment_source} · algorithm {profile.assessment_version || "stored"}</li>
-          <li>Conditional candidates: {profile.conditional_count} · unknown evidence or unsupported constructs: {profile.unknown_count} · deny evidence: {profile.deny_evidence_count}</li>
-        </ul>
-        <p className="mt-1 text-sm">Attached names: {profile.attached_policies?.join(", ") || "none recorded"} · policy retrieval: {profile.policy_retrieval}</p>
-        {Object.entries(profile.policy_descriptions ?? {}).map(([name, d]) => (
-          <p key={name} className="text-xs text-slate-600 dark:text-slate-300">{name}, description written in IAM: {d}</p>
-        ))}
-        <div className="mt-1"><TagList tags={profile.tags} /></div>
-        <ul className="mt-2 space-y-2">
-          {(profile.permission_candidates ?? []).map((item) => (
-            <li key={item.evidence_fingerprint} className="hs-card-soft space-y-1 p-3 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{item.category || "no category"}</span>
-                <EvidenceChip state={item.outcome} />
-                {item.eligible ? <StateChip tone="warn" glyph="⚑" label="Finding eligible" /> : <StateChip tone="unk" glyph="–" label="Not a finding" />}
-                <AuthorizationChip status="not_assessed" />
-                {item.service_activity ? (
-                  <StateChip
-                    tone={item.service_activity === "not_accessed_in_window" ? "info" : "unk"}
-                    glyph={item.service_activity === "accessed" ? "●" : item.service_activity === "not_accessed_in_window" ? "○" : "?"}
-                    label={
-                      item.service_activity === "accessed"
-                        ? `${item.service_activity_scope === "action" ? "Action used" : "Service used"} ${item.service_last_accessed?.slice(0, 10) ?? ""}`
-                        : item.service_activity === "not_accessed_in_window"
-                          ? "Service not used in IAM window"
-                          : item.service_activity === "not_reported"
-                            ? "Service not listed by IAM"
-                            : "Service use unknown"
-                    }
-                    title="IAM access advisor, service level only. It does not show which actions were used."
-                  />
-                ) : null}
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                {item.effect || "—"} {item.actions?.join(", ")} on {item.resources?.join(", ") || "—"} · scope {item.resource_breadth || "unknown"} · {item.exposure_class || "unclassified"} · version {item.version_verification || "unverified"}
-              </p>
-              {item.conditions && Object.keys(item.conditions).length > 0 ? (
-                <p className="cr-mono break-all text-slate-600 dark:text-slate-300">Condition ({item.condition_status}): {JSON.stringify(item.conditions)}</p>
-              ) : null}
-              <p className="cr-ident">{item.policy_arn || "inline document"}{item.policy_version ? ` · ${item.policy_version}` : ""}{item.statement_id ? ` · ${item.statement_id}` : ""}</p>
-              <p className="cr-helper">{item.note}</p>
-            </li>
-          ))}
-        </ul>
-      </section>
-      <section>
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Workload attachments</h3>
-        <p className="text-sm text-slate-700 dark:text-slate-300">{profile.attachment_note || "No EC2 or Lambda attachment was collected for this role."}</p>
-        <ul className="space-y-2">
-          {(profile.workloads ?? []).map((item) => (
-            <li key={item.relationship_id || item.workload_arn} className="text-sm">
-              <span className="font-medium">{item.kind}</span> · {item.workload_type} · {item.mechanism}
-              {item.status ? <span> · {item.status}</span> : null}
-              {item.region ? <span> · {item.region}</span> : null}
-              {item.runtime_observed ? <span> · runtime {item.runtime_observed}</span> : null}
-              <Link className="block break-all font-mono text-xs text-cyan-800 underline dark:text-cyan-200" to={`/inventory?scan_id=${encodeURIComponent(scanId)}&resource=${encodeURIComponent(item.workload_arn)}`}>
-                {item.workload_arn}
-              </Link>
-              {item.cluster ? <span className="block break-all font-mono text-xs">{item.cluster}{item.namespace ? ` / ${item.namespace}` : ""}{item.service_account ? ` / ${item.service_account}` : ""}</span> : null}
-              <span className="text-xs text-slate-500">{item.note}</span>
-            </li>
-          ))}
-        </ul>
-        {profile.shared_role ? <p className="text-xs text-slate-500">This role is shared. Resource impact is counted once, not once per workload.</p> : null}
-      </section>
-      <section>
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Configured trust</h3>
-        <p className="text-sm text-slate-700 dark:text-slate-300">{profile.trust_evidence_note}</p>
-        {(profile.trusts ?? []).length === 0 ? <p className="text-sm">No trust principal was read from stored evidence.</p> : null}
-        <ul className="space-y-2">
-          {(profile.trusts ?? []).map((trust) => (
-            <li key={`${trust.evidence}-${trust.kind}-${trust.principal_type}-${trust.principal_arn}`} className="text-sm">
-              <span className="font-medium">{trust.kind}</span> · {trust.scope}
-              {trust.condition_status ? <span> · condition {trust.condition_status}</span> : null}
-              <span className="block break-all font-mono text-xs">{trust.principal_arn || trust.principal_type}</span>
-              <span className="text-xs text-slate-500">{trust.evidence ? `${trust.evidence} · ` : ""}{trust.note}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-      <details className="hs-card-soft p-3">
-        <summary className="hs-focus-ring cursor-pointer text-sm font-semibold text-slate-900 dark:text-slate-100">Evidence and collection coverage</summary>
-        <div className="mt-2">
-      <section>
-        
-        <ul className="list-disc pl-5 text-sm">
-          {(profile.evidence_coverage?.lines ?? []).map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      </section>
-        </div>
-      </details>
-      <section>
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Hypothetical compromise</h3>
-        {!impact ? (
-          <div className="space-y-2">
-            {(profile.workloads ?? []).length > 0 ? (
-              <label className="block text-sm">
-                Workload for the credential assumption
-                <select
-                  className="hs-input mt-1"
-                  value={impactWorkload || profile.workloads?.[0]?.workload_arn || ""}
-                  onChange={(e) => onImpactWorkload(e.target.value)}
-                >
-                  {(profile.workloads ?? []).map((item) => (
-                    <option key={item.workload_arn} value={item.workload_arn}>
-                      {item.workload_type} {item.workload_name || item.workload_arn}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            <button
-              type="button"
-              className="rounded bg-cyan-700 px-3 py-2 text-sm text-white dark:bg-cyan-600"
-              onClick={() => onImpact(impactWorkload || profile.workloads?.[0]?.workload_arn || "")}
-            >
-              {(profile.workloads ?? []).length > 0 ? "Calculate hypothetical workload credential impact" : "Calculate hypothetical impact"}
-            </button>
-          </div>
-        ) : profile.impact ? (
-          <div className="space-y-1 text-sm">
-            <p className="font-medium">{profile.impact.kind}</p>
-            <p>{profile.impact.assumption}</p>
-            <p>
-              Allowed {profile.impact.validated_allowed}, denied {profile.impact.validated_denied}, conditional {profile.impact.conditional}, unknown {profile.impact.unknown}.
-            </p>
-            <p>
-              Resource paths {profile.impact.resource_impact_paths}. Validated transitions {profile.impact.validated_transitions}. Reachable roles {profile.impact.reachable_identities}.
-            </p>
-            <p>Privilege escalation: {profile.impact.privilege_escalation || "NOT_ASSESSED"}.</p>
-            {profile.impact.missing_evidence && profile.impact.missing_evidence.length > 0 ? (
-              <p>Unknown or unevaluated reasons: {profile.impact.missing_evidence.join(", ")}.</p>
-            ) : null}
-            {profile.impact.truncated ? <p>The search stopped at its bound. These counts are not a complete reachable universe.</p> : null}
-          </div>
-        ) : (
-          <StatePanel>Calculating impact…</StatePanel>
-        )}
-      </section>
-      <details className="hs-card-soft p-3">
-        <summary className="hs-focus-ring cursor-pointer text-sm font-semibold text-slate-900 dark:text-slate-100">Review recommendations (read-only)</summary>
-        <div className="mt-2">
-      <section>
-        
-        {(profile.recommendations ?? []).length === 0 ? <p className="text-sm">No review item was produced from the recorded evidence.</p> : null}
-        <ul className="space-y-3">
-          {(profile.recommendations ?? []).map((rec) => (
-            <li key={rec.id} className="text-sm">
+
+      <section aria-label="Suggested changes">
+        <SectionHeader title="Suggested changes" hint="Read-only suggestions. Cloudrift does not change anything." />
+        {recs.length === 0 ? <p className="mt-1 text-sm">No change is suggested from the recorded evidence.</p> : null}
+        <ul className="mt-2 space-y-3">
+          {recs.map((rec) => (
+            <li key={rec.id} className="hs-card-soft space-y-1 p-3 text-sm">
               <p className="font-medium">{rec.title}</p>
               <p>{rec.issue}</p>
-              <p className="text-xs text-slate-500">{rec.operational_risk}</p>
-              <p className="text-xs">Read-only. This recommendation is not executed.</p>
+              <p className="text-xs text-slate-600 dark:text-slate-300"><span className="font-medium">Could break:</span> {rec.operational_risk}</p>
+              <p className="text-xs text-slate-600 dark:text-slate-300"><span className="font-medium">Check afterwards:</span> {rec.verification}</p>
             </li>
           ))}
         </ul>
       </section>
+
+      <details className="hs-card-soft p-3">
+        <summary className="hs-focus-ring cursor-pointer text-sm font-semibold text-slate-900 dark:text-slate-100">Evidence behind this page (for review)</summary>
+        <div className="mt-3 space-y-4">
+          <section>
+            <SectionHeader title="Sensitive permissions declared" hint={profile.candidate_note} />
+            <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+              {profile.candidate_count} declared · {profile.conditional_count} conditional · {profile.unknown_count} could not be read · {profile.deny_evidence_count} explicit deny. Policies: {profile.attached_policies?.join(", ") || "none recorded"}.
+            </p>
+            <ul className="mt-2 space-y-2">
+              {(profile.permission_candidates ?? []).map((item) => (
+                <li key={item.evidence_fingerprint} className="hs-card-soft space-y-1 p-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{item.category ? categoryLabel(item.category) : "Could not be classified"}</span>
+                    <EvidenceChip state={item.outcome} />
+                    {item.eligible ? <StateChip tone="warn" glyph="⚑" label="Counts toward a finding" /> : null}
+                    {item.service_activity ? (
+                      <StateChip
+                        tone={item.service_activity === "not_accessed_in_window" ? "info" : "unk"}
+                        glyph={item.service_activity === "accessed" ? "●" : item.service_activity === "not_accessed_in_window" ? "○" : "?"}
+                        label={item.service_activity === "accessed" ? `Service used ${item.service_last_accessed?.slice(0, 10) ?? ""}` : item.service_activity === "not_accessed_in_window" ? "Service not used in IAM window" : "Service use unknown"}
+                        title="IAM access advisor, service level only."
+                      />
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    {item.effect || "—"} {item.actions?.join(", ")} on {item.resources?.join(", ") || "—"} · {item.resource_breadth === "global_wildcard" ? "every resource" : humanize(item.resource_breadth || "unknown scope")}
+                  </p>
+                  {item.conditions && Object.keys(item.conditions).length > 0 ? <p className="cr-mono break-all text-slate-600 dark:text-slate-300">Condition: {JSON.stringify(item.conditions)}</p> : null}
+                  <p className="cr-ident">{item.policy_arn || "inline document"}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section>
+            <SectionHeader title="Coverage" hint="What the scan could and could not read for this role." />
+            <ul className="mt-1 list-disc pl-5 text-sm">
+              {(profile.evidence_coverage?.lines ?? []).map((line) => <li key={line}>{line}</li>)}
+            </ul>
+          </section>
         </div>
       </details>
     </article>
+  );
+}
+
+/** What the role's policies allow, per service. Written policy text: denies are not applied. */
+function RoleCapabilities({ profile }: { profile: RoleEntitlementProfile }) {
+  const all = profile.capabilities ?? [];
+  // S3 Object Lambda access comes from the same S3 policy line; one row says it.
+  const caps = all.filter((c) => !(c.service === "s3-object-lambda" && all.some((o) => o.service === "s3" && o.level === c.level)));
+  const row = (c: NonNullable<RoleEntitlementProfile["capabilities"]>[number]) => {
+    const [tone, glyph, label] = LEVEL[c.level] ?? LEVEL.read;
+    return (
+      <tr key={c.service} title={(c.actions ?? []).join(", ")}>
+        <td className="py-1.5 pr-3"><span className="block font-medium">{serviceLabel(c.service)}</span><span className="block text-xs text-slate-500">{c.policies.join(", ")}</span></td>
+        <td className="py-1.5 pr-3"><StateChip tone={tone} glyph={glyph} label={label} />{c.limited_by_boundary ? <span className="mt-1 block text-xs text-slate-500">narrowed by its boundary</span> : null}</td>
+        <td className="py-1.5">{c.scope}{c.conditional ? " · conditional" : ""}</td>
+      </tr>
+    );
+  };
+  return (
+    <section aria-label="What the role can do" className="space-y-2">
+      <SectionHeader title="What it can do" hint="Read from the role's policies, per service. Explicit denies are not applied." />
+      {caps.length === 0 ? (
+        <p className="text-sm">No allow statement was read for this role. {profile.capability_note || "No policy is attached, or none could be read."}</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-slate-500"><th className="pb-1 pr-3 font-normal">Service</th><th className="pb-1 pr-3 font-normal">Level</th><th className="pb-1 font-normal">On</th></tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">{caps.slice(0, 8).map(row)}</tbody>
+        </table>
+      )}
+      {caps.length > 8 ? (
+        <details>
+          <summary className="cursor-pointer text-xs font-medium text-cyan-800 dark:text-cyan-300">Show {caps.length - 8} more services</summary>
+          <table className="mt-1 w-full text-sm"><tbody className="divide-y divide-slate-200 dark:divide-slate-800">{caps.slice(8).map(row)}</tbody></table>
+        </details>
+      ) : null}
+      {caps.length > 0 && profile.capability_note ? <p className="cr-helper">{profile.capability_note}</p> : null}
+      {profile.controls_note ? (
+        <p className="flex items-start gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+          <span aria-hidden="true">{profile.controls_complete ? "✓" : "?"}</span>
+          {profile.controls_note}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/** Where the role is exposed and who owns it. Not checked is never shown as safe. */
+function RoleContext({ profile }: { profile: RoleEntitlementProfile }) {
+  const state = profile.exposure_state;
+  const chip =
+    state === "reachable" ? <StateChip tone="bad" glyph="◉" label="Reachable from the internet" /> :
+    state === "restricted" ? <StateChip tone="warn" glyph="◐" label="Open to specific addresses" /> :
+    state === "not_reachable" ? <StateChip tone="ok" glyph="✓" label="No way in from the internet" /> :
+    state === "not_checked" ? <StateChip tone="unk" glyph="?" label="Exposure not checked" /> :
+    <StateChip tone="unk" glyph="–" label="No workload runs as it" />;
+  const keys = (profile.owner_tag_keys ?? []).join(", ");
+  return (
+    <section aria-label="Exposure and ownership" className="space-y-2">
+      <SectionHeader title="Exposure and ownership" hint="Whether a workload that runs as this role can be reached from the internet, from its security group rules. It does not mean the workload can be exploited." />
+      <p className="flex flex-wrap items-center gap-2 text-sm">{chip}<span>{profile.exposure_detail}</span></p>
+      {(profile.entry_points ?? []).length > 0 ? (
+        <ul className="space-y-1 text-sm">
+          {(profile.entry_points ?? []).map((e) => <li key={e.text} className="flex gap-2"><span aria-hidden="true" className="text-slate-400">→</span><span>{e.text}</span></li>)}
+        </ul>
+      ) : null}
+      {(profile.runs_on ?? []).map((w) => (
+        <p key={w.arn} className="hs-card-soft break-all p-2 text-sm">
+          <span className="cr-kpi-label mr-2">Runs on</span>
+          <span className="font-medium">{w.name || humanize(w.type)}</span>
+          <span className="block text-xs text-slate-500">{[w.arn.split("/").pop(), w.state, w.public_ip ? `public IP ${w.public_ip}` : w.type === "ec2_instance" ? "no public IP" : "", w.profile ? `instance profile ${w.profile}` : ""].filter(Boolean).join(" · ")}</span>
+        </p>
+      ))}
+      <p className="text-sm">
+        {profile.owner ? <>Owner: <span className="font-medium">{profile.owner}</span>. </> : <span className="text-amber-800 dark:text-amber-300">No owner tag{keys ? ` (looked for ${keys})` : ""}. </span>}
+        {profile.created_at ? `Created ${profile.created_at.slice(0, 10)} (${ageLabel(profile.created_at)}).` : ""}
+      </p>
+      {profile.tags && Object.keys(profile.tags).length > 0 ? <div><span className="cr-kpi-label mr-2">Tags</span><TagList tags={profile.tags} /></div> : null}
+    </section>
+  );
+}
+
+/** What stolen credentials for this role could reach. Computed on open, from the stored policies. */
+function RoleImpact({ profile }: { profile: RoleEntitlementProfile }) {
+  const i = profile.impact;
+  const fromWorkload = (profile.workloads ?? []).length > 0;
+  if (!i) return <StatePanel>Working out what this role could reach…</StatePanel>;
+  const reasons = (i.missing_evidence ?? []).map((m) => m.split(": ").pop() ?? m);
+  // When every undecided result is "no allow in the role's policies", the role simply lacks those permissions.
+  const noAllowOnly = reasons.length > 0 && reasons.every((r) => r === "no_applicable_allow");
+  const tile = (n: number, label: string, hint: string) => (
+    <div className="hs-card-soft p-2" title={hint}>
+      <p className="text-xl font-semibold tabular-nums">{n}</p>
+      <p className="text-xs">{label}</p>
+    </div>
+  );
+  const verb = (r: { service: string; level: string }) => (r.level === "read" ? (r.service === "s3" ? "Can read" : "Can list") : "Can change");
+  const single = (r: { noun: string; count: number }) => (r.count === 1 ? r.noun.replace("databases", "database").replace(/s$/, "") : r.noun);
+  return (
+    <section aria-label="If the credentials are stolen" className="space-y-2">
+      <SectionHeader title="If this role's credentials are stolen" hint={fromWorkload ? "Credentials taken from a workload carry no session policy, so none is assumed." : "No workload runs as this role, so the session's own restrictions are unknown."} />
+      {(profile.reach ?? []).length > 0 ? (
+        <ul className="space-y-2 text-sm">
+          {(profile.reach ?? []).map((r) => (
+            <li key={r.service}>
+              <StateChip tone={r.level === "read" ? "info" : "bad"} glyph="●" label={`${verb(r)} ${r.count} ${single(r)}`} />
+              {(r.items ?? []).length > 0 ? (
+                <p className="mt-1 break-all text-xs text-slate-600 dark:text-slate-300">
+                  {(r.items ?? []).map((it, n) => (
+                    <span key={it.name}>{n > 0 ? ", " : ""}{it.hint ? <strong className="font-semibold text-amber-800 dark:text-amber-300" title={it.hint}>{it.name} ({it.hint})</strong> : it.name}</span>
+                  ))}
+                  {r.count > (r.items ?? []).length ? `, and ${r.count - (r.items ?? []).length} more` : ""}
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="cr-helper">From the policy text, for every resource the scan collected in this account. The checks below cover sensitive actions only (IAM changes, assuming roles, secrets, keys).</p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {tile(i.validated_allowed, "Confirmed allowed", "Sensitive actions the policies clearly allow")}
+        {tile(i.conditional, "Depends on a condition", "Allowed only if a condition in the policy holds")}
+        {noAllowOnly
+          ? tile(i.unknown, "Not in its policies", "Nothing in the role's own policies allows these. They are not counted as denied because a resource's own policy could still grant access.")
+          : tile(i.unknown, "Could not be decided", "Not allowed and not ruled out")}
+        {tile(i.reachable_identities, "Other roles reachable", "Roles the holder could move to")}
+      </div>
+      <p className="text-sm">{escalationText(i.privilege_escalation)}</p>
+      {i.truncated ? <p className="cr-helper">The search stopped at its limit, so these counts are not complete.</p> : null}
+    </section>
+  );
+}
+
+/** Two lines that say what this role is, then the ways out of this page: its findings, its blast radius, its workloads. */
+function RoleSummary({ profile, scanId }: { profile: RoleEntitlementProfile; scanId: string }) {
+  const workloads = profile.workloads ?? [];
+  const declared = Array.from(new Set((profile.permission_candidates ?? []).filter((c) => c.category && (c.outcome === "DECLARED" || c.outcome === "CONDITIONAL")).map((c) => categoryLabel(c.category))));
+  const used = lastUsedLabel(profile.last_used_status, profile.days_since_used, profile.last_used_region).text;
+  const enc = encodeURIComponent;
+  return (
+    <div className="mt-3 space-y-3">
+      <p className="text-sm text-slate-700 dark:text-slate-300">
+        {workloads.length > 0 ? `Used by ${workloads.length} workload${workloads.length === 1 ? "" : "s"} (${workloads.slice(0, 2).map((w) => humanize(w.workload_type)).join(", ")}). ` : "No collected workload runs as this role. "}
+        {declared.length > 0 ? `Declares ${declared.join(", ").toLowerCase()}. ` : "Declares no broad permission, which is not a safety claim. "}
+        {used}.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Link className="hs-action-pill" to={`/blast-explorer?scan=${enc(scanId)}&principal=${enc(profile.role_arn)}`}>What can this role reach? (Blast Explorer)</Link>
+        <Link className="hs-action-pill" to={`/access?scan_id=${enc(scanId)}&arn=${enc(profile.role_arn)}&action=sts:AssumeRole`}>Who can assume it? (Access Explorer)</Link>
+        {workloads[0] ? <Link className="hs-action-pill" to={`/inventory?scan_id=${enc(scanId)}&resource=${enc(workloads[0].workload_arn)}`}>Open the workload in Inventory</Link> : null}
+      </div>
+      {(profile.findings ?? []).length > 0 ? (
+        <section aria-label="Findings on this role">
+          <p className="cr-kpi-label mb-1">Findings on this role</p>
+          <ul className="space-y-1">
+            {(profile.findings ?? []).map((f) => (
+              <li key={f.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <StateChip tone={severityTone(f.severity)} glyph="●" label={capitalize(f.severity)} />
+                <Link className="text-cyan-800 underline dark:text-cyan-200" to={`/findings?scan_id=${enc(scanId)}&finding_id=${enc(f.id)}`}>{f.title}</Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <p className="cr-helper">No finding above Info is recorded on this role itself.</p>
+      )}
+    </div>
   );
 }

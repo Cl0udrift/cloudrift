@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -104,7 +103,7 @@ func ScoreTrust(
 			cfg.Trust.GhostThresholdDays,
 		)
 
-		title := fmt.Sprintf("External trust on %s -> %s", role.Name, verdict)
+		title := trustTitle(role.Name, verdict)
 		// Stable identity: module + role + external principal, NOT the (mutable) verdict, so a
 		// trust whose severity/verdict changes across scans keeps the same ID for diff "changed".
 		hash := sha256.Sum256([]byte(string(models.ModuleExternalAccess) + "|" + role.ARN + "|" + rel.TargetARN))
@@ -340,4 +339,21 @@ func trustReason(condition trustCondition, activityStatus string) string {
 	default:
 		return "days_since_used below stale threshold"
 	}
+}
+
+// trustTitle says in plain words why the external trust matters. The verdict code stays in the evidence.
+func trustTitle(role string, verdict trustCondition) string {
+	switch verdict {
+	case condGhostAdmin:
+		return role + " gives an outside account administrator access it has not used recently"
+	case condUnknownVendor:
+		return role + " trusts an outside account that is not on the approved list"
+	case condStale:
+		return role + " trusts an outside account and has not been used recently"
+	case condAging:
+		return role + " trusts an outside account and its use is tapering off"
+	case condActive:
+		return role + " trusts an outside account and is in active use"
+	}
+	return role + " trusts an outside account"
 }

@@ -251,8 +251,17 @@ export interface IdentityListItem {
   last_used_region?: string;
   days_since_used?: number;
   workload_count: number;
+  inline_policy_count?: number;
   evidence_completeness: string;
   collection_status: string;
+  tags?: Record<string, string>;
+  finding_count: number;
+  max_severity?: string;
+  owner?: string;
+  internet_facing: boolean;
+  exposure_detail?: string;
+  aws_managed: boolean;
+  exposure_state?: string;
 }
 
 export interface IdentityListResponse {
@@ -477,7 +486,44 @@ export interface PermissionCandidate {
   note?: string;
 }
 
+export interface RoleCapability {
+  service: string;
+  level: "full" | "write" | "read";
+  scope: string;
+  policies: string[];
+  actions?: string[];
+  conditional?: boolean;
+  limited_by_boundary?: boolean;
+}
+
+export interface TrustStatement {
+  kind: string;
+  principals: string[];
+  account?: string;
+  outside: boolean;
+  guards?: string[];
+  summary: string;
+}
+
 export interface RoleEntitlementProfile {
+  exposure_state?: string;
+  created_at?: string;
+  owner_tag_keys?: string[];
+  capabilities?: RoleCapability[];
+  capability_note?: string;
+  reach?: { service: string; level: string; noun: string; count: number; items?: { name: string; hint?: string }[] }[];
+  entry_points?: { text: string; ports: string; sources: string[]; world: boolean; via: string }[];
+  runs_on?: { arn: string; type: string; name?: string; state?: string; public_ip?: string; profile?: string }[];
+  controls_complete?: boolean;
+  controls_note?: string;
+  trust_statements?: TrustStatement[];
+  finding_count: number;
+  max_severity?: string;
+  owner?: string;
+  internet_facing: boolean;
+  exposure_detail?: string;
+  aws_managed: boolean;
+  findings?: { id: string; title: string; severity: string }[];
   scan_id: string;
   role_arn: string;
   account_id: string;
@@ -1311,6 +1357,16 @@ export interface PrincipalListItem {
   mfa_active: boolean;
   active_keys: number;
   credential_findings: number;
+  key_issues: number;
+  inline?: string[];
+  usage?: "person" | "programmatic" | "no_credentials" | "unknown";
+  last_activity?: string;
+  activity_as_of?: string;
+  activity_live?: boolean;
+  members?: number;
+  finding_count: number;
+  max_severity?: string;
+  owner?: string;
   tags?: Record<string, string>;
 }
 export interface PrincipalListResponse {
@@ -1353,6 +1409,15 @@ export interface PrincipalPoliciesResponse {
   credential_note?: string;
   broad_candidates: string[];
   tags?: Record<string, string>;
+  capabilities?: RoleCapability[];
+  capability_note?: string;
+  reach?: NonNullable<RoleEntitlementProfile["reach"]>;
+  can_reach?: { name: string; arn: string; technique: string }[];
+  escalation?: string;
+  members?: string[];
+  findings?: { id: string; title: string; severity: string }[];
+  owner?: string;
+  last_activity?: string;
 }
 export interface KeySummary {
   slot: string;
@@ -1361,6 +1426,7 @@ export interface KeySummary {
   last_used?: string;
   last_service?: string;
   age_days?: number;
+  last_used_source?: string;
 }
 export interface CredentialSummary {
   console_enabled: boolean;
@@ -1368,6 +1434,9 @@ export interface CredentialSummary {
   password_last_used?: string;
   keys: KeySummary[];
   findings: string[];
+  key_issues?: number;
+  report_generated_at?: string;
+  live_checked_at?: string;
 }
 export interface RoleAssumer {
   arn: string;
@@ -1395,6 +1464,7 @@ export interface ObservedUse {
   window_days: number;
 }
 export interface ObservedCaller extends ObservedUse {
+  source_ips?: string[];
   caller: string;
   name: string;
   caller_type: string;

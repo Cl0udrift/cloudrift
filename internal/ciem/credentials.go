@@ -23,11 +23,13 @@ func CredentialSummaryFor(user models.AssetNode, now time.Time) *schema.Credenti
 	out.Console, _ = user.Properties["console_enabled"].(bool)
 	out.MFA, _ = user.Properties["mfa_active"].(bool)
 	out.PasswordLastUsed = strProp(user, "password_last_used")
+	out.ReportGeneratedAt = strProp(user, "credential_report_generated_at")
+	out.LiveCheckedAt = strProp(user, "live_activity_checked_at")
 	if out.Console && !out.MFA {
 		out.Findings = append(out.Findings, "Console access without MFA")
 	}
 	for _, raw := range keyMaps(user.Properties["access_keys"]) {
-		key := schema.KeySummary{Slot: anyStr(raw["slot"]), LastRotated: anyStr(raw["last_rotated"]), LastUsed: anyStr(raw["last_used"]), LastService: anyStr(raw["last_service"])}
+		key := schema.KeySummary{Slot: anyStr(raw["slot"]), LastRotated: anyStr(raw["last_rotated"]), LastUsed: anyStr(raw["last_used"]), LastService: anyStr(raw["last_service"]), LastUsedSource: anyStr(raw["last_used_source"])}
 		key.Active, _ = raw["active"].(bool)
 		if t, err := time.Parse(time.RFC3339, key.LastRotated); err == nil {
 			days := int(now.Sub(t).Hours() / 24)
@@ -39,14 +41,17 @@ func CredentialSummaryFor(user models.AssetNode, now time.Time) *schema.Credenti
 		}
 		if key.AgeDays != nil && *key.AgeDays > staleKeyDays {
 			out.Findings = append(out.Findings, "Active access key older than 90 days")
+			out.KeyIssues++
 		}
 		if t, err := time.Parse(time.RFC3339, key.LastUsed); err != nil {
 			if key.AgeDays != nil && *key.AgeDays < newKeyGraceDays {
 				continue // a key made days ago has not had time to be used
 			}
 			out.Findings = append(out.Findings, "Active access key that has never been used")
+			out.KeyIssues++
 		} else if now.Sub(t).Hours()/24 > staleKeyDays {
 			out.Findings = append(out.Findings, "Active access key unused for over 90 days")
+			out.KeyIssues++
 		}
 	}
 	return out

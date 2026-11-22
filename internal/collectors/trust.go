@@ -124,6 +124,7 @@ func CollectTrust(ctx context.Context, accounts []Account) ([]models.AssetNode, 
 }
 
 func CollectTrustWithConfig(ctx context.Context, cfg *config.Config, accounts []Account) ([]models.AssetNode, []models.Relationship, error) {
+	ctx = WithLiveKeyActivity(ctx, cfg != nil && cfg.Scan.LiveKeyLastUsed, cfg.Scan.LiveKeyLastUsedMaxCalls)
 	sem := make(chan struct{}, max(1, cfg.Scan.RoleAssumptionConcurrency))
 	// Shared across accounts so total parallel per-role policy fetches stay bounded.
 	roleSem := make(chan struct{}, roleTrustConcurrency)
@@ -342,6 +343,21 @@ func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI
 							fmt.Sprintf("%d users are not in the credential report, which AWS generated at %s and caches for up to four hours; their credential data is not collected", missing, generated.Format(time.RFC3339)))
 					}
 					nodes = append(nodes, credStatus)
+					if budget := liveKeyBudget(ctx); budget > 0 && cerr == nil {
+						if live, ok := client.(IAMLiveActivityAPI); ok {
+							skipped, lerr := refreshLiveActivity(ctx, live, userNodes, budget, time.Now())
+							switch {
+							case lerr != nil:
+								nodes = append(nodes, CollectionStatus(accountID, "", "iam_key_activity", "global", "partial",
+									"the credential report's last-used dates were kept, because the live check was refused ("+lerr.Error()+"); it needs iam:ListAccessKeys, iam:GetAccessKeyLastUsed and iam:GetUser"))
+							case skipped > 0:
+								nodes = append(nodes, CollectionStatus(accountID, "", "iam_key_activity", "global", "partial",
+									fmt.Sprintf("%d users were not checked live because the call budget of %d was reached; the credential report's dates were kept for them", skipped, budget)))
+							default:
+								nodes = append(nodes, CollectionStatus(accountID, "", "iam_key_activity", "global", "succeeded", ""))
+							}
+						}
+					}
 				}
 			}
 			nodes = append(nodes, userNodes...)

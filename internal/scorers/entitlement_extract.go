@@ -549,3 +549,43 @@ func containsValue(values []string, want string) bool {
 	}
 	return false
 }
+
+// RoleStatement is one statement of a policy that applies to a role, as written. It is a reading of stored
+// documents and says nothing about what is allowed after boundaries, SCPs and denies.
+type RoleStatement struct {
+	PolicyARN, PolicyType string
+	Effect                string
+	Actions, Resources    []string
+	NotAction             bool
+	Conditional           bool
+}
+
+// RoleStatements returns every statement of every policy document stored for the role, including those that match
+// no sensitive pattern. Policies whose document is missing or unreadable are returned in unread, by name.
+func RoleStatements(scanID string, role models.AssetNode, assets []models.AssetNode, rels []models.Relationship) (stmts []RoleStatement, unread []string) {
+	sources := resolvePolicyConflicts(policySources(scanID, role, assets, rels))
+	if !hasInlineSource(sources) {
+		for i, raw := range stringSliceProperty(role.Properties, "inline_policy_documents") {
+			sources = append(sources, policySource{PolicyType: models.PolicyTypeInline, PolicyARN: "inline:" + role.ARN + ":" + strconv.Itoa(i), Document: raw, Status: models.PolicyRetrievalOK})
+		}
+	}
+	for _, source := range sources {
+		if source.Status != models.PolicyRetrievalOK || strings.TrimSpace(source.Document) == "" {
+			unread = append(unread, source.PolicyARN)
+			continue
+		}
+		parsed, err := models.NormalizeIdentityPolicy(source.PolicyARN, source.PolicyType, role.AccountID, source.Document)
+		if err != nil {
+			unread = append(unread, source.PolicyARN)
+			continue
+		}
+		for _, st := range parsed {
+			stmts = append(stmts, RoleStatement{
+				PolicyARN: source.PolicyARN, PolicyType: source.PolicyType, Effect: st.Effect,
+				Actions: st.Action, Resources: st.Resource, NotAction: len(st.NotAction) > 0 || len(st.NotResource) > 0,
+				Conditional: len(st.Condition) > 0,
+			})
+		}
+	}
+	return stmts, unread
+}

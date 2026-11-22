@@ -73,6 +73,7 @@ func summarizeRole(role models.AssetNode, assets []models.AssetNode, rels []mode
 		}
 	}
 	workloads := WorkloadsForRole(role.ARN, assets, rels)
+	_, inlineCount := policyInventory(role, assets)
 	status := strProp(role, "resolution_status")
 	if status == "" {
 		status = "collected"
@@ -98,6 +99,7 @@ func summarizeRole(role models.AssetNode, assets []models.AssetNode, rels []mode
 		UnknownEvidenceCount:      unknown,
 		ControlsMissing:           controlsMissing(role),
 		WorkloadCount:             len(workloads),
+		InlinePolicyCount:         inlineCount,
 		EvidenceCompleteness:      evidenceLabel(role),
 		CollectionStatus:          status,
 	}
@@ -305,7 +307,13 @@ func Profile(scanID string, role models.AssetNode, assets []models.AssetNode, re
 	trusts, trustNote := TrustEvidence(role, rels, orgMembership(assets))
 	svcStatus, svcCompleted, svcEntries := serviceAccessFromRole(role)
 	annotateServiceActivity(permissions, svcStatus, svcEntries)
+	capabilities, capabilityNote := Capabilities(scanID, role, assets, rels)
+	coverage := evidenceCoverage(role, assets)
+	controlsOK := func(s string) bool { return s == "NOT_APPLICABLE" || s == "COMPLETE_FOR_SUPPORTED_SCOPE" }
+	controlsComplete := controlsOK(coverage.PermissionsBoundary) && controlsOK(coverage.OrganizationsSCP) && controlsOK(coverage.OrganizationsRCP)
+	trustStatements := TrustStatements(role, assets)
 	profile := schema.RoleEntitlementProfile{
+		CreatedAt: strProp(role, "create_date"), Capabilities: capabilities, CapabilityNote: capabilityNote, Reach: Reach(role.AccountID, capabilities, assets), RunsOn: workloadCards(workloads, assets), ControlsComplete: controlsComplete, ControlsNote: controlsNote(role, coverage, controlsComplete), TrustStatements: trustStatements,
 		ScanID:                    scanID,
 		RoleARN:                   role.ARN,
 		AccountID:                 role.AccountID,
@@ -344,9 +352,19 @@ func Profile(scanID string, role models.AssetNode, assets []models.AssetNode, re
 		WorkloadCount:         len(workloads),
 		SharedRole:            len(workloads) > 1,
 		AttachmentNote:        AttachmentNote(role, rels, workloads),
-		EvidenceCoverage:      evidenceCoverage(role, assets),
+		EvidenceCoverage:      coverage,
 		Recommendations:       internalRecommendations(role, labels, broadCandidates(permissions), workloads),
 		ExecutionEnabled:      false,
+	}
+	profile.EvidenceCoverage.Lines = plainCoverageLines(role, coverage, len(workloads) > 0)
+	if specific := trustRecommendations(role, trustStatements); len(specific) > 0 {
+		kept := profile.Recommendations[:0]
+		for _, r := range profile.Recommendations {
+			if r.ID != "review-trust" { // the specific review names the account and the missing guard
+				kept = append(kept, r)
+			}
+		}
+		profile.Recommendations = append(kept, specific...)
 	}
 	return profile
 }
@@ -447,7 +465,9 @@ func internalRecommendations(role models.AssetNode, labels, candidates []string,
 		Candidates:      candidates,
 		BoundaryMissing: boundaryUnobserved(role),
 		OrgMissing:      strProp(role, "scp_status") == "missing" || strProp(role, "scp_status") == "",
-		SessionMissing:  strProp(role, "session_policy_status") == "missing" || strProp(role, "session_policy_status") == "",
+		// Credentials taken from a workload carry no session policy, so a missing one is not a gap for such a role.
+		SessionMissing:  (strProp(role, "session_policy_status") == "missing" || strProp(role, "session_policy_status") == "") && len(workloads) == 0,
+		Idle:            IsIdleAfter(schema.IdentityListItem{LastUsedStatus: strProp(role, "role_last_used_status"), DaysSinceUsed: daysSinceUsed(role)}, DefaultIdleDays),
 		LastUsed:        strProp(role, "role_last_used"),
 		WorkloadCount:   len(workloads),
 		UnresolvedRoles: unresolved,

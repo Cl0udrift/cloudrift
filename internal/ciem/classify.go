@@ -50,6 +50,8 @@ func ClassifyRole(role models.AssetNode, rels []models.Relationship, assets []mo
 		// Same-account principals get no TRUSTS edge, so read them from the document itself.
 		if onlySameAccountPrincipals(doc, role.AccountID) {
 			labels[ClassSameAccount] = struct{}{}
+		} else if onlyServicePrincipals(doc) {
+			labels[ClassAWSServiceRole] = struct{}{}
 		} else {
 			labels[ClassUnresolved] = struct{}{}
 		}
@@ -181,4 +183,10 @@ func onlySameAccountPrincipals(doc, accountID string) bool {
 		}
 	}
 	return true
+}
+
+// onlyServicePrincipals is true when the trust document names AWS services (such as ec2.amazonaws.com) and no
+// account, federated or wildcard principal. Such a role is assumed by a service, not by a person or another account.
+func onlyServicePrincipals(doc string) bool {
+	return strings.Contains(doc, `"Service"`) && !strings.Contains(doc, `"AWS"`) && !strings.Contains(doc, `"Federated"`) && !strings.Contains(doc, `"*"`)
 }

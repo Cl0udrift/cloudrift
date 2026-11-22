@@ -70,3 +70,21 @@ func TestObservedEdgesMergeRegions(t *testing.T) {
 		t.Fatalf("%+v", rels)
 	}
 }
+
+func TestParseAssumeEventsKeepsDistinctSourceIPs(t *testing.T) {
+	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	role := `"requestParameters":{"roleArn":"arn:aws:iam::111111111111:role/Target"}`
+	user := `"userIdentity":{"type":"IAMUser","arn":"arn:aws:iam::111111111111:user/chris"}`
+	got := ParseAssumeEvents([]cttypes.Event{
+		ev(at, `{`+user+`,"sourceIPAddress":"203.0.113.7",`+role+`}`),
+		ev(at, `{`+user+`,"sourceIPAddress":"203.0.113.7",`+role+`}`),
+		ev(at, `{`+user+`,"sourceIPAddress":"198.51.100.9",`+role+`}`),
+	})
+	if len(got) != 1 || len(got[0].SourceIPs) != 2 || got[0].Count != 3 {
+		t.Fatalf("want one caller, 3 calls, 2 distinct addresses: %+v", got)
+	}
+	rels := ObservedAssumptionEdges(got, 30, at)
+	if ips, _ := rels[0].Properties["source_ips"].([]string); len(ips) != 2 {
+		t.Fatalf("the edge must carry the addresses: %+v", rels[0].Properties)
+	}
+}

@@ -79,8 +79,10 @@ func exposureIndex(assets []models.AssetNode, rels []models.Relationship) map[st
 				out[a.ARN] = Exposure{Internet: true, Kind: "internet", Detail: "Has a public IP and a security group that allows " + strings.Join(ports, ", ") + " from anywhere."}
 				continue
 			}
-			if ip != "" {
-				out[a.ARN] = Exposure{Kind: "restricted", Detail: "Has a public IP, but no security group rule allows traffic from anywhere."}
+			if eps := EntryPoints(a.ARN, assets, rels); len(eps) > 0 {
+				out[a.ARN] = Exposure{Kind: "restricted", Detail: EntrySummary(eps) + " " + eps[0].Text + "."}
+			} else if ip != "" {
+				out[a.ARN] = Exposure{Kind: "restricted", Detail: "Has a public IP, but no security group rule lets traffic in from the internet."}
 			}
 			for _, lb := range routedBy[a.ARN] {
 				if e := out[lb]; e.Internet {
@@ -146,3 +148,14 @@ func tagsOf(asset models.AssetNode) map[string]string {
 	}
 	return nil
 }
+
+// Exposures is exposureIndex for callers outside the package.
+func Exposures(assets []models.AssetNode, rels []models.Relationship) map[string]Exposure {
+	return exposureIndex(assets, rels)
+}
+
+// OwnerOf is ownerOf for callers outside the package.
+func OwnerOf(asset models.AssetNode, keys []string) string { return ownerOf(asset, keys) }
+
+// IsAWSManaged reports whether AWS creates and owns the asset.
+func IsAWSManaged(asset models.AssetNode) bool { return isAWSOwned(asset) }

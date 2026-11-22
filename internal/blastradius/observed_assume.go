@@ -52,6 +52,16 @@ func ObservedAssumers(role models.AssetNode, assets []models.AssetNode, rels []m
 		if f, ok := r.Properties["window_days"].(float64); ok {
 			c.WindowDays = int(f)
 		}
+		switch ips := r.Properties["source_ips"].(type) {
+		case []string:
+			c.SourceIPs = ips
+		case []any: // read back from JSON
+			for _, v := range ips {
+				if ip, ok := v.(string); ok {
+					c.SourceIPs = append(c.SourceIPs, ip)
+				}
+			}
+		}
 		if a, ok := inScan[identityKey(r.SourceARN)]; ok {
 			c.InScan, c.Name = true, a.Name
 		} else {

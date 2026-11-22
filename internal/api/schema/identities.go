@@ -27,11 +27,98 @@ type IdentityListItem struct {
 	UnknownEvidenceCount int `json:"unknown_evidence_count"`
 	// ControlsMissing names the authorization controls (permissions_boundary, scp, rcp) whose
 	// evidence was not collected for this role. Without them an allow cannot be validated.
-	ControlsMissing      []string          `json:"controls_missing,omitempty"`
-	WorkloadCount        int               `json:"workload_count"`
+	ControlsMissing []string `json:"controls_missing,omitempty"`
+	WorkloadCount   int      `json:"workload_count"`
+	// InlinePolicyCount is the number of inline policies on the role: access written for this role alone.
+	InlinePolicyCount    int               `json:"inline_policy_count"`
 	EvidenceCompleteness string            `json:"evidence_completeness"`
 	CollectionStatus     string            `json:"collection_status"`
 	Tags                 map[string]string `json:"tags,omitempty"`
+	IdentityContext
+}
+
+// IdentityContext is what the rest of the scan knows about a role: its findings, who owns it, and whether a workload
+// running as it can be reached from the internet. It is derived from stored findings and collected facts.
+type IdentityContext struct {
+	// FindingCount counts findings above Info on the role itself; MaxSeverity is the worst of them.
+	FindingCount   int    `json:"finding_count"`
+	MaxSeverity    string `json:"max_severity,omitempty"`
+	Owner          string `json:"owner,omitempty"`
+	InternetFacing bool   `json:"internet_facing"`
+	// ExposureState is reachable, not_reachable, not_checked or no_workload. not_checked means the scan did not collect
+	// what is needed to say, which is not the same as not reachable.
+	ExposureState  string `json:"exposure_state,omitempty"`
+	ExposureDetail string `json:"exposure_detail,omitempty"`
+	// AWSManaged marks service-linked and other roles AWS creates and owns; a customer cannot change them.
+	AWSManaged bool `json:"aws_managed"`
+}
+
+// RoleCapability is what the role's policies allow for one service, as written. Level is the widest of full (every
+// action), write, read; it is not evaluated access.
+type RoleCapability struct {
+	Service     string   `json:"service"`
+	Level       string   `json:"level"`
+	Scope       string   `json:"scope"`
+	Policies    []string `json:"policies"`
+	Actions     []string `json:"actions,omitempty"`
+	Conditional bool     `json:"conditional,omitempty"`
+	// Limited is true when a permissions boundary narrowed this row (a lower level, fewer resources).
+	Limited bool `json:"limited_by_boundary,omitempty"`
+}
+
+// EntryPoint is one way traffic can reach a workload from outside its network.
+type EntryPoint struct {
+	Text    string   `json:"text"`
+	Ports   string   `json:"ports"`
+	Sources []string `json:"sources"`
+	// World is true when the source is every address (0.0.0.0/0 or ::/0).
+	World bool   `json:"world"`
+	Via   string `json:"via"`
+}
+
+// WorkloadCard is what the scan knows about a workload that runs as a role.
+type WorkloadCard struct {
+	ARN      string `json:"arn"`
+	Type     string `json:"type"`
+	Name     string `json:"name,omitempty"`
+	State    string `json:"state,omitempty"`
+	PublicIP string `json:"public_ip,omitempty"`
+	Profile  string `json:"profile,omitempty"`
+}
+
+// ReachItem is one resource a service-wide grant covers. Hint says why it deserves attention, from its name.
+type ReachItem struct {
+	Name string `json:"name"`
+	Hint string `json:"hint,omitempty"`
+}
+
+// ReachCount is how many collected resources of one kind a role's grant covers.
+type ReachCount struct {
+	Service string `json:"service"`
+	Level   string `json:"level"`
+	Noun    string `json:"noun"`
+	Count   int    `json:"count"`
+	// Items lists up to six of them by name.
+	Items []ReachItem `json:"items,omitempty"`
+}
+
+// TrustStatement is one Allow statement of the role's trust policy in plain terms.
+type TrustStatement struct {
+	// Kind is account, service, federated, wildcard or other.
+	Kind       string   `json:"kind"`
+	Principals []string `json:"principals"`
+	// Account is the account id for an account principal, and Outside says it is not the role's own account.
+	Account string   `json:"account,omitempty"`
+	Outside bool     `json:"outside"`
+	Guards  []string `json:"guards,omitempty"`
+	Summary string   `json:"summary"`
+}
+
+// IdentityFindingRef is one finding on a role, enough to link to it.
+type IdentityFindingRef struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Severity string `json:"severity"`
 }
 
 // IdentityListResponse is one page of IAM roles stored in a scan.
@@ -136,6 +223,25 @@ type PermissionCandidate struct {
 // RoleEntitlementProfile is the shared role view for inventory, findings, and impact.
 // Impact is omitted until the caller asks for the hypothetical compromise evaluation.
 type RoleEntitlementProfile struct {
+	IdentityContext
+	CreatedAt    string           `json:"created_at,omitempty"`
+	OwnerTagKeys []string         `json:"owner_tag_keys,omitempty"`
+	Capabilities []RoleCapability `json:"capabilities,omitempty"`
+	// CapabilityNote says what the capability summary could not read.
+	CapabilityNote string `json:"capability_note,omitempty"`
+	// Reach counts the collected resources a service-wide grant covers, such as the S3 buckets of the account when the
+	// role may use s3 on every resource. It follows the policy text only.
+	Reach []ReachCount `json:"reach,omitempty"`
+	// EntryPoints are the ways in from the internet to the workloads that run as the role, as plain sentences.
+	EntryPoints []EntryPoint `json:"entry_points,omitempty"`
+	// RunsOn describes each workload that runs as the role.
+	RunsOn []WorkloadCard `json:"runs_on,omitempty"`
+	// ControlsComplete is true when the permissions boundary, SCPs and RCPs are each confirmed absent or were read, so the
+	// role's policies are everything that limits or grants. ControlsNote says so in words.
+	ControlsComplete      bool                  `json:"controls_complete"`
+	ControlsNote          string                `json:"controls_note,omitempty"`
+	TrustStatements       []TrustStatement      `json:"trust_statements,omitempty"`
+	Findings              []IdentityFindingRef  `json:"findings,omitempty"`
 	ScanID                string                `json:"scan_id"`
 	RoleARN               string                `json:"role_arn"`
 	AccountID             string                `json:"account_id"`
@@ -218,6 +324,24 @@ type PrincipalListItem struct {
 	MFA                  bool     `json:"mfa_active"`
 	ActiveKeys           int      `json:"active_keys"`
 	CredentialFindings   int      `json:"credential_findings"`
+	// Inline lists the inline policies that apply, as "name" or "name (from group G)". Inline policies belong to one
+	// identity only, so they are the extra access given outside shared policies.
+	Inline []string `json:"inline,omitempty"`
+	// KeyIssues counts only the access key findings; CredentialFindings also counts console without MFA.
+	KeyIssues int `json:"key_issues"`
+	// Usage says how the user signs in: person (console), programmatic (keys only), no_credentials, or unknown when the
+	// credential report did not cover the user. Empty for a group.
+	Usage string `json:"usage,omitempty"`
+	// LastActivity is the latest console sign-in or access key use known. ActivityAsOf says how fresh it is: the time IAM
+	// was asked (ActivityLive) or, when it was not, the time the credential report was generated.
+	LastActivity string `json:"last_activity,omitempty"`
+	ActivityAsOf string `json:"activity_as_of,omitempty"`
+	ActivityLive bool   `json:"activity_live,omitempty"`
+	// Members counts the users in a group.
+	Members      int    `json:"members,omitempty"`
+	FindingCount int    `json:"finding_count"`
+	MaxSeverity  string `json:"max_severity,omitempty"`
+	Owner        string `json:"owner,omitempty"`
 	// Tags are the IAM tags on the user, which is where teams record an owner.
 	Tags map[string]string `json:"tags,omitempty"`
 }
@@ -274,6 +398,26 @@ type PrincipalPoliciesResponse struct {
 	Tags        map[string]string  `json:"tags,omitempty"`
 	// CredentialNote says why a user has no credential data when the cause is a credential report older than the user.
 	CredentialNote string `json:"credential_note,omitempty"`
+	// Capabilities is what the applying policies allow per service, as written; Reach counts the collected resources a
+	// service-wide grant covers. Denies, boundaries and SCPs are not applied.
+	Capabilities   []RoleCapability `json:"capabilities,omitempty"`
+	CapabilityNote string           `json:"capability_note,omitempty"`
+	Reach          []ReachCount     `json:"reach,omitempty"`
+	// CanReach are the users and roles this principal can move to, and Escalation is the search verdict. Users only.
+	CanReach   []PrincipalReach `json:"can_reach,omitempty"`
+	Escalation string           `json:"escalation,omitempty"`
+	// Members are the user names in a group.
+	Members      []string             `json:"members,omitempty"`
+	Findings     []IdentityFindingRef `json:"findings,omitempty"`
+	Owner        string               `json:"owner,omitempty"`
+	LastActivity string               `json:"last_activity,omitempty"`
+}
+
+// PrincipalReach is one identity a principal can move to, and how.
+type PrincipalReach struct {
+	Name      string `json:"name"`
+	ARN       string `json:"arn"`
+	Technique string `json:"technique"`
 }
 
 // KeySummary is one access key slot from the credential report.
@@ -284,6 +428,8 @@ type KeySummary struct {
 	LastUsed    string `json:"last_used,omitempty"`
 	LastService string `json:"last_service,omitempty"`
 	AgeDays     *int   `json:"age_days,omitempty"`
+	// LastUsedSource is "live" when IAM was asked at scan time, and empty when the value is the credential report's.
+	LastUsedSource string `json:"last_used_source,omitempty"`
 }
 
 // CredentialSummary is console access, MFA and access keys for one user.
@@ -293,6 +439,13 @@ type CredentialSummary struct {
 	PasswordLastUsed string       `json:"password_last_used,omitempty"`
 	Keys             []KeySummary `json:"keys"`
 	Findings         []string     `json:"findings"`
+	// KeyIssues counts the findings that are about access keys (old, never used, unused), apart from console without MFA.
+	KeyIssues int `json:"key_issues"`
+	// ReportGeneratedAt is when AWS generated the credential report. Values taken from it are as of that time and can
+	// miss use in the hours after, since AWS caches the report for up to four hours.
+	ReportGeneratedAt string `json:"report_generated_at,omitempty"`
+	// LiveCheckedAt is when last-used dates were refreshed from IAM at scan time; empty when they were not.
+	LiveCheckedAt string `json:"live_checked_at,omitempty"`
 }
 
 // RoleAssumer is a collected user or role evaluated against one role's trust policy and
@@ -331,6 +484,8 @@ type ObservedCaller struct {
 	FirstSeen  string `json:"first_seen"`
 	LastSeen   string `json:"last_seen"`
 	WindowDays int    `json:"window_days"`
+	// SourceIPs are the distinct addresses the calls came from, capped. Empty for scans collected before this was kept.
+	SourceIPs []string `json:"source_ips,omitempty"`
 }
 
 // AccessPath is how a caller gets an allow: through itself, a group, an attached or inline policy, or the

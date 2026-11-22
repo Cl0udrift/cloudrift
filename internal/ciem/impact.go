@@ -38,12 +38,15 @@ func Impact(ctx context.Context, scanID string, role models.AssetNode, assets []
 		EntryFeasibility: "hypothetical_session",
 		Assumption:       "A usable session for " + role.ARN + " is compromised. This is independent of whether any caller can obtain that session.",
 	}
+	// Credentials taken from an instance or function carry no session policy, so a role that a workload runs as is
+	// evaluated that way. Without a workload the session policy stays unknown.
+	fromWorkload := len(WorkloadsForRole(role.ARN, assets, rels)) > 0
 	blast := blastradius.AnalyzePermissionBlast(blastradius.PermissionBlastRequest{
-		ScanID: scanID, RoleARN: role.ARN, AssumedCompromise: true, SessionSource: "assumed",
+		ScanID: scanID, RoleARN: role.ARN, AssumedCompromise: true, SessionSource: "assumed", AssumeNoSessionPolicy: fromWorkload,
 		Assets: assets, Relationships: rels,
 	})
 	attack := blastradius.AnalyzeIdentityAttack(ctx, blastradius.IdentityAttackRequest{
-		ScanID: scanID, InitialPrincipal: role.ARN, SessionSource: "assumed",
+		ScanID: scanID, InitialPrincipal: role.ARN, SessionSource: "assumed", AssumeNoSessionPolicy: fromWorkload,
 		Assets: assets, Relationships: rels,
 	})
 	out.BroadPrivilegeCandidates = blast.BroadPrivilegeCandidates

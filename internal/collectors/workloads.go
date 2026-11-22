@@ -1,11 +1,11 @@
 package collectors
 
 import (
-	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
-	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"sort"
 	"strings"
 	"sync"

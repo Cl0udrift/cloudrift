@@ -59,7 +59,7 @@ func Build(cfg *config.Config, scanID string, assets []models.AssetNode) Report 
 		ScanID: scanID, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Readiness: readiness(), Techniques: blastradius.AttackTechniques(), Totals: map[string]int{},
 		Note: "Static text comes from the registry in internal/coverage. Action and technique lists are read from the code. Live state comes from the config and the selected scan.",
 	}
-	toggles := map[string]string{"iam-inventory": "scan.iam_policy_inventory", "resource-policies": "scan.resource_policies", "service-access": "scan.service_last_accessed"}
+	toggles := map[string]string{"iam-inventory": "scan.iam_policy_inventory", "resource-policies": "scan.resource_policies", "service-access": "scan.service_last_accessed", "network-resources": "scan.network_resources"}
 	statuses, counts := collectorStatuses(assets), assetCounts(assets)
 	for _, m := range Modules() {
 		live := &Live{State: "unknown"}

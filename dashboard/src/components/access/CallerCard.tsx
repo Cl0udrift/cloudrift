@@ -76,8 +76,9 @@ export function ObservedCallersList({ callers, historyRead }: { callers: Observe
         <ul className="mt-2 divide-y divide-slate-200 dark:divide-slate-800">
           {callers.map((c) => (
             <li key={c.caller} className="py-2 text-sm">
-              <span className="break-all font-medium">{c.name}</span> <span className="text-xs text-slate-500">{c.in_scan ? c.caller_type.replace("_", " ") : `${c.caller_type.replace("_", " ")}, not in this scan`}</span>
+              <span className="break-all font-medium">{c.name}</span> <span className="text-xs text-slate-500">{c.in_scan ? c.caller_type.replace("_", " ") : c.caller_type === "aws_service" ? "AWS service" : `${c.caller_type.replace("_", " ")}, not in this scan`}</span>
               <p className="text-xs text-slate-500">{c.count} {c.count === 1 ? "time" : "times"}, {c.first_seen.slice(0, 10)} to {c.last_seen.slice(0, 10)} (window {c.window_days} days)</p>
+              {c.source_ips && c.source_ips.length > 0 ? <p className="text-xs text-slate-500">From {c.source_ips.join(", ")}</p> : null}
             </li>
           ))}
         </ul>

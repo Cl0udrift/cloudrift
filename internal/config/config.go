@@ -51,6 +51,12 @@ type Config struct {
 		ServiceResources bool `toml:"service_resources"`
 		// NetworkResources collects security groups, load balancers and RDS instances with how they reach the instances.
 		NetworkResources bool `toml:"network_resources"`
+		// LiveKeyLastUsed asks IAM for each active access key's last use, and each console user's last sign-in, at scan time.
+		// The credential report that otherwise supplies them is cached by AWS for up to four hours, so it can miss use from
+		// the last few hours. Default true; it costs one call per user and one per active key, bounded by
+		// LiveKeyLastUsedMaxCalls (default 400).
+		LiveKeyLastUsed         bool `toml:"live_key_last_used"`
+		LiveKeyLastUsedMaxCalls int  `toml:"live_key_last_used_max_calls"`
 		// IdentityCenter collects IAM Identity Center (SSO) permission sets, account assignments, users and groups, so the
 		// Identity Center page can show who reaches which account with which permissions. Opt-in, default false. It works
 		// only with the organization management account or the delegated administrator, and needs sso and identitystore
@@ -147,6 +153,8 @@ func Default() *Config {
 	c.Scan.IAMPolicyInventory = true
 	c.Scan.ServiceResources = true
 	c.Scan.NetworkResources = true
+	c.Scan.LiveKeyLastUsed = true
+	c.Scan.LiveKeyLastUsedMaxCalls = 400
 	c.Inventory.OwnerTagKeys = []string{"owner", "team"}
 	c.Scan.EscalationSearchSeconds = 120
 	c.Cost.Currency = "USD"

@@ -85,6 +85,8 @@ type InternalReviewInput struct {
 	OrgMissing      bool
 	SessionMissing  bool
 	LastUsed        string
+	// Idle is true when IAM reports no use in its tracking window, or none for 90 days.
+	Idle            bool
 	WorkloadCount   int
 	UnresolvedRoles int
 	LambdaCount     int
@@ -111,6 +113,11 @@ func InternalRoleRecommendations(in InternalReviewInput) []schema.CIEMRecommenda
 		out = append(out, review("review-wildcard-admin", "Review excessive wildcard IAM permissions", in,
 			"Policy text grants an administrative wildcard.", "Removing the wildcard can remove access the workload still uses. This is not a generated least-privilege policy."))
 	}
+	if has("broad_s3_access") {
+		out = append(out, review("review-broad-s3", "Replace S3 access on every bucket with access to the buckets this workload uses", in,
+			"Policy text allows s3:* on all resources. Anyone who holds this role's credentials can read, change and delete every bucket in the account, including ones this workload never touches.",
+			"A scoped policy that misses a bucket the workload still uses makes it fail with access denied. List the buckets from the application's configuration or from S3 access logs before narrowing."))
+	}
 	if has("broad_assume_role") {
 		out = append(out, review("review-broad-assume", "Investigate broad role-assumption scope", in,
 			"Policy text allows sts:AssumeRole on a broad resource.", "Narrowing AssumeRole can break a reporting or deployment workflow that assumes another role."))
@@ -131,9 +138,9 @@ func InternalRoleRecommendations(in InternalReviewInput) []schema.CIEMRecommenda
 		out = append(out, review("review-org-evidence", "Investigate missing Organizations authorization evidence", in,
 			"SCP evidence is missing. Missing evidence is not full access and it is not a deny.", "Collecting organization policies does not change the role until an administrator edits a policy."))
 	}
-	if in.LastUsed != "" {
-		out = append(out, review("review-activity", "Review role activity without treating it as unused permission", in,
-			"Role last-used metadata was stored. Absence of recent use is not proof a permission is unused.", "Deleting a role from last-used metadata can break an infrequent caller."))
+	if in.Idle {
+		out = append(out, review("review-activity", "This role has not been used recently: confirm it is still needed", in,
+			"IAM reports no recent use of the role. That does not prove it is unused (a rarely run job may still need it), so check with its owner before removing anything.", "Deleting a role on last-used data alone can break a job that runs rarely."))
 	}
 	if in.WorkloadCount > 1 && has("administrative_wildcard") {
 		out = append(out, review("review-shared-privileged-role", "Investigate a highly privileged role used by several workloads", in,
@@ -194,7 +201,7 @@ func review(id, title string, in InternalReviewInput, issue, risk string) schema
 		ChangeTarget: in.RoleARN, Affected: in.RoleARN,
 		ExpectedReduction: "A narrower grant reduces what a compromised session of this role could do, after the owner confirms the workload.",
 		OperationalRisk:   risk,
-		Verification:      "Rescan the role and review the hypothetical impact. Do not execute a change from this recommendation.",
+		Verification:      "After the change, scan again. This suggestion should no longer appear.",
 	}
 }
 

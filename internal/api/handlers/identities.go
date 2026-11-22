@@ -16,13 +16,14 @@ import (
 	"github.com/Zero0x00/cloudrift/internal/blastradius"
 	"github.com/Zero0x00/cloudrift/internal/ciem"
 	"github.com/Zero0x00/cloudrift/internal/iamauth"
+	"github.com/Zero0x00/cloudrift/internal/inventory"
 	"github.com/Zero0x00/cloudrift/internal/models"
 	"github.com/Zero0x00/cloudrift/internal/scans"
 )
 
-func ListIdentities(outputDir string) http.HandlerFunc {
+func ListIdentities(outputDir string, configPath ...string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		scanID, _, assets, rels, findings, ok := loadInventoryScan(w, r, outputDir)
 		if !ok {
 			return
 		}
@@ -46,6 +47,7 @@ func ListIdentities(outputDir string) http.HandlerFunc {
 			Idle:         r.URL.Query().Get("idle") == "true",
 			IdleDays:     idleDaysParam(r.URL.Query().Get("idle_days")),
 		})
+		items = enrichAndFilterRoles(items, assets, rels, findings, ownerKeys(configPath), r)
 		total := len(items)
 		totalPages := 0
 		if total > 0 {
@@ -72,23 +74,25 @@ func ListIdentities(outputDir string) http.HandlerFunc {
 }
 
 // ListPrincipals returns the IAM users and groups stored in the scan.
-func ListPrincipals(outputDir string) http.HandlerFunc {
+func ListPrincipals(outputDir string, configPath ...string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		scanID, _, assets, rels, findings, ok := loadInventoryScan(w, r, outputDir)
 		if !ok {
 			return
 		}
+		items := ciem.ListPrincipals(scanID, assets, rels, time.Now())
+		enrichPrincipals(items, assets, findings, ownerKeys(configPath))
 		writeJSON(w, http.StatusOK, schema.PrincipalListResponse{
-			ScanID: scanID, Items: ciem.ListPrincipals(scanID, assets, rels, time.Now()),
+			ScanID: scanID, Items: items,
 			Note: "Users and groups come from iam:GetAccountAuthorizationDetails. An empty list can also mean that call was denied; check the iam_users_groups collection status.",
 		})
 	}
 }
 
 // GetPrincipalPolicies returns every policy applying to one user or group and where it came from.
-func GetPrincipalPolicies(outputDir string) http.HandlerFunc {
+func GetPrincipalPolicies(outputDir string, configPath ...string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		scanID, _, assets, rels, findings, ok := loadInventoryScan(w, r, outputDir)
 		if !ok {
 			return
 		}
@@ -97,7 +101,13 @@ func GetPrincipalPolicies(outputDir string) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "principal_not_found", "iam user or group was not collected in this scan", nil)
 			return
 		}
-		writeJSON(w, http.StatusOK, ciem.PrincipalPolicies(scanID, principal, ciem.ScanIndex(assets), rels, time.Now()))
+		resp := ciem.PrincipalPolicies(scanID, principal, ciem.ScanIndex(assets), rels, time.Now())
+		resp.Owner = inventory.OwnerOf(principal, ownerKeys(configPath))
+		_, resp.Findings = principalFindings(principal.ARN, findings)
+		if principal.AssetType == models.AssetIAMUser {
+			resp.CanReach, resp.Escalation = userReach(r.Context(), scanID, principal, assets, rels)
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -330,9 +340,9 @@ func idleDaysParam(raw string) int {
 	return n
 }
 
-func GetIdentityProfile(outputDir string) http.HandlerFunc {
+func GetIdentityProfile(outputDir string, configPath ...string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		scanID, _, assets, rels, findings, ok := loadInventoryScan(w, r, outputDir)
 		if !ok {
 			return
 		}
@@ -342,6 +352,9 @@ func GetIdentityProfile(outputDir string) http.HandlerFunc {
 			return
 		}
 		profile := ciem.Profile(scanID, role, assets, rels)
+		profile.OwnerTagKeys = ownerKeys(configPath)
+		_, _, profile.EntryPoints = roleExposure(ciem.WorkloadsForRole(role.ARN, assets, rels), assets, rels, hasSecurityGroups(assets))
+		profile.IdentityContext, profile.Findings = roleContexts(assets, rels, findings, profile.OwnerTagKeys)(role)
 		if truthy(r.URL.Query().Get("impact")) {
 			impact := ciem.Impact(r.Context(), scanID, role, assets, rels)
 			if workload := strings.TrimSpace(r.URL.Query().Get("workload_arn")); workload != "" {
@@ -478,4 +491,47 @@ func truthy(value string) bool {
 	default:
 		return false
 	}
+}
+
+// enrichAndFilterRoles adds findings, owner and exposure to each role, applies the filters that depend on them, and
+// orders the list for review (riskiest first).
+func enrichAndFilterRoles(items []schema.IdentityListItem, assets []models.AssetNode, rels []models.Relationship, findings []models.Finding, keys []string, r *http.Request) []schema.IdentityListItem {
+	byARN := map[string]models.AssetNode{}
+	for _, a := range assets {
+		byARN[a.ARN] = a
+	}
+	context := roleContexts(assets, rels, findings, keys)
+	q := r.URL.Query()
+	days := idleDaysParam(q.Get("idle_days"))
+	if days <= 0 {
+		days = ciem.DefaultIdleDays
+	}
+	out := items[:0]
+	for _, item := range items {
+		item.IdentityContext, _ = context(byARN[item.RoleARN])
+		switch {
+		case q.Get("hide_aws_managed") == "true" && item.AWSManaged,
+			q.Get("findings") == "true" && item.FindingCount == 0,
+			q.Get("internet") == "true" && !item.InternetFacing,
+			q.Get("powerful_idle") == "true" && !powerfulIdle(item, days):
+			continue
+		}
+		out = append(out, item)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if a, b := identityRisk(out[i]), identityRisk(out[j]); a != b {
+			return a > b
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func hasSecurityGroups(assets []models.AssetNode) bool {
+	for _, a := range assets {
+		if a.AssetType == models.AssetSecurityGroup {
+			return true
+		}
+	}
+	return false
 }
