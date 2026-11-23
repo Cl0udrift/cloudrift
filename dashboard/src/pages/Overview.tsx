@@ -165,6 +165,7 @@ function ExecutiveLayout({
         criticalSparkline={criticalSeries.length >= 2 ? criticalSeries : undefined}
         riskSparkline={riskSeries.length >= 2 ? riskSeries : undefined}
         onOpenCritical={() => goToFindings({ severity: "critical", page: "1" })}
+        onOpenHigh={() => goToFindings({ severity: "high", page: "1" })}
         onOpenRiskCost={() => goToFindings({ page: "1" })}
         onOpenExternal={() => goToTrust({ page: "1" })}
         onOpenReclaimable={() => goToFindings({ claimability: "reclaimable", page: "1" })}
@@ -172,8 +173,8 @@ function ExecutiveLayout({
 
       <ScanRiskTrendChart scans={scans} selectedScanId={selectedScanId} enabled={trendEnabled} />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <DirectVsRiskCostSplit summary={summary} />
+      <div className={`grid gap-6 ${summary.total_monthly_direct_cost_usd + summary.total_monthly_risk_cost_usd > 0 ? "lg:grid-cols-2" : ""}`}>
+        {summary.total_monthly_direct_cost_usd + summary.total_monthly_risk_cost_usd > 0 ? <DirectVsRiskCostSplit summary={summary} /> : null}
         <SeverityDistribution summary={summary} onSeverityClick={(severity) => goToFindings({ severity, page: "1" })} />
       </div>
 

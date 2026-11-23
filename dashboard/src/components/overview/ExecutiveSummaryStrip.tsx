@@ -87,6 +87,7 @@ function ExecCard({
 export function ExecutiveSummaryStrip({
   summary,
   onOpenCritical,
+  onOpenHigh,
   onOpenRiskCost,
   onOpenExternal,
   onOpenReclaimable,
@@ -97,6 +98,7 @@ export function ExecutiveSummaryStrip({
 }: {
   summary: ScanSummaryResponse;
   onOpenCritical: () => void;
+  onOpenHigh: () => void;
   onOpenRiskCost: () => void;
   onOpenExternal: () => void;
   onOpenReclaimable: () => void;
@@ -110,7 +112,7 @@ export function ExecutiveSummaryStrip({
       <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
         Executive summary
       </h2>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(15rem,1fr))]">
         <ExecCard
           label="Critical findings"
           value={formatCount(summary.critical_count)}
@@ -119,15 +121,20 @@ export function ExecutiveSummaryStrip({
           emphasis="rose"
           onClick={onOpenCritical}
         />
-        <ExecCard
-          label="Total risk cost / mo"
-          value={formatUsd(summary.total_monthly_risk_cost_usd)}
-          delta={riskDelta}
-          sparkline={riskSparkline}
-          deltaKind="usd"
-          emphasis="neutral"
-          onClick={onOpenRiskCost}
-        />
+        <ExecCard label="High findings" value={formatCount(summary.high_count)} delta={undefined} emphasis="neutral" onClick={onOpenHigh} />
+        {/* Dollar cost exists only for orphaned-edge findings, and at list price it is usually $0. A $0.00 tile on a scan of
+            identity findings reads as "no risk", so it is shown only when there is a figure. */}
+        {summary.total_monthly_risk_cost_usd > 0 ? (
+          <ExecCard
+            label="Modeled risk cost / mo (estimate)"
+            value={formatUsd(summary.total_monthly_risk_cost_usd)}
+            delta={riskDelta}
+            sparkline={riskSparkline}
+            deltaKind="usd"
+            emphasis="neutral"
+            onClick={onOpenRiskCost}
+          />
+        ) : null}
         <ExecCard
           label="External access"
           value={formatCount(summary.external_access_count)}
@@ -135,13 +142,15 @@ export function ExecutiveSummaryStrip({
           emphasis="violet"
           onClick={onOpenExternal}
         />
-        <ExecCard
-          label="Reclaimable assets"
-          value={formatCount(summary.reclaimable_count)}
-          delta={undefined}
-          emphasis="emerald"
-          onClick={onOpenReclaimable}
-        />
+        {summary.reclaimable_count > 0 ? (
+          <ExecCard
+            label="Reclaimable assets"
+            value={formatCount(summary.reclaimable_count)}
+            delta={undefined}
+            emphasis="emerald"
+            onClick={onOpenReclaimable}
+          />
+        ) : null}
       </div>
     </div>
   );

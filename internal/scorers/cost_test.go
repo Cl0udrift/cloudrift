@@ -14,30 +14,21 @@ import (
 	"github.com/Zero0x00/cloudrift/internal/models"
 )
 
-func TestScoreCostMultipliers(t *testing.T) {
-	node := models.AssetNode{AssetType: models.AssetCloudFrontDist}
-	f := &models.Finding{Claimability: models.ClaimDangling}
-	d, r := ScoreCost(node, f)
-	if d != 35.0 || r != 105.0 {
-		t.Fatalf("unexpected costs direct=%v risk=%v", d, r)
+func TestScoreCostIsZeroAtListPriceForEveryKind(t *testing.T) {
+	for _, kind := range []models.AssetType{models.AssetDNSRecord, models.AssetS3Bucket, models.AssetCloudFrontDist, models.AssetACMCert} {
+		d, r := ScoreCost(models.AssetNode{AssetType: kind}, &models.Finding{Claimability: models.ClaimReclaimable})
+		if d != 0 || r != 0 {
+			t.Fatalf("%s has no standing per-asset fee at AWS list price, so its modeled cost is 0: %v %v", kind, d, r)
+		}
 	}
 }
 
-func TestScoreCost_ReclaimableMultiplier(t *testing.T) {
-	node := models.AssetNode{AssetType: models.AssetDNSRecord}
-	f := &models.Finding{Claimability: models.ClaimReclaimable}
-	d, r := ScoreCost(node, f)
-	if d != 0.50 || r != 2.50 {
-		t.Fatalf("expected 0.50 and 2.50, got %v and %v", d, r)
+func TestRiskFactorsScaleOnlyOrphanedEdgeFindings(t *testing.T) {
+	if multiplierForFinding(models.ModuleOrphanedEdge, models.ClaimReclaimable) != 5 || multiplierForFinding(models.ModuleOrphanedEdge, models.ClaimDangling) != 3 || multiplierForFinding(models.ModuleOrphanedEdge, models.ClaimBroken) != 1 {
+		t.Fatal("orphaned-edge factors changed")
 	}
-}
-
-func TestScoreCost_BrokenMultiplierOne(t *testing.T) {
-	node := models.AssetNode{AssetType: models.AssetS3Bucket}
-	f := &models.Finding{Claimability: models.ClaimBroken}
-	d, r := ScoreCost(node, f)
-	if d != 0.23 || r != 0.23 {
-		t.Fatalf("expected same direct and risk cost, got %v and %v", d, r)
+	if multiplierForFinding(models.ModuleExternalAccess, models.ClaimReclaimable) != 1 {
+		t.Fatal("other modules are not scaled")
 	}
 }
 
@@ -105,11 +96,11 @@ func TestEnrichCost_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out[0].MonthlyDirectCost != 20.50 {
-		t.Fatalf("expected direct cost 20.50, got %v", out[0].MonthlyDirectCost)
+	if out[0].MonthlyDirectCost != 0 || out[0].MonthlyRiskCost != 0 {
+		t.Fatalf("service spend must not become the finding's cost: %v %v", out[0].MonthlyDirectCost, out[0].MonthlyRiskCost)
 	}
-	if out[0].MonthlyRiskCost != 61.5 {
-		t.Fatalf("expected risk cost 61.5, got %v", out[0].MonthlyRiskCost)
+	if out[0].Evidence["account_service_spend_usd_30d"] != 20.50 || out[0].Evidence["account_service_name"] != "Amazon CloudFront" {
+		t.Fatalf("the service's spend is attached as context: %+v", out[0].Evidence)
 	}
 }
 
@@ -192,15 +183,15 @@ func TestEnrichCost_PartialMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out[0].MonthlyDirectCost != 3 || out[0].MonthlyRiskCost != 9 {
-		t.Fatalf("expected updated S3 finding costs, got direct=%v risk=%v", out[0].MonthlyDirectCost, out[0].MonthlyRiskCost)
+	if out[0].MonthlyDirectCost != 0.23 || out[0].MonthlyRiskCost != 0.69 || out[0].Evidence["account_service_spend_usd_30d"] != 3.0 {
+		t.Fatalf("matched finding keeps its cost and gains the service spend as context: %+v", out[0])
 	}
-	if out[1].MonthlyDirectCost != 0.50 || out[1].MonthlyRiskCost != 0.50 {
+	if out[1].MonthlyDirectCost != 0.50 || out[1].MonthlyRiskCost != 0.50 || out[1].Evidence != nil {
 		t.Fatalf("expected unmatched service to remain unchanged")
 	}
 }
 
-func TestEnrichCost_DistributesAcrossMatchingFindings(t *testing.T) {
+func TestEnrichCost_DoesNotSplitTheBillAcrossFindings(t *testing.T) {
 	restore := stubCELoaders(t)
 	defer restore()
 
@@ -245,14 +236,13 @@ func TestEnrichCost_DistributesAcrossMatchingFindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out[0].MonthlyDirectCost != 5 || out[1].MonthlyDirectCost != 5 {
-		t.Fatalf("expected equal 5.00 direct split, got %v and %v", out[0].MonthlyDirectCost, out[1].MonthlyDirectCost)
-	}
-	if out[0].MonthlyRiskCost != 15 {
-		t.Fatalf("expected dangling risk cost 15.00, got %v", out[0].MonthlyRiskCost)
-	}
-	if out[1].MonthlyRiskCost != 25 {
-		t.Fatalf("expected reclaimable risk cost 25.00, got %v", out[1].MonthlyRiskCost)
+	for _, f := range out {
+		if f.MonthlyDirectCost != 0 || f.MonthlyRiskCost != 0 {
+			t.Fatalf("the service bill must not be divided among findings: %+v", f)
+		}
+		if f.Evidence["account_service_spend_usd_30d"] != 10.0 {
+			t.Fatalf("every finding names the same whole-service spend: %+v", f.Evidence)
+		}
 	}
 }
 

@@ -924,7 +924,7 @@ Even security issues have a **cost angle** — you pay for the DNS, certificates
 1. **What exists?** Hostnames, buckets, distributions, roles — tied to accounts.
 2. **Who owns it?** Account IDs, tags, and OU paths route work to the right team.
 3. **Is it claimable?** For edge findings, a claimability verdict says whether a stranger could plausibly take control.
-4. **What is it costing?** Static estimates plus an optional Cost Explorer merge give FinOps-friendly signals.
+4. **What is it costing?** Not a risk measure. At AWS list price an orphaned DNS record, S3 bucket, CloudFront distribution or public ACM certificate has no standing per-asset fee, so their modeled cost is $0. Optionally, Cost Explorer's 30-day spend on the service is attached to a finding as context.
 
 ### Try it in 60 seconds (no AWS)
 
@@ -1632,7 +1632,7 @@ Key sections:
 
 - `[aws]` — org role name, scan mode (auto, organization, account), management profile, regions to scan
 - `[scan]` — HTTP concurrency, role-assumption concurrency, timeouts
-- `[cost]` — `use_cur` flag for Cost Explorer enrichment
+- `[cost]` — `use_cur` attaches Cost Explorer's 30-day service spend to orphaned-edge findings as context (it reads Cost Explorer, not the Cost and Usage Report). `currency` and the two risk multipliers are read by nothing and are no longer shown on the Settings page
 - `[trust]` — approved external accounts, thresholds for stale/ghost roles
 - `[output]` — scan output directory (default: `./cloudrift-output`)
 - `[neo4j]` — `uri`, `username`, `password_env` (optional)
@@ -1838,7 +1838,7 @@ Cloudrift assumes a read-only audit role (`CloudriftAuditRole`) into each accoun
 | **CloudTrail** *(opt-in, `scan.assume_role_activity`)* | `cloudtrail:LookupEvents` for `AssumeRole` events (up to 90 days, 5,000 events per Region, time budget) | Shows which callers actually assumed a role |
 | **IAM Identity Center** *(opt-in, `scan.identity_center`)* | `sso:ListInstances`, `ListPermissionSets`, `DescribePermissionSet`, `ListManagedPoliciesInPermissionSet`, `ListCustomerManagedPolicyReferencesInPermissionSet`, `GetInlinePolicyForPermissionSet`, `ListAccountsForProvisionedPermissionSet`, `ListAccountAssignments`; `identitystore:DescribeUser`, `DescribeGroup`, `ListGroupMemberships`. Management account or delegated administrator only | Shows who reaches which account through single sign-on |
 | **STS** | `GetCallerIdentity` | Confirms assumed-role identity during cross-account scanning |
-| **Cost Explorer** *(optional)* | `GetCostAndUsage` (last 30 days, grouped by account + service) | Enriches findings with actual monthly spend for FinOps prioritization |
+| **Cost Explorer** *(optional)* | `GetCostAndUsage` (last 30 days, grouped by account + service) | Attaches the account's spend on the finding's service as context. It is the whole service's spend, never the finding's cost or priority |
 
 > **Not collected:** ACM certificate details, API Gateway custom domains, RDS clusters and snapshots, VPCs and security groups. CloudTrail data events, CloudTrail Lake and Athena are not read either (they need customer-owned infrastructure or paid queries).
 
@@ -2000,7 +2000,7 @@ Complete reference for engineers onboarding to the repository. Assumptions and g
 
 - **Orphaned edge assets** - DNS names, CloudFront, S3 website endpoints, certificates, etc., with validation via DNS/HTTP probes and structured claimability (reclaimable, dangling, broken, edge obscured).
 - **External IAM trust** - Roles that trust external principals (AWS accounts, SAML, OIDC), scored using IAM activity (`RoleLastUsed`) and configurable trust policy (approved accounts, stale/ghost day thresholds).
-- **Cost signals** - Static per-asset estimates and optional **Cost Explorer** enrichment for orphaned-edge findings (not applied to `external_access` findings by design).
+- **Cost signals** - Orphaned-edge findings carry a modeled cost at AWS list price, which is $0 for the asset kinds Cloudrift finds; optional **Cost Explorer** spend is attached as context. Identity and external-access findings carry no dollar figure, and cost does not affect priority.
 - **Reporting** - JSON artifacts; CLI `report` supports **table, JSON, CSV, markdown**; Excel workbook writers live in `internal/output/` for library use but are **not** exposed on `cloudrift report`; **React dashboard** is served by the same binary.
 
 #### Problem it solves
@@ -2066,7 +2066,7 @@ The **`internal/`** packages implement a full pipeline (collectors → validator
 
 ### 3. API documentation
 
-> **Newer endpoints** (all `GET`, under `/api/scans/{id}` unless noted): `/inventory/summary`, `/inventory/resources`, `/inventory/resource`, `/inventory/export.csv` (the same filters as the list: `internet_facing`, `owner`, `new_resources`, `hide_aws`); `/identities/usage` (who and what uses a role, with who was seen assuming it), `/identities/who-can` (who can do an action to a target, with the route drawn as steps), `/identities/targets` (search for a target); `/identity-center` (permission sets, people and groups, accounts); `/api/coverage` and `/api/coverage/reference` (module status and the reference-catalog benchmark). The scan setting keys are served and saved by `/api/config`.
+> **Newer endpoints** (all `GET`, under `/api/scans/{id}` unless noted): `/inventory/summary`, `/inventory/resources`, `/inventory/resource`, `/inventory/export.csv` (the same filters as the list: `internet_facing`, `owner`, `new_resources`, `hide_aws`); `/identities/usage` (who and what uses a role, with who was seen assuming it), `/identities/who-can` (who can do an action to a target, with the route drawn as steps), `/identities/targets` (search for a target, riskiest first, including buckets, secrets and keys), `/identities/access-suggestions` (ready questions), and `who-can` also takes `chain=true` for roles reached through other roles; `/identity-center` (permission sets, people and groups, accounts); `/api/coverage` and `/api/coverage/reference` (module status and the reference-catalog benchmark). The scan setting keys are served and saved by `/api/config`.
 
 Base URL: same host as the dashboard (default `http://127.0.0.1:8080` — loopback by default; `--host` opts into a non-loopback bind). JSON only for REST. Authentication is optional and off by default: setting `CLOUDRIFT_API_TOKEN` gates the entire server (REST + UI) behind HTTP Basic auth (see [Security review](#9-security-review)).
 
@@ -2544,7 +2544,7 @@ There is **no database** in core Phase 1–2 flow. **Phase 3** adds a **Neo4j gr
 | IAM `ListRoles` + `GetRole` per role (activity/trust) | Concurrency semaphores in config (`role_assumption_concurrency`) |
 | HTTP probes | `http_probe_concurrency`, timeouts |
 | Large `findings.json` | API pagination + max `page_size` 200; full file read per request |
-| Cost Explorer | Single `GetCostAndUsage` call; merged into map; distributed across findings sharing account+service |
+| Cost Explorer | Single `GetCostAndUsage` call; the service spend is attached to each matching finding as evidence, not divided among them |
 
 **Scale limits:** Suited to org-scale **hundreds–low thousands** of findings per scan on a single host; no horizontal API tier.
 

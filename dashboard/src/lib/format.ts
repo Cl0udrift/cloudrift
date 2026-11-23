@@ -1,4 +1,6 @@
+/** A dollar figure, or a dash for zero: a modeled cost of $0 means no figure exists, not that there is no risk. */
 export function formatUsd(n: number): string {
+  if (n === 0) return "—";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",

@@ -175,8 +175,8 @@ func TestRunProducesBothModulesAndPersists(t *testing.T) {
 			if f.Claimability != models.ClaimReclaimable || f.Severity != models.SeverityCritical {
 				t.Errorf("edge finding: want reclaimable/critical, got %s/%s", f.Claimability, f.Severity)
 			}
-			if f.MonthlyRiskCost <= 0 {
-				t.Errorf("edge finding: expected cost > 0, got %v", f.MonthlyRiskCost)
+			if f.MonthlyRiskCost != 0 { // a DNS record has no per-asset fee at AWS list price
+				t.Errorf("edge finding: expected modeled cost 0 at list price, got %v", f.MonthlyRiskCost)
 			}
 		case models.ModuleExternalAccess:
 			sawExternal = true

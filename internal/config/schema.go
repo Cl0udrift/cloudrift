@@ -118,17 +118,9 @@ func Schema() []Field {
 			}},
 		{Key: "trust.stale_threshold_days", Group: "Trust policy", Label: "Stale after (days)", Description: "A role unused this long is reported as stale.", Kind: "int", Min: num(1), Max: num(3650), Apply: "next_scan"},
 		{Key: "trust.ghost_threshold_days", Group: "Trust policy", Label: "Ghost after (days)", Description: "A role unused this long is reported as a ghost.", Kind: "int", Min: num(1), Max: num(3650), Apply: "next_scan"},
-
-		{Key: "cost.currency", Group: "Cost", Label: "Currency", Description: "Currency label for cost figures.", Kind: "string", Apply: "next_scan",
-			check: func(s string) error {
-				if !regexp.MustCompile(`^[A-Z]{3}$`).MatchString(s) {
-					return fmt.Errorf("must be a three-letter code such as USD")
-				}
-				return nil
-			}},
-		{Key: "cost.risk_multiplier_reclaimable", Group: "Cost", Label: "Reclaimable risk multiplier", Description: "Multiplier applied to reclaimable-asset cost when computing risk cost.", Kind: "float", Min: num(0), Max: num(100), Apply: "next_scan"},
-		{Key: "cost.risk_multiplier_dangling", Group: "Cost", Label: "Dangling risk multiplier", Description: "Multiplier applied to dangling-resource cost when computing risk cost.", Kind: "float", Min: num(0), Max: num(100), Apply: "next_scan"},
-		{Key: "cost.use_cur", Group: "Cost", Label: "Use Cost Explorer data", Description: "Enrich cost figures with Cost Explorer data. Off means estimates only.", Kind: "bool", Apply: "next_scan"},
+		// cost.currency and the two risk multipliers were settings no code read. They are no longer offered; the config file still
+		// accepts the keys so an older file loads.
+		{Key: "cost.use_cur", Group: "Cost", Label: "Attach account spend (Cost Explorer)", Description: "At scan time, ask Cost Explorer what the account spent on the service behind each orphaned-edge finding in the last 30 days and show it on the finding as context. It is the whole service's spend, not the resource's, so it is never used as the finding's cost or priority. Needs ce:GetCostAndUsage and the management profile. The key is named use_cur for history; it reads Cost Explorer, not the Cost and Usage Report.", Kind: "bool", Apply: "next_scan"},
 
 		{Key: "neo4j.uri", Group: "Graph database", Label: "Neo4j URI", Description: "Optional graph store for Blast Explorer and query.", Kind: "string", Apply: "restart",
 			check: func(s string) error {

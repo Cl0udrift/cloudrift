@@ -85,10 +85,13 @@ type Config struct {
 		ServiceLastAccessedTimeoutSeconds int `toml:"service_last_accessed_timeout_seconds"`
 	} `toml:"scan"`
 	Cost struct {
+		// Currency and the two multipliers are read by nothing. They stay so an older config file still loads.
 		Currency                  string  `toml:"currency"`
 		RiskMultiplierReclaimable float64 `toml:"risk_multiplier_reclaimable"`
 		RiskMultiplierDangling    float64 `toml:"risk_multiplier_dangling"`
-		UseCUR                    bool    `toml:"use_cur"`
+		// UseCUR attaches Cost Explorer's 30-day spend on the finding's service as context. Despite the name it does not
+		// read the Cost and Usage Report.
+		UseCUR bool `toml:"use_cur"`
 	} `toml:"cost"`
 	Inventory struct {
 		// OwnerTagKeys are the resource tag keys read as the owner, in priority order, matched case-insensitively.

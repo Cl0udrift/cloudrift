@@ -449,7 +449,7 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
         )
       }),
       columnHelper.accessor("monthly_risk_cost_usd", {
-        header: () => <span className="whitespace-nowrap">Risk cost / mo</span>,
+        header: () => <span className="whitespace-nowrap" title="Modeled monthly cost of an orphaned asset at AWS list price. Identity findings have none.">Modeled cost / mo</span>,
         cell: (info) => (
           <span className="tabular-nums text-slate-800 dark:text-slate-200">{formatUsd(info.getValue())}</span>
         )

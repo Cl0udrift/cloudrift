@@ -1,20 +1,38 @@
 package scorers
 
 import (
-	"fmt"
 	"math"
 	"strings"
 
 	"github.com/Zero0x00/cloudrift/internal/models"
 )
 
+// maxBoost caps what any module's own evidence can add to a finding's severity points. Severity decides the order; the
+// boost only separates findings of the same severity. Every module gets the same cap so no module outranks another just
+// because it has more kinds of evidence, and dollar cost is not an input: a monthly price says nothing about harm.
+const maxBoost = 15.0
+
 // PriorityScore ranks findings for top-fix workflows. Higher is more urgent.
 func PriorityScore(f models.Finding) float64 {
-	s := severityPoints(f.Severity)
-	c := claimabilityPoints(f.Claimability)
-	r := riskCostPoints(f.MonthlyRiskCost)
-	e := externalExposurePoints(f)
-	return math.Round((s+c+r+e)*100) / 100
+	return math.Round((severityPoints(f.Severity)+moduleBoost(f))*100) / 100
+}
+
+// moduleBoost is how much more urgent a finding is than others of its severity, from evidence its own module records:
+// takeover state for an orphaned edge, trust signals for external access, and a running workload for an identity finding.
+func moduleBoost(f models.Finding) float64 {
+	switch f.Module {
+	case models.ModuleOrphanedEdge:
+		return math.Min(maxBoost, claimabilityPoints(f.Claimability)*0.4)
+	case models.ModuleExternalAccess:
+		return math.Min(maxBoost, externalExposurePoints(f)*0.3)
+	}
+	if w, ok := f.Evidence["workloads"].([]any); ok && len(w) > 0 {
+		return 10 // something runs as this identity, so what it holds is in use
+	}
+	if w, ok := f.Evidence["workloads"].([]map[string]any); ok && len(w) > 0 {
+		return 10
+	}
+	return 0
 }
 
 // PriorityReason builds a concise, explainable string for why a finding ranked highly.
@@ -37,9 +55,6 @@ func PriorityReason(f models.Finding) string {
 		parts = append(parts, "broken claim")
 	case string(models.ClaimEdgeObscured):
 		parts = append(parts, "edge obscured")
-	}
-	if f.MonthlyRiskCost > 0 {
-		parts = append(parts, fmt.Sprintf("$%.0f/mo modeled risk", f.MonthlyRiskCost))
 	}
 	if strings.EqualFold(string(f.Module), string(models.ModuleExternalAccess)) {
 		var ext []string
@@ -80,9 +95,6 @@ func PriorityLess(a, b models.Finding, scoreA, scoreB float64) bool {
 	if rankA != rankB {
 		return rankA > rankB
 	}
-	if a.MonthlyRiskCost != b.MonthlyRiskCost {
-		return a.MonthlyRiskCost > b.MonthlyRiskCost
-	}
 	return a.ID < b.ID
 }
 
@@ -118,13 +130,6 @@ func claimabilityPoints(c models.Claimability) float64 {
 	default:
 		return 6
 	}
-}
-
-func riskCostPoints(monthlyUSD float64) float64 {
-	if monthlyUSD <= 0 {
-		return 0
-	}
-	return math.Min(42, monthlyUSD*0.12)
 }
 
 func externalExposurePoints(f models.Finding) float64 {

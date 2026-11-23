@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	awscfg "github.com/aws/aws-sdk-go-v2/config"
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	awscfg "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	cetypes "github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
 
@@ -36,31 +36,32 @@ var ceNowUTC = func() time.Time {
 	return time.Now().UTC()
 }
 
+// estimatedListPrice is what holding one asset of each kind costs per month at AWS list price, from the AWS pricing pages
+// (read 2026-11-22). Every kind is $0, which is the finding: none of them has a standing per-asset fee, so the price of an
+// orphaned asset says nothing about the harm of leaving it exposed.
+//   - Route 53: $0.50 per hosted zone per month; a record has no charge (a zone includes up to 10,000).
+//   - S3: no fixed fee per bucket and no minimum charge; storage and requests are billed by use.
+//   - CloudFront: pay-as-you-go has no stated per-distribution fee. Flat-rate plans ($0, $15, $200, $1,000 per month) exist,
+//     but the plan of a distribution is not collected.
+//   - ACM: a public certificate for ACM-integrated services is free. An exportable one is $7 at issuance and renewal, and the
+//     scan does not say which kind a certificate is.
+var estimatedListPrice = map[models.AssetType]float64{
+	models.AssetDNSRecord:      0,
+	models.AssetS3Bucket:       0,
+	models.AssetCloudFrontDist: 0,
+	models.AssetACMCert:        0,
+}
+
+// Modeled factors for how easy an orphaned asset is to take over. They scale the list price above; they are not a loss
+// estimate and are not configurable.
+const (
+	riskFactorReclaimable = 5.0
+	riskFactorDangling    = 3.0
+)
+
 func ScoreCost(node models.AssetNode, finding *models.Finding) (directCost, riskCost float64) {
-	// Phase 1 baseline estimates; refined with CUR in later phases.
-	switch node.AssetType {
-	case models.AssetDNSRecord:
-		directCost = 0.50
-	case models.AssetS3Bucket:
-		directCost = 0.23
-	case models.AssetCloudFrontDist:
-		directCost = 35.0
-	case models.AssetACMCert:
-		directCost = 7.0
-	default:
-		directCost = 0
-	}
-	multiplier := 1.0
-	switch finding.Claimability {
-	case models.ClaimReclaimable:
-		multiplier = 5.0
-	case models.ClaimDangling:
-		multiplier = 3.0
-	case models.ClaimBroken, models.ClaimUnknown, models.ClaimEdgeObscured:
-		multiplier = 1.0
-	}
-	riskCost = directCost * multiplier
-	return directCost, riskCost
+	directCost = estimatedListPrice[node.AssetType]
+	return directCost, directCost * multiplierForFinding(models.ModuleOrphanedEdge, finding.Claimability)
 }
 
 func EnrichCostFromCE(ctx context.Context, findings []models.Finding, cfg config.Config) ([]models.Finding, error) {
@@ -102,34 +103,27 @@ func EnrichCostFromCE(ctx context.Context, findings []models.Finding, cfg config
 		return findings, nil
 	}
 
+	// Cost Explorer reports spend per account and service, not per resource, so it cannot price one finding. Dividing the
+	// service's whole bill among the findings made each look like it cost hundreds of dollars. It is attached as context
+	// instead, labelled as the whole service's spend, and the finding's own cost is left alone.
 	enriched := make([]models.Finding, len(findings))
 	copy(enriched, findings)
-	indicesByKey := make(map[string][]int)
 	for i := range enriched {
 		service := serviceForFinding(enriched[i])
 		if service == "" {
 			continue
 		}
-		key := ceKey(enriched[i].AccountID, service)
-		if _, ok := costMap[key]; !ok {
+		spend, ok := costMap[ceKey(enriched[i].AccountID, service)]
+		if !ok {
 			continue
 		}
-		indicesByKey[key] = append(indicesByKey[key], i)
-	}
-
-	// CE is grouped at account+service level. We distribute that monthly amount across
-	// matching findings to avoid inflated additive totals when multiple findings map
-	// to the same CE group.
-	for key, idxs := range indicesByKey {
-		if len(idxs) == 0 {
-			continue
+		evidence := make(map[string]any, len(enriched[i].Evidence)+2)
+		for k, v := range enriched[i].Evidence {
+			evidence[k] = v
 		}
-		monthlyCost := costMap[key]
-		share := monthlyCost / float64(len(idxs))
-		for _, idx := range idxs {
-			enriched[idx].MonthlyDirectCost = share
-			enriched[idx].MonthlyRiskCost = share * multiplierForFinding(enriched[idx].Module, enriched[idx].Claimability)
-		}
+		evidence["account_service_name"] = service
+		evidence["account_service_spend_usd_30d"] = spend
+		enriched[i].Evidence = evidence
 	}
 	return enriched, nil
 }
@@ -208,9 +202,9 @@ func multiplierForFinding(module models.Module, c models.Claimability) float64 {
 	}
 	switch c {
 	case models.ClaimReclaimable:
-		return 5.0
+		return riskFactorReclaimable
 	case models.ClaimDangling:
-		return 3.0
+		return riskFactorDangling
 	default:
 		return 1.0
 	}
