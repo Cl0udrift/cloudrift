@@ -121,7 +121,13 @@ func Run(ctx context.Context, cfg *config.Config, outputDir, toolVersion string,
 		// has real data instead of an unset property.
 		annotateAlternateDomains(res.Assets)
 		bucketNames := buildBucketNameSet(res.Assets)
-		edgeCandidates := filterByType(res.Assets, models.AssetDNSRecord)
+		// A private-zone name only resolves inside its VPC, so probing it from here would call it broken.
+		var edgeCandidates []models.AssetNode
+		for _, n := range filterByType(res.Assets, models.AssetDNSRecord) {
+			if private, _ := n.Properties["private"].(bool); !private {
+				edgeCandidates = append(edgeCandidates, n)
+			}
+		}
 		if opts.NoHTTP {
 			progress("validating", fmt.Sprintf("validating %d edge assets (DNS only, HTTP probing skipped)", len(edgeCandidates)))
 		} else {
@@ -145,6 +151,17 @@ func Run(ctx context.Context, cfg *config.Config, outputDir, toolVersion string,
 		}
 	}
 
+	// --- Takeover beyond DNS: buckets that are referenced but unowned, and CloudFront origins that were deleted. ---
+	if opts.runsModule(models.ModuleOrphanedEdge) {
+		var bucketProbe scorers.BucketProbe
+		if !opts.NoHTTP {
+			bucketProbe = validators.BucketState
+		}
+		progress("validating", "checking referenced buckets and CloudFront origins")
+		findings = append(findings, scorers.ScoreResourceTakeover(ctx, res.Assets, bucketProbe, validators.CheckDeletedTarget)...)
+		findings = append(findings, scorers.ScoreUnheldTargets(ctx, res.Assets, res.Coverage.Complete(), validators.IsEC2Address)...)
+	}
+
 	// --- External-trust module: cross-account / federated IAM trust + resource-policy exposure. ---
 	if opts.runsModule(models.ModuleExternalAccess) {
 		progress("scoring", "evaluating IAM trust and resource-policy exposure")
@@ -152,6 +169,7 @@ func Run(ctx context.Context, cfg *config.Config, outputDir, toolVersion string,
 		findings = append(findings, scorers.ScoreTrust(res.Assets, res.Rels, activityIdx, cfg)...)
 		findings = append(findings, scorers.ScoreResourceExposure(res.Assets, res.Rels, cfg)...)
 		findings = append(findings, scorers.ScoreVPCEndpoints(res.Assets)...)
+		findings = append(findings, scorers.ScoreDeletedTrustPrincipals(res.Assets)...)
 		if cfg.Scan.IAMPolicyInventory {
 			progress("scoring", "recording broad IAM entitlement candidates")
 			entitlements := scorers.ScoreEntitlements(res.Assets, res.Rels)

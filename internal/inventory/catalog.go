@@ -58,6 +58,7 @@ var catalog = []serviceDef{
 	{ID: "cloudfront", Name: "CloudFront", Types: []string{"cloudfront_dist"}},
 	{ID: "apigateway", Name: "API Gateway", Types: []string{"apigateway_domain"}},
 	{ID: "acm", Name: "ACM", Types: []string{"acm_cert"}},
+	{ID: "cognito", Name: "Cognito domains", Types: []string{"cognito_user_pool"}},
 }
 
 var typeService = map[models.AssetType]string{}
@@ -74,7 +75,7 @@ var typeName = map[string]string{
 	"cloudformation_stack": "CloudFormation stack", "codebuild_project": "CodeBuild project", "state_machine": "Step Functions state machine",
 	"eks_cluster": "EKS cluster", "eks_pod_identity_association": "EKS Pod Identity association",
 	"dns_record": "DNS record", "cloudfront_dist": "CloudFront distribution",
-	"apigateway_domain": "API Gateway domain", "acm_cert": "ACM certificate",
+	"apigateway_domain": "API Gateway domain", "acm_cert": "ACM certificate", "cognito_user_pool": "Cognito user pool domain",
 }
 
 // excludedAssetTypes are scan evidence and metadata. They are not AWS infrastructure totals.
@@ -87,6 +88,7 @@ var excludedAssetTypes = map[models.AssetType]bool{
 	models.AssetIRSATrust:                true,
 	"workload_collection_status":         true,
 	"collection_status":                  true,
+	models.AssetPublicAddressSet:         true,
 }
 
 var typeCategory = map[string]string{
@@ -100,7 +102,7 @@ var typeCategory = map[string]string{
 	"s3_bucket": categoryStorage, "s3_object": categoryStorage,
 	"iam_role": categoryIdentity, "iam_user": categoryIdentity, "iam_group": categoryIdentity, "iam_policy": categoryIdentity, "instance_profile": categoryIdentity,
 	"ecs_task_definition": categoryConfiguration, "eks_pod_identity_association": categoryConfiguration,
-	"dns_record": categoryNetwork, "cloudfront_dist": categoryNetwork, "apigateway_domain": categoryNetwork, "acm_cert": categoryNetwork,
+	"dns_record": categoryNetwork, "cloudfront_dist": categoryNetwork, "apigateway_domain": categoryNetwork, "acm_cert": categoryNetwork, "cognito_user_pool": categoryIdentity,
 }
 
 var categoryOrder = []struct{ ID, Name string }{
@@ -116,13 +118,13 @@ var categoryOrder = []struct{ ID, Name string }{
 // collector whose result was not recorded.
 // optInSetting names the setting that turns on the collectors behind a service card. A card with no assets and no collection record
 // for one of these is reported as off, with the setting to turn on, not as a gap.
-var optInSetting = map[string]string{"identity_center": "scan.identity_center", "secrets": "scan.resource_policies", "kms": "scan.resource_policies", "rds": "scan.network_resources", "elbv2": "scan.network_resources", "security_groups": "scan.network_resources", "vpc_endpoints": "scan.resource_policies"}
+var optInSetting = map[string]string{"identity_center": "scan.identity_center", "secrets": "scan.resource_policies", "kms": "scan.resource_policies", "rds": "scan.network_resources", "elbv2": "scan.network_resources", "security_groups": "scan.network_resources", "vpc_endpoints": "scan.resource_policies", "acm": "scan.network_resources", "apigateway": "scan.network_resources", "cognito": "scan.network_resources"}
 
-var noCollector = map[string]bool{"apigateway": true, "acm": true}
+var noCollector = map[string]bool{}
 
 var serviceScope = map[string]string{
 	"ec2": "regional", "elbv2": "regional", "security_groups": "regional", "rds": "regional", "lambda": "regional", "ecs": "regional", "eks": "regional",
-	"apigateway": "regional", "acm": "regional",
+	"apigateway": "regional", "acm": "regional", "cognito": "regional",
 	"iam": "global", "s3": "global", "route53": "global", "cloudfront": "global",
 }
 

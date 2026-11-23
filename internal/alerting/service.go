@@ -140,38 +140,18 @@ func (s *Service) ListEvents(limit int) ([]AlertEvent, error) {
 }
 
 func (s *Service) SupportedTypes() []SupportedAlertType {
-	return []SupportedAlertType{
-		{
-			Type:               RuleScanCompletion,
-			Label:              "Scan completion",
-			Description:        "Triggers when a scan completes and summarizes critical/high posture.",
-			SupportsThresholds: false,
-		},
-		{
-			Type:               RuleNewCriticalFindings,
-			Label:              "New critical findings",
-			Description:        "Triggers when critical findings are introduced versus previous run.",
-			SupportsThresholds: false,
-		},
-		{
-			Type:               RuleNewEscalationPaths,
-			Label:              "New privilege-escalation paths",
-			Description:        "Triggers when a scan finds a privilege-escalation path (a principal that can reach more access) that the previous scan did not have.",
-			SupportsThresholds: false,
-		},
-		{
-			Type:               RuleReclaimableThreshold,
-			Label:              "Reclaimable findings threshold",
-			Description:        "Triggers when reclaimable findings exceed configured count/risk threshold.",
-			SupportsThresholds: true,
-		},
-		{
-			Type:               RuleStaleExternalPrivilegedRoles,
-			Label:              "Stale external privileged roles",
-			Description:        "Triggers when stale external trust remains privileged/admin-like.",
-			SupportsThresholds: true,
-		},
+	out := []SupportedAlertType{
+		{Type: RuleScanCompletion, Label: "Scan digest", Description: "After each scan, says what changed: new and resolved findings and the top new items. Stays quiet when nothing changed."},
+		{Type: RuleNewCriticalFindings, Label: "New critical findings", Description: "Triggers when critical findings are introduced versus the previous scan."},
+		{Type: RuleNewInternetExposure, Label: "New internet-reachable resources", Description: "Triggers when a resource can newly be reached from the internet (an open security group rule on an instance, load balancer or database)."},
 	}
+	for _, d := range deltaSpecs {
+		out = append(out, SupportedAlertType{Type: d.Type, Label: d.Label, Description: d.Description})
+	}
+	return append(out,
+		SupportedAlertType{Type: RuleReclaimableThreshold, Label: "Reclaimable findings", Description: "Triggers when reclaimable findings (dangling records and orphaned resources an attacker could claim) reach a count you set.", SupportsThresholds: true},
+		SupportedAlertType{Type: RuleStaleExternalPrivilegedRoles, Label: "Stale external privileged roles", Description: "Triggers when stale external trust remains privileged/admin-like.", SupportsThresholds: true},
+	)
 }
 
 func hintAccountIDsFromMetadata(m map[string]any) []string {
@@ -422,9 +402,11 @@ func validateRule(rule AlertRule) error {
 	if err := validateCooldownMinutes(rule.CooldownMinutes); err != nil {
 		return err
 	}
-	switch rule.Type {
-	case RuleScanCompletion, RuleNewCriticalFindings, RuleNewEscalationPaths, RuleReclaimableThreshold, RuleStaleExternalPrivilegedRoles:
-	default:
+	known := false
+	for _, t := range (&Service{}).SupportedTypes() {
+		known = known || t.Type == rule.Type
+	}
+	if !known {
 		return fmt.Errorf("unsupported rule type %q", rule.Type)
 	}
 	if rule.Channel.Type != ChannelSlackWebhook {

@@ -178,6 +178,11 @@ func AnalyzeIdentityAttack(ctx context.Context, req IdentityAttackRequest) schem
 		var next []nextHop
 		for _, ad := range attackDecisions(blast) {
 			decision, technique := ad.PermissionDecision, ad.technique
+			// AWS owns service-linked roles: their trust policy and permissions cannot be changed and only their own service
+			// can assume them, so no step into one is a transition or an escalation. Listing them inflated every count.
+			if target, ok := findAsset(req.Assets, decision.ResourceARN); ok && target.AssetType == models.AssetIAMRole && serviceLinked(target) {
+				continue
+			}
 			key := state.principal + "\n" + technique + "\n" + decision.ResourceARN + "\n" + contextFP
 			hop := schema.AttackTransition{
 				Technique:           technique,
@@ -634,8 +639,10 @@ func originFor(technique string) string {
 }
 
 func addEscalation(report *schema.IdentityAttackReport, kind string, hop schema.AttackTransition, why string) {
+	// Two actions can enable one step (AttachGroupPolicy and PutGroupPolicy both grant on a group). They are one escalation:
+	// what matters is who can do what to which target, not which API call does it.
 	for _, e := range report.Escalations {
-		if e.TransitionID == hop.TransitionID && e.Kind == kind {
+		if e.Kind == kind && e.SourcePrincipal == hop.SourcePrincipal && e.TargetARN == hop.TargetARN {
 			return
 		}
 	}

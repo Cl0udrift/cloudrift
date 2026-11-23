@@ -7,7 +7,9 @@ import { apiClient } from "../api/client";
 import { formatQueryError } from "../api/httpError";
 import { queryKeys } from "../api/queryKeys";
 import type { BlastAnalysisMode, BlastGraphEdge, BlastGraphNode, IdentityAttackReport, PermissionBlastReport } from "../api/types";
+import { BlastAnswer } from "../components/blast/BlastAnswer";
 import { BlastStarters } from "../components/blast/BlastStarters";
+import { ResourceBlast } from "../components/blast/ResourceBlast";
 import { BlastExplorerCanvas } from "../components/blast/BlastExplorerCanvas";
 import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
@@ -15,11 +17,12 @@ import { useScanContext } from "../hooks/useScanContext";
 
 type BlastModeQuery = BlastAnalysisMode;
 
+// The question people ask first is how it can escalate, so that is the default.
 function modeFrom(s: string | null): BlastModeQuery {
-  if (s === "attack_path" || s === "identity_exposure" || s === "permission_blast_radius") {
+  if (s === "attack_path" || s === "identity_exposure" || s === "permission_blast_radius" || s === "blast_radius") {
     return s;
   }
-  return "blast_radius";
+  return "attack_path";
 }
 
 export function BlastExplorerPage() {
@@ -29,6 +32,7 @@ export function BlastExplorerPage() {
   const finding = sp.get("finding") || "";
   const entity = sp.get("entity") || "";
   const principal = sp.get("principal") || "";
+  const resource = sp.get("resource") || "";
   const mode = modeFrom(sp.get("mode"));
 
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -39,7 +43,9 @@ export function BlastExplorerPage() {
   const [expandedEdgeIds, setExpandedEdgeIds] = useState<string[]>([]);
   const [expandedFromNodeIds, setExpandedFromNodeIds] = useState<string[]>([]);
 
-  const rootCount = Number(Boolean(finding)) + Number(Boolean(entity)) + Number(Boolean(principal));
+  const rootCount = Number(Boolean(finding)) + Number(Boolean(entity)) + Number(Boolean(principal)) + Number(Boolean(resource));
+  const byResource = Boolean(resource) && !principal && !finding && !entity;
+  // (resourceFinding is set below, once the finding's payload says which resource it is about.)
   const byPrincipal = Boolean(principal);
   const byEntity = !byPrincipal && Boolean(entity);
   const byFinding = !byPrincipal && !byEntity && Boolean(finding);
@@ -56,7 +62,7 @@ export function BlastExplorerPage() {
         : byEntity
         ? apiClient.getEntityBlastExplorer(scan, entity, { mode })
         : apiClient.getBlastRadiusExplorer(scan, finding, { mode }),
-    enabled: Boolean(scan && rootCount === 1 && (byPrincipal ? principal : byEntity ? entity : finding))
+    enabled: Boolean(scan && rootCount === 1 && !byResource && (byPrincipal ? principal : byEntity ? entity : finding))
   });
 
   const payload = q.data;
@@ -148,12 +154,21 @@ export function BlastExplorerPage() {
     setSp(n);
   };
 
+  const graphUp = Boolean(payload?.summary.graph_available);
+  const resourceFinding = byFinding && Boolean(payload) && !payload!.summary.source_principal_arn && Boolean(payload!.summary.focal_resource_arn);
+  const tabs: [BlastModeQuery, string, string][] = [
+    ["attack_path", "How it can escalate", "Which identities and permissions it can take over, step by step."],
+    ["permission_blast_radius", "What it can reach", "The resources its permissions let it read or change."],
+    ["blast_radius", "Connections", "How it is wired to other resources. Needs the graph database for the picture."]
+  ];
+  const startLabel = payload?.summary.source_principal_arn ? payload.summary.source_principal_arn.slice(payload.summary.source_principal_arn.lastIndexOf("/") + 1) : "";
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Blast radius explorer"
-        description="Topology and hypothetical impact for one finding, principal or external entity."
-        details="Topology, unevaluated identity exposure, evidence-backed attack paths, and hypothetical permission impact for one finding, principal, or external entity."
+        description="If this is compromised, what can happen?"
+        details="Start from a user, a role or a finding. The explorer assumes its credentials are stolen and shows, from the stored policies, what it could take over and reach. It is a model, not evidence that anything happened."
       />
       {(currentScan?.synthetic || scan.startsWith("demo")) && (
         <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
@@ -161,68 +176,40 @@ export function BlastExplorerPage() {
         </p>
       )}
       {(!scan || rootCount === 0 || rootCount > 1) && (
-        <StatePanel intent="empty" title="Choose where to start">
-          <p className="mb-3">Pick a finding or a user below, or open this view from a finding's Blast radius card.</p>
-          {scan ? <BlastStarters scanId={scan} /> : <p>Select a scan first.</p>}
-        </StatePanel>
+        scan ? <BlastStarters scanId={scan} /> : <StatePanel intent="empty" title="Select a scan first">Pick a scan in the bar above.</StatePanel>
       )}
 
-      {scan && rootCount === 1 && (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-slate-500">Mode</span>
-          <button
-            type="button"
-            className={`rounded px-2 py-1 text-xs font-medium ${
-              mode === "blast_radius"
-                ? "bg-cyan-500/20 text-cyan-900 dark:text-cyan-100"
-                : "text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800"
-            }`}
-            onClick={() => modeToggle("blast_radius")}
-          >
-            Topology
-          </button>
-          <button
-            type="button"
-            className={`rounded px-2 py-1 text-xs font-medium ${
-              mode === "identity_exposure"
-                ? "bg-cyan-500/20 text-cyan-900 dark:text-cyan-100"
-                : "text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800"
-            }`}
-            onClick={() => modeToggle("identity_exposure")}
-          >
-            Identity exposure
-          </button>
-          <button
-            type="button"
-            className={`rounded px-2 py-1 text-xs font-medium ${
-              mode === "attack_path"
-                ? "bg-cyan-500/20 text-cyan-900 dark:text-cyan-100"
-                : "text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800"
-            }`}
-            onClick={() => modeToggle("attack_path")}
-          >
-            Attack path
-          </button>
-          <button
-            type="button"
-            className={`rounded px-2 py-1 text-xs font-medium ${
-              mode === "permission_blast_radius"
-                ? "bg-cyan-500/20 text-cyan-900 dark:text-cyan-100"
-                : "text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800"
-            }`}
-            onClick={() => modeToggle("permission_blast_radius")}
-          >
-            Permission impact
-          </button>
-          <Link to="/findings" className="ml-auto text-xs text-cyan-700 hover:underline dark:text-cyan-400">
-            ← Back to findings
+      {scan && byResource ? (
+        <div className="space-y-4">
+          <Link to={`/blast-explorer?scan=${encodeURIComponent(scan)}`} className="text-xs text-cyan-700 hover:underline dark:text-cyan-400">Change starting point</Link>
+          <ResourceBlast scanId={scan} resourceId={resource} />
+        </div>
+      ) : null}
+
+      {scan && rootCount === 1 && !byResource && !resourceFinding && (
+        <div className="flex flex-wrap items-center gap-2 text-sm" role="tablist" aria-label="Question">
+          {tabs.map(([key, label, hint]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={mode === key}
+              title={hint}
+              className={`hs-action-pill ${mode === key ? "!border-cyan-500 !bg-cyan-500/10 text-cyan-900 dark:text-cyan-100" : ""}`}
+              onClick={() => modeToggle(key)}
+            >
+              {label}
+            </button>
+          ))}
+          <Link to={`/blast-explorer?scan=${encodeURIComponent(scan)}`} className="ml-auto text-xs text-cyan-700 hover:underline dark:text-cyan-400">
+            Change starting point
           </Link>
         </div>
       )}
 
       {q.isLoading && (
         <p className="text-sm text-slate-500" role="status">
-          Loading curated subgraph…
+          Working out what it can do…
         </p>
       )}
       {q.isError && (
@@ -232,190 +219,119 @@ export function BlastExplorerPage() {
       )}
 
       {payload && (
-        <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-          <div>
-            {payload.summary.graph_available ? null : (
-              <p className="mb-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200/90">
-                Graph data unavailable (
-                {payload.summary.graph_unavailable_reason || "neo4j_unconfigured"}). Summary below still applies for
-                operational context.
-              </p>
-            )}
-            <BlastExplorerCanvas
-              data={{ ...payload, nodes, edges }}
-              selectedNodeId={selectedNode}
-              selectedPathNodeIDs={activePath?.node_ids ?? null}
-              selectedPathEdgeIDs={activePath?.edge_ids ?? null}
-              expandedNodeIDs={expandedNodeIds}
-              expandedEdgeIDs={expandedEdgeIds}
-              onSelectNode={(id) => {
-                setSelectedNode(id);
-              }}
-            />
-            <p className="mt-2 text-[11px] text-slate-500">
-              Drag to rotate, scroll to zoom. Click a node to inspect. Unrelated items are de-emphasized in the
-              layout.
+        <div className="space-y-6">
+          {mode !== "blast_radius" ? <BlastAnswer scanId={scan} payload={payload} /> : null}
+          {/* A finding about a resource (a DNS record, a bucket, a distribution), not about an identity: answer for the resource. */}
+          {byFinding && !payload.summary.source_principal_arn && payload.summary.focal_resource_arn ? <ResourceBlast scanId={scan} resourceId={payload.summary.focal_resource_arn} /> : null}
+          {mode === "permission_blast_radius" && payload.summary.permission_blast ? (
+            <details className="hs-card p-4">
+              <summary className="hs-focus-ring cursor-pointer text-sm font-semibold text-slate-900 dark:text-slate-100">Every permission checked</summary>
+              <div className="mt-3"><PermissionImpact report={payload.summary.permission_blast} /></div>
+            </details>
+          ) : null}
+          {mode === "permission_blast_radius" && !payload.summary.permission_blast ? (
+            <p className="text-sm text-slate-600 dark:text-slate-300">No permission impact was computed for this starting point.</p>
+          ) : null}
+
+          {graphUp && (mode === "blast_radius" || mode === "identity_exposure") ? (
+            <section aria-label="Graph" className="space-y-2">
+              <h3 className="cr-section-title">Graph</h3>
+              <BlastExplorerCanvas
+                data={{ ...payload, nodes, edges }}
+                selectedNodeId={selectedNode}
+                selectedPathNodeIDs={activePath?.node_ids ?? null}
+                selectedPathEdgeIDs={activePath?.edge_ids ?? null}
+                expandedNodeIDs={expandedNodeIds}
+                expandedEdgeIDs={expandedEdgeIds}
+                onSelectNode={(id) => {
+                  setSelectedNode(id);
+                }}
+              />
+              <p className="text-[11px] text-slate-500">Drag to rotate, scroll to zoom. Click a node to inspect.</p>
+            </section>
+          ) : mode === "blast_radius" ? (
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              The connection graph needs the graph database (Neo4j), which is not connected. The routes under "How it can escalate" and "What it can reach" do not need it.
             </p>
-          </div>
-          <aside className="min-w-0 space-y-3 overflow-hidden rounded-lg border border-slate-200 bg-slate-50/50 p-4 text-sm dark:border-slate-800 dark:bg-slate-900/40">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
-              {payload.focus.root_type === "principal"
-                ? "Principal Blast Radius"
-                : payload.focus.root_type === "external_entity"
-                  ? "External Entity Blast Radius"
-                  : "Finding Blast Radius"}
-            </p>
-            <p className="text-[11px] text-slate-500">
-              {payload.focus.root_type === "principal"
-                ? payload.summary.source_principal_arn?.includes(":role/")
-                  ? "Impact from IAM Role"
-                  : "Impact from External Principal"
-                : payload.focus.root_type === "external_entity"
-                  ? "Impact from External Principal"
-                  : "Impact from Finding Context"}
-            </p>
-            <p className="break-words text-slate-800 dark:text-slate-200">{payload.summary.summary_text}</p>
-            {mode === "attack_path" && pathVariants.length === 0 ? (
-              <p className="text-xs text-amber-800 dark:text-amber-200">
-                No established attack path. Trust, unevaluated policy candidates, ownership, DNS, certificates,
-                and fronting stay in Topology and Identity exposure.
-              </p>
-            ) : null}
-            {mode === "attack_path" && payload.summary.identity_attack ? (
-              <IdentityAttackHops report={payload.summary.identity_attack} />
-            ) : null}
-            {mode === "permission_blast_radius" && payload.summary.permission_blast ? (
-              <PermissionImpact report={payload.summary.permission_blast} />
-            ) : null}
-            {mode === "identity_exposure" && pathVariants.length > 0 ? (
-              <p className="text-xs text-cyan-700 dark:text-cyan-300">
-                {pathVariants.length} unevaluated exposure candidate{pathVariants.length > 1 ? "s" : ""}. Validity:{" "}
-                {pathVariants[0]?.validity || payload.summary.path_validity || "UNKNOWN"}.
-              </p>
-            ) : null}
-            <ul className="list-inside list-disc text-xs text-slate-600 dark:text-slate-400">
-              <li>Collected assets in view: {payload.summary.confirmed_resource_count ?? payload.summary.reachable_resource_count}</li>
-              <li>Unresolved references: {payload.summary.unresolved_reference_count ?? 0}</li>
-              <li>Accounts in view: {payload.summary.reachable_accounts_count}</li>
-              <li>
-                {payload.summary.identity_attack
-                  ? `Complete resource paths: ${payload.summary.attack_path_count ?? 0}`
-                  : `Attack paths: ${payload.summary.attack_path_count ?? 0}`}
-              </li>
-              {payload.summary.identity_attack ? (
-                <li>Validated transitions: {payload.summary.validated_transition_count ?? 0}</li>
+          ) : null}
+
+          {resourceFinding ? null : <details className="hs-card p-4">
+            <summary className="hs-focus-ring cursor-pointer text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Technical details{startLabel ? ` for ${startLabel}` : ""}
+            </summary>
+            <aside className="mt-3 min-w-0 space-y-3 text-sm">
+              <p className="break-words text-slate-800 dark:text-slate-200">{payload.summary.summary_text}</p>
+              {mode === "attack_path" && payload.summary.identity_attack ? <IdentityAttackHops report={payload.summary.identity_attack} /> : null}
+              <ul className="list-inside list-disc text-xs text-slate-600 dark:text-slate-400">
+                <li>Unresolved references: {payload.summary.unresolved_reference_count ?? 0}</li>
+                <li>Path validity: {payload.summary.path_validity || "UNKNOWN"}</li>
+              </ul>
+              {payload.summary.missing_prerequisites && payload.summary.missing_prerequisites.length > 0 ? (
+                <p className="text-[11px] text-slate-500">Missing prerequisites: {payload.summary.missing_prerequisites.join(", ")}</p>
               ) : null}
-              {payload.summary.identity_attack ? (
-                <li>Additional reachable roles: {payload.summary.reachable_identity_count ?? 0}</li>
-              ) : null}
-              <li>Path validity: {payload.summary.path_validity || "UNKNOWN"}</li>
-            </ul>
-            {payload.summary.missing_prerequisites && payload.summary.missing_prerequisites.length > 0 ? (
-              <p className="text-[11px] text-slate-500">
-                Missing prerequisites: {payload.summary.missing_prerequisites.join(", ")}
-              </p>
-            ) : null}
-            {payload.summary.starting_assumption ? (
-              <p className="text-[11px] text-slate-500">{payload.summary.starting_assumption}</p>
-            ) : null}
-            {showPathSwitcher ? (
-              <div className="space-y-2 rounded border border-cyan-500/30 bg-cyan-500/5 p-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {mode === "identity_exposure" ? "Exposure candidates" : "Chain view"}
-                </h3>
-                <div className="flex flex-wrap gap-1.5">
-                  {pathVariants.map((variant) => {
-                    const active = activePath?.id === variant.id;
-                    return (
+              {payload.summary.starting_assumption ? <p className="text-[11px] text-slate-500">{payload.summary.starting_assumption}</p> : null}
+              {showPathSwitcher ? (
+                <div className="space-y-2 rounded border border-cyan-500/30 bg-cyan-500/5 p-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{mode === "identity_exposure" ? "Exposure candidates" : "Chain view"}</h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {pathVariants.map((variant) => (
                       <button
                         key={variant.id}
                         type="button"
                         onClick={() => setSelectedPathId(variant.id)}
-                        className={`rounded px-2 py-1 text-[11px] font-medium ${
-                          active
-                            ? "bg-cyan-500/25 text-cyan-900 dark:text-cyan-100"
-                            : "bg-slate-200/70 text-slate-700 hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                        }`}
+                        className={`rounded px-2 py-1 text-[11px] font-medium ${activePath?.id === variant.id ? "bg-cyan-500/25 text-cyan-900 dark:text-cyan-100" : "bg-slate-200/70 text-slate-700 hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"}`}
                       >
                         {variant.label}
                       </button>
-                    );
-                  })}
-                </div>
-                {activePath ? (
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                    {activePath.summary}
-                    {activePath.risk_hint ? ` ${activePath.risk_hint}` : ""}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Legend</h3>
-            <div className="space-y-3 text-[11px] text-slate-600 dark:text-slate-400">
-              {EDGE_LEGEND.map((group) => (
-                <section key={group.title} aria-label={group.title} className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <svg width="28" height="8" aria-hidden="true">
-                      <line x1="0" y1="4" x2="28" y2="4" stroke={group.stroke} strokeWidth="2" strokeDasharray={group.dash} />
-                    </svg>
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">{group.title}</span>
-                    <span className="text-slate-500">({group.line})</span>
-                  </div>
-                  <p className="text-slate-500">{group.note}</p>
-                  <dl className="space-y-1 border-l border-slate-300 pl-2 dark:border-slate-700">
-                    {group.items.map(([label, desc]) => (
-                      <div key={label}>
-                        <dt className="font-mono text-[10px] text-cyan-700 dark:text-cyan-300">{label}</dt>
-                        <dd className="ml-0">{desc}</dd>
-                      </div>
                     ))}
-                  </dl>
-                </section>
-              ))}
-            </div>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Selection</h3>
-            {selectedNodeObj ? <NodeDetail n={selectedNodeObj} /> : <p className="text-xs text-slate-500">No node selected.</p>}
-            {selectedNodeObj ? (
-              <EdgeEvidence edges={edges.filter((e) => e.source === selectedNodeObj.id || e.target === selectedNodeObj.id)} />
-            ) : null}
-            {selectedNodeObj && payload.summary.graph_available ? (
-              <div className="space-y-1">
-                <button
-                  type="button"
-                  className="rounded border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                  disabled={
-                    expandMutation.isPending ||
-                    expandedFromNodeIds.includes(selectedNodeObj.id) ||
-                    selectedNodeObj.type === "finding"
-                  }
-                  onClick={() => {
-                    if (!expandedFromNodeIds.includes(selectedNodeObj.id)) {
-                      expandMutation.mutate(selectedNodeObj.id);
-                    }
-                  }}
-                >
-                  {expandedFromNodeIds.includes(selectedNodeObj.id)
-                    ? "1-hop expansion added"
-                    : expandMutation.isPending
-                      ? "Expanding…"
-                      : "Expand 1 hop"}
-                </button>
-                {expandMutation.isSuccess && !expandMutation.data.expansion_applied ? (
-                  <p className="text-[11px] text-slate-500">
-                    {expandMutation.data.expansion_reason === "no_additional_high_signal_neighbors"
-                      ? "No additional high-signal neighbors."
-                      : "No additional expansion available."}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-            {!selectedNodeObj && edges.length > 0 ? (
-              <p className="text-[11px] text-slate-500">
-                Tip: select nodes in the 3D view. Edge list: {edges.length} (curated cap).
-              </p>
-            ) : null}
-          </aside>
+                  </div>
+                  {activePath ? <p className="text-[11px] text-slate-600 dark:text-slate-400">{activePath.summary}{activePath.risk_hint ? ` ${activePath.risk_hint}` : ""}</p> : null}
+                </div>
+              ) : null}
+              {graphUp ? (
+                <>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Selection</h3>
+                  {selectedNodeObj ? <NodeDetail n={selectedNodeObj} /> : <p className="text-xs text-slate-500">No node selected.</p>}
+                  {selectedNodeObj ? <EdgeEvidence edges={edges.filter((e) => e.source === selectedNodeObj.id || e.target === selectedNodeObj.id)} /> : null}
+                  {selectedNodeObj ? (
+                    <button
+                      type="button"
+                      className="rounded border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                      disabled={expandMutation.isPending || expandedFromNodeIds.includes(selectedNodeObj.id) || selectedNodeObj.type === "finding"}
+                      onClick={() => expandMutation.mutate(selectedNodeObj.id)}
+                    >
+                      {expandedFromNodeIds.includes(selectedNodeObj.id) ? "1-hop expansion added" : expandMutation.isPending ? "Expanding…" : "Expand 1 hop"}
+                    </button>
+                  ) : null}
+                  <details>
+                    <summary className="cursor-pointer text-xs font-semibold text-slate-600 dark:text-slate-300">How to read the graph (legend)</summary>
+                    <div className="mt-2 space-y-3 text-[11px] text-slate-600 dark:text-slate-400">
+                      {EDGE_LEGEND.map((group) => (
+                        <section key={group.title} aria-label={group.title} className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <svg width="28" height="8" aria-hidden="true">
+                              <line x1="0" y1="4" x2="28" y2="4" stroke={group.stroke} strokeWidth="2" strokeDasharray={group.dash} />
+                            </svg>
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">{group.title}</span>
+                            <span className="text-slate-500">({group.line})</span>
+                          </div>
+                          <p className="text-slate-500">{group.note}</p>
+                          <dl className="space-y-1 border-l border-slate-300 pl-2 dark:border-slate-700">
+                            {group.items.map(([label, desc]) => (
+                              <div key={label}>
+                                <dt className="font-mono text-[10px] text-cyan-700 dark:text-cyan-300">{label}</dt>
+                                <dd className="ml-0">{desc}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </section>
+                      ))}
+                    </div>
+                  </details>
+                </>
+              ) : null}
+            </aside>
+          </details>}
         </div>
       )}
     </div>
@@ -524,11 +440,13 @@ function EdgeEvidence({ edges }: { edges: BlastGraphEdge[] }) {
 }
 
 function IdentityAttackHops({ report }: { report: IdentityAttackReport }) {
-  const hops = report.transitions ?? [];
+  // A step its policies do not allow ("no applicable allow") is not a finding; it is counted, not listed.
+  const notAllowed = (report.transitions ?? []).filter((h) => h.reason === "no_applicable_allow").length;
+  const hops = (report.transitions ?? []).filter((h) => h.reason !== "no_applicable_allow");
   return (
     <div className="space-y-2 rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-950 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-100">
       <p className="font-semibold">Hypothetical session. A validated hop is modeled authorization, not evidence that an attack occurred.</p>
-      <p className="break-all">Initial role {report.initial_principal} · session {report.session_context_source}</p>
+      <p className="break-all">Starting identity {report.initial_principal} · session {report.session_context_source}</p>
       <ul className="list-inside list-disc space-y-0.5">
         <li>Complete resource paths: {report.resource_impact_path_count ?? 0}</li>
         <li>Distinct validated transitions: {report.validated_transition_count ?? 0}</li>
@@ -580,6 +498,7 @@ function IdentityAttackHops({ report }: { report: IdentityAttackReport }) {
           ))}
         </ul>
       ) : null}
+      {notAllowed > 0 ? <p>{notAllowed} other steps were tried and are not allowed by its policies.</p> : null}
       {(report.unsupported_techniques ?? []).length > 0 ? (
         <p>Unsupported techniques: {report.unsupported_techniques?.join(", ")}</p>
       ) : null}

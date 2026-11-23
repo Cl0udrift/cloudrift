@@ -1,13 +1,14 @@
 import type { ReactNode } from "react";
 import type { AccessStep } from "../../api/types";
 
-const KIND_LABEL: Record<AccessStep["kind"], string> = { caller: "Who", group: "Group", policy: "Policy", trust: "Trust policy", target: "Target" };
+const KIND_LABEL: Record<AccessStep["kind"], string> = { caller: "Who", group: "Group", policy: "Policy", trust: "Trust policy", action: "It can", target: "Target" };
 
 const ICON: Record<AccessStep["kind"], ReactNode> = {
   caller: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20c0-4 3.2-6 7-6s7 2 7 6" /></>,
   group: <><circle cx="9" cy="9" r="3" /><circle cx="16" cy="10" r="2.5" /><path d="M3 19c0-3.3 2.7-5 6-5s6 1.7 6 5M15 15c3 0 6 1.4 6 4" /></>,
   policy: <><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v4h4M10 12h5M10 16h5" /></>,
   trust: <><circle cx="8" cy="12" r="3.5" /><path d="M11.5 12H21M18 12v3M15 12v2.5" /></>,
+  action: <><path d="M13 3L5 13h6l-1 8 8-10h-6z" /></>,
   target: <><path d="M12 3l8 3v6c0 4.5-3.2 7.5-8 9-4.8-1.5-8-4.5-8-9V6z" /></>
 };
 

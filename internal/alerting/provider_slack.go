@@ -128,7 +128,7 @@ func formatSlackBlocks(payload AlertPayload) []map[string]any {
 			if len(parts) >= 3 {
 				break
 			}
-			parts = append(parts, "• "+b)
+			parts = append(parts, "• "+slackEscape(b))
 		}
 		blocks = append(blocks, map[string]any{
 			"type": "section",
@@ -136,6 +136,23 @@ func formatSlackBlocks(payload AlertPayload) []map[string]any {
 				"type": "mrkdwn",
 				"text": strings.Join(parts, "\n"),
 			},
+		})
+	}
+	if len(payload.Items) > 0 {
+		lines := make([]string, 0, len(payload.Items))
+		for _, it := range payload.Items {
+			line := "• " + slackEscape(it.Title)
+			if it.URL != "" {
+				line = "• <" + it.URL + "|" + slackEscape(it.Title) + ">"
+			}
+			if it.Detail != "" {
+				line += "  _" + slackEscape(it.Detail) + "_"
+			}
+			lines = append(lines, line)
+		}
+		blocks = append(blocks, map[string]any{
+			"type": "section",
+			"text": map[string]any{"type": "mrkdwn", "text": strings.Join(lines, "\n")},
 		})
 	}
 	if strings.TrimSpace(payload.ActionURL) != "" {
@@ -158,4 +175,9 @@ func formatSlackBlocks(payload AlertPayload) []map[string]any {
 		})
 	}
 	return blocks
+}
+
+// slackEscape stops text from finding names being read as Slack markup or links.
+func slackEscape(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }

@@ -3,6 +3,7 @@ import { CopyIdentifier } from "../ui/CopyIdentifier";
 import { SeverityBadge } from "../SeverityBadge";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { RemediationCommand } from "./RemediationCommand";
 import { IdentityPath, ReachableByList, RemediationOptions } from "./IdentityPath";
 import { formatQueryError } from "../../api/httpError";
 import type { FindingDetailItem } from "../../api/types";
@@ -283,11 +284,9 @@ export function FindingDetailPanelContent({
           <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300">{item.recommendation}</p>
         </Section>
       ) : null}
-      {item.remediation_command ? (
+      {item.remediation_command || ev.remediation_note ? (
         <Section title="Remediation command">
-          <pre className="overflow-x-auto rounded border border-slate-300 bg-slate-100 p-3 font-mono text-xs text-emerald-900 dark:border-slate-800 dark:bg-slate-950 dark:text-emerald-200/90">
-            {item.remediation_command}
-          </pre>
+          <RemediationCommand command={item.remediation_command} note={ev.remediation_note as string | undefined} level={ev.evidence_level as string | undefined} />
         </Section>
       ) : null}
       {item.trust ? (

@@ -9,6 +9,8 @@ const (
 	AssetCloudFrontDist           AssetType = "cloudfront_dist"
 	AssetAPIGatewayDomain         AssetType = "apigateway_domain"
 	AssetACMCert                  AssetType = "acm_cert"
+	AssetCognitoUserPool          AssetType = "cognito_user_pool"
+	AssetPublicAddressSet         AssetType = "public_address_set"
 	AssetIAMRole                  AssetType = "iam_role"
 	AssetIAMUser                  AssetType = "iam_user"
 	AssetIAMGroup                 AssetType = "iam_group"

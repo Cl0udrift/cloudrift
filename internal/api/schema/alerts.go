@@ -44,17 +44,23 @@ type AlertScope struct {
 }
 
 type Threshold struct {
-	CountMin       int     `json:"count_min,omitempty"`
-	RiskCostUSDMin float64 `json:"risk_cost_usd_min,omitempty"`
+	CountMin int `json:"count_min,omitempty"`
+}
+
+type AlertItem struct {
+	Title  string `json:"title"`
+	Detail string `json:"detail,omitempty"`
+	URL    string `json:"url,omitempty"`
 }
 
 type AlertPayload struct {
-	Title       string   `json:"title"`
-	Severity    string   `json:"severity"`
-	Summary     string   `json:"summary"`
-	Bullets     []string `json:"bullets"`
-	ActionLabel string   `json:"action_label"`
-	ActionURL   string   `json:"action_url"`
+	Title       string      `json:"title"`
+	Severity    string      `json:"severity"`
+	Summary     string      `json:"summary"`
+	Bullets     []string    `json:"bullets"`
+	Items       []AlertItem `json:"items"`
+	ActionLabel string      `json:"action_label"`
+	ActionURL   string      `json:"action_url"`
 }
 
 type AlertContext struct {

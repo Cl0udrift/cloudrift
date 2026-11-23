@@ -63,17 +63,25 @@ type RuleScope struct {
 }
 
 type Threshold struct {
-	CountMin       int     `json:"count_min,omitempty"`
-	RiskCostUSDMin float64 `json:"risk_cost_usd_min,omitempty"`
+	CountMin int `json:"count_min,omitempty"`
+}
+
+// AlertItem is one named thing in an alert, with a link to it.
+type AlertItem struct {
+	Title  string `json:"title"`
+	Detail string `json:"detail,omitempty"`
+	URL    string `json:"url,omitempty"`
 }
 
 type AlertPayload struct {
-	Title       string   `json:"title"`
-	Severity    Severity `json:"severity"`
-	Summary     string   `json:"summary"`
-	Bullets     []string `json:"bullets"`
-	ActionLabel string   `json:"action_label"`
-	ActionURL   string   `json:"action_url"`
+	Title    string   `json:"title"`
+	Severity Severity `json:"severity"`
+	Summary  string   `json:"summary"`
+	Bullets  []string `json:"bullets"`
+	// Items names up to three of the things the alert is about.
+	Items       []AlertItem `json:"items,omitempty"`
+	ActionLabel string      `json:"action_label"`
+	ActionURL   string      `json:"action_url"`
 }
 
 type AlertBlastSummary struct {

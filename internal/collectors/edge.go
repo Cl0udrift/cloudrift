@@ -2,6 +2,7 @@ package collectors
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -72,6 +73,7 @@ func CollectEdgeWithConfig(ctx context.Context, cfg *config.Config, accounts []A
 							"price_class":       string(d.PriceClass),
 							"alternate_domains": alt,
 							"origin":            firstOrigin(d),
+							"origins":           allOrigins(d),
 						},
 					}
 					localNodes = append(localNodes, node)
@@ -81,11 +83,14 @@ func CollectEdgeWithConfig(ctx context.Context, cfg *config.Config, accounts []A
 							SourceARN: arn, TargetARN: *d.ViewerCertificate.ACMCertificateArn, RelType: models.RelUsesCert,
 						})
 					}
-					origin := firstOrigin(d)
-					if strings.Contains(origin, ".s3.") || strings.Contains(origin, ".s3-") {
-						localRels = append(localRels, models.Relationship{
-							SourceARN: arn, TargetARN: "arn:aws:s3:::" + bucketFromOrigin(origin), RelType: models.RelFronts,
-						})
+					seenBucket := map[string]bool{}
+					for _, origin := range allOrigins(d) {
+						if bucket := bucketFromOrigin(origin); bucket != "" && !seenBucket[bucket] {
+							seenBucket[bucket] = true
+							localRels = append(localRels, models.Relationship{
+								SourceARN: arn, TargetARN: "arn:aws:s3:::" + bucket, RelType: models.RelFronts,
+							})
+						}
 					}
 				}
 			}
@@ -108,10 +113,24 @@ func firstOrigin(d cftypes.DistributionSummary) string {
 	return ""
 }
 
-func bucketFromOrigin(origin string) string {
-	parts := strings.Split(origin, ".")
-	if len(parts) > 0 {
-		return parts[0]
+// allOrigins lists every origin domain of a distribution, not only the first.
+func allOrigins(d cftypes.DistributionSummary) []string {
+	var out []string
+	for _, o := range d.Origins.Items {
+		if name := awsv2.ToString(o.DomainName); name != "" {
+			out = append(out, name)
+		}
 	}
-	return origin
+	return out
+}
+
+var s3OriginName = regexp.MustCompile(`^(.+?)\.s3[.-]`)
+
+// bucketFromOrigin returns the bucket an S3 or S3 website origin domain names, or "" for any other origin.
+// Bucket names may contain dots, so the name is everything before the ".s3" label.
+func bucketFromOrigin(origin string) string {
+	if m := s3OriginName.FindStringSubmatch(strings.ToLower(origin)); m != nil {
+		return m[1]
+	}
+	return ""
 }

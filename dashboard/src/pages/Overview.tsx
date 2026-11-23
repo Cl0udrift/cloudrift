@@ -17,6 +17,7 @@ import {
   SeverityDistribution
 } from "../components/overview/SummaryVisualizations";
 import { ScanRiskTrendChart } from "../components/overview/ScanRiskTrendChart";
+import { EdgeCoverageNotice } from "../components/findings/EdgeCoverageNotice";
 import { SecondaryMetricsStrip } from "../components/overview/SecondaryMetricsStrip";
 import { OwnershipRiskPanel } from "../components/overview/OwnershipRiskPanel";
 import { DashboardViewSwitch } from "../components/overview/DashboardViewSwitch";
@@ -356,6 +357,8 @@ function OperationsLayout({
   return (
     <div className="hs-section space-y-6">
       <OperationsScanSummaryCard scanId={selectedScanId} />
+
+      {summary.orphaned_edge_count === 0 ? <EdgeCoverageNotice scanId={selectedScanId} /> : null}
 
       <SecondaryMetricsStrip
         summary={summary}

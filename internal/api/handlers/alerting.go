@@ -409,8 +409,7 @@ func toSchemaRule(rule alerting.AlertRule) schema.AlertRule {
 			AccountIDs: append([]string(nil), rule.Scope.AccountIDs...),
 		},
 		Threshold: schema.Threshold{
-			CountMin:       rule.Threshold.CountMin,
-			RiskCostUSDMin: rule.Threshold.RiskCostUSDMin,
+			CountMin: rule.Threshold.CountMin,
 		},
 		CooldownMinutes:   rule.CooldownMinutes,
 		LastEvaluatedAt:   rule.LastEvaluatedAt,
@@ -440,8 +439,7 @@ func fromSchemaRule(rule schema.AlertRule) alerting.AlertRule {
 			AccountIDs: append([]string(nil), rule.Scope.AccountIDs...),
 		},
 		Threshold: alerting.Threshold{
-			CountMin:       rule.Threshold.CountMin,
-			RiskCostUSDMin: rule.Threshold.RiskCostUSDMin,
+			CountMin: rule.Threshold.CountMin,
 		},
 		CooldownMinutes:   rule.CooldownMinutes,
 		LastEvaluatedAt:   rule.LastEvaluatedAt,
@@ -536,8 +534,17 @@ func schemaFromAlertContext(ctx alerting.AlertContext) schema.AlertContext {
 			Severity:    string(ctx.Payload.Severity),
 			Summary:     ctx.Payload.Summary,
 			Bullets:     append([]string(nil), ctx.Payload.Bullets...),
+			Items:       toSchemaItems(ctx.Payload.Items),
 			ActionLabel: ctx.Payload.ActionLabel,
 			ActionURL:   ctx.Payload.ActionURL,
 		},
 	}
+}
+
+func toSchemaItems(in []alerting.AlertItem) []schema.AlertItem {
+	out := make([]schema.AlertItem, 0, len(in))
+	for _, i := range in {
+		out = append(out, schema.AlertItem{Title: i.Title, Detail: i.Detail, URL: i.URL})
+	}
+	return out
 }

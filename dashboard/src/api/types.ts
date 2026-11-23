@@ -788,7 +788,6 @@ export interface AlertScope {
 
 export interface AlertThreshold {
   count_min?: number;
-  risk_cost_usd_min?: number;
 }
 
 export interface AlertRule {
@@ -821,6 +820,7 @@ export interface AlertPayload {
   severity: string;
   summary: string;
   bullets: string[];
+  items?: { title: string; detail?: string; url?: string }[];
   action_label: string;
   action_url: string;
 }
@@ -1462,7 +1462,7 @@ export interface RoleAssumer {
   chain?: string[];
 }
 export interface AccessStep {
-  kind: "caller" | "group" | "policy" | "trust" | "target";
+  kind: "caller" | "group" | "policy" | "trust" | "action" | "target";
   label: string;
   detail?: string;
 }

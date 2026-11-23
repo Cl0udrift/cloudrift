@@ -16,6 +16,7 @@ import {
 } from "../components/findings/FindingDetailPanel";
 import { InterimHeuristicIndicator } from "../components/InterimHeuristicIndicator";
 import { PageHeader } from "../components/PageHeader";
+import { EdgeCoverageNotice } from "../components/findings/EdgeCoverageNotice";
 import { SafeExternalLink } from "../components/SafeExternalLink";
 import { SeverityBadge } from "../components/SeverityBadge";
 import { ScanRequired } from "../components/ScanRequired";
@@ -520,6 +521,7 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
             : "Server-paginated from GET /api/scans/:id/findings. Detail loads when a row is opened. Filters sync to the URL for sharing."
         }
       />
+      {state.module === "orphaned_edge" ? <EdgeCoverageNotice scanId={selectedScanId} /> : null}
       {triage ? (
         <div
           className="rounded-lg border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/95 dark:border-amber-500/35 dark:bg-amber-950/40"

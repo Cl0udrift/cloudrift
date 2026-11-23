@@ -65,25 +65,38 @@ func CollectDNSWithConfig(ctx context.Context, cfg *config.Config, accounts []Ac
 							return
 						}
 						for _, rr := range records.ResourceRecordSets {
-							if rr.Type == types.RRTypeSoa || rr.Type == types.RRTypeNs {
+							name := strings.TrimSuffix(awsv2.ToString(rr.Name), ".")
+							// The zone's own NS set is Route 53's; an NS record below the apex is a delegation worth checking.
+							if rr.Type == types.RRTypeSoa || (rr.Type == types.RRTypeNs && strings.EqualFold(name, strings.TrimSuffix(awsv2.ToString(zone.Name), "."))) {
 								continue
 							}
-							name := strings.TrimSuffix(awsv2.ToString(rr.Name), ".")
 							target := recordTarget(rr)
+							props := map[string]any{
+								"type":           string(rr.Type),
+								"value":          target,
+								"values":         recordValues(rr),
+								"zone_id":        strings.TrimPrefix(awsv2.ToString(zone.Id), "/hostedzone/"),
+								"private":        zone.Config != nil && zone.Config.PrivateZone,
+								"target_service": classifyTargetService(target),
+								"dns_status":     "unknown",
+							}
+							if rr.TTL != nil {
+								props["ttl"] = *rr.TTL
+							}
+							if rr.SetIdentifier != nil {
+								props["set_identifier"] = *rr.SetIdentifier
+							}
+							if rr.AliasTarget != nil {
+								props["alias_hosted_zone_id"] = awsv2.ToString(rr.AliasTarget.HostedZoneId)
+								props["alias_evaluate_target_health"] = rr.AliasTarget.EvaluateTargetHealth
+							}
 							local = append(local, models.AssetNode{
-								ARN:       "arn:aws:route53:::" + strings.TrimPrefix(awsv2.ToString(zone.Id), "/hostedzone/") + "/" + name,
-								AssetType: models.AssetDNSRecord,
-								Name:      name,
-								AccountID: account.ID,
-								Region:    "global",
-								Properties: map[string]any{
-									"type":           string(rr.Type),
-									"value":          target,
-									"zone_id":        strings.TrimPrefix(awsv2.ToString(zone.Id), "/hostedzone/"),
-									"private":        zone.Config != nil && zone.Config.PrivateZone,
-									"target_service": classifyTargetService(target),
-									"dns_status":     "unknown",
-								},
+								ARN:        "arn:aws:route53:::" + strings.TrimPrefix(awsv2.ToString(zone.Id), "/hostedzone/") + "/" + name,
+								AssetType:  models.AssetDNSRecord,
+								Name:       name,
+								AccountID:  account.ID,
+								Region:     "global",
+								Properties: props,
 							})
 						}
 					}
@@ -98,6 +111,17 @@ func CollectDNSWithConfig(ctx context.Context, cfg *config.Config, accounts []Ac
 	wg.Wait()
 	warnPartial(ctx, "dns", firstErr)
 	return out, nil
+}
+
+// recordValues returns every value of a record, so a fix can name the whole record set.
+func recordValues(rr types.ResourceRecordSet) []string {
+	var out []string
+	for _, r := range rr.ResourceRecords {
+		if r.Value != nil {
+			out = append(out, *r.Value)
+		}
+	}
+	return out
 }
 
 func recordTarget(rr types.ResourceRecordSet) string {
@@ -130,3 +154,6 @@ func classifyTargetService(target string) string {
 		return "unknown"
 	}
 }
+
+// ClassifyTargetService names the AWS or third-party service a DNS target belongs to.
+func ClassifyTargetService(target string) string { return classifyTargetService(target) }

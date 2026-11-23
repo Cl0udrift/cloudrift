@@ -54,6 +54,12 @@ Resources:
                   - ec2:DescribeIamInstanceProfileAssociations
                   - ec2:DescribeRegions
                   - ec2:DescribeSecurityGroups
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeNetworkInterfaces
+                  - acm:ListCertificates
+                  - acm:DescribeCertificate
+                  - cognito-idp:ListUserPools
+                  - cognito-idp:DescribeUserPool
                   - elasticloadbalancing:DescribeLoadBalancers
                   - elasticloadbalancing:DescribeTargetGroups
                   - elasticloadbalancing:DescribeTargetHealth
@@ -106,3 +112,9 @@ Resources:
                   - s3:GetBucketEncryption
                   - sts:AssumeRole
                 Resource: "*"
+              # Custom domain names only: apigateway:GET on the whole service would also read API keys and stages.
+              - Effect: Allow
+                Action: apigateway:GET
+                Resource:
+                  - arn:aws:apigateway:*::/domainnames
+                  - arn:aws:apigateway:*::/domainnames/*

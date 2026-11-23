@@ -46,14 +46,18 @@ func (e *Evaluator) Evaluate(rule AlertRule, scanID string) (AlertEvaluationResu
 		res, err = e.evalScanCompletion(rule, scanID, scoped)
 	case RuleNewCriticalFindings:
 		res, err = e.evalNewCritical(rule, scanID, scoped)
-	case RuleNewEscalationPaths:
-		res, err = e.evalNewEscalation(rule, scanID, scoped)
+	case RuleNewInternetExposure:
+		res, err = e.evalNewExposure(rule, scanID)
 	case RuleReclaimableThreshold:
 		res, err = e.evalReclaimable(rule, scanID, scoped)
 	case RuleStaleExternalPrivilegedRoles:
 		res, err = e.evalStaleExternalPrivileged(rule, scanID, scoped)
 	default:
-		return AlertEvaluationResult{}, fmt.Errorf("unsupported alert rule type %q", rule.Type)
+		spec, ok := deltaSpecFor(rule.Type)
+		if !ok {
+			return AlertEvaluationResult{}, fmt.Errorf("unsupported alert rule type %q", rule.Type)
+		}
+		res, err = e.evalDelta(rule, scanID, spec, scoped)
 	}
 	if err != nil {
 		return res, err
@@ -106,54 +110,73 @@ func enrichScopeMetadata(rule AlertRule, before, after int, res *AlertEvaluation
 	}
 }
 
+// evalScanCompletion is the "what changed" digest. It does not fire when nothing changed since the previous scan,
+// so a quiet scan stays quiet. The first scan has no baseline and always reports its totals.
 func (e *Evaluator) evalScanCompletion(rule AlertRule, scanID string, findings []models.Finding) (AlertEvaluationResult, error) {
 	critical, high := severityCounts(findings)
-	newCount, resolvedCount := 0, 0
-	var prevRisk, currRisk float64
-	currRisk = totalMonthlyRiskUSD(findings)
-	if prev := e.previousScanID(scanID); prev != "" {
-		_, oldFindings, err := scans.LoadScanArtifacts(e.outputDir, prev)
-		if err == nil {
-			newCount, resolvedCount = diffCounts(oldFindings, findings)
-			prevRisk = totalMonthlyRiskUSD(oldFindings)
+	prev := e.previousScanID(scanID)
+	var fresh []models.Finding
+	resolved := 0
+	prevCritical, prevHigh := 0, 0
+	if prev != "" {
+		_, old, err := scans.LoadScanArtifacts(e.outputDir, prev)
+		if err != nil {
+			return AlertEvaluationResult{}, err
+		}
+		old = FilterFindingsByAccountScope(rule, old)
+		prevCritical, prevHigh = severityCounts(old)
+		oldIdx := map[string]struct{}{}
+		for _, f := range old {
+			oldIdx[diffIdentity(f)] = struct{}{}
+		}
+		curIdx := map[string]struct{}{}
+		for _, f := range findings {
+			curIdx[diffIdentity(f)] = struct{}{}
+			if _, ok := oldIdx[diffIdentity(f)]; !ok {
+				fresh = append(fresh, f)
+			}
+		}
+		for k := range oldIdx {
+			if _, ok := curIdx[k]; !ok {
+				resolved++
+			}
 		}
 	}
-
-	bullets := []string{
-		fmt.Sprintf("%d findings (%d critical / %d high).", len(findings), critical, high),
-	}
-	if newCount > 0 || resolvedCount > 0 {
-		bullets = append(bullets, fmt.Sprintf("Delta vs prior scan: +%d new identities, -%d resolved.", newCount, resolvedCount))
-	}
-	if line := riskTrendLine(prevRisk, currRisk); line != "" {
-		bullets = append(bullets, line)
-	}
-	bullets = append(bullets, topAccountBullet(findings))
-
-	summary := fmt.Sprintf("Scan %s complete — prioritize critical/high items before they compound.", scanID)
-	if critical > 0 {
-		summary = fmt.Sprintf("Scan %s complete — %d critical finding(s) need ownership review.", scanID, critical)
-	}
-
+	totals := fmt.Sprintf("%d findings (%d critical, %d high).", len(findings), critical, high)
 	payload := AlertPayload{
-		Title:       "Scan completed",
+		Title:       "Scan finished",
 		Severity:    SeverityInfo,
-		Summary:     summary,
-		Bullets:     cleanBullets(bullets),
 		ActionLabel: "Open scan overview",
 		ActionURL:   e.url("/overview", map[string]string{"scan_id": scanID, "view": "executive"}),
 	}
-	meta := map[string]any{
-		"critical_count":     critical,
-		"high_count":         high,
-		"new_count":          newCount,
-		"resolved_count":     resolvedCount,
-		"modeled_risk_usd":   currRisk,
-		"prior_modeled_risk": prevRisk,
+	meta := map[string]any{"critical_count": critical, "high_count": high, "new_count": len(fresh), "resolved_count": resolved}
+	triggered := true
+	switch {
+	case prev == "":
+		payload.Summary = fmt.Sprintf("First scan %s finished. %s", scanID, totals)
+		payload.Items = e.topItems(scanID, filterCriticalHigh(findings))
+	case len(fresh) == 0 && resolved == 0:
+		triggered = false
+		payload = quiet(payload, "Scan finished, no changes", fmt.Sprintf("Scan %s found the same findings as %s. %s", scanID, prev, totals))
+	default:
+		meta["baseline_scan_id"] = prev
+		payload.Summary = fmt.Sprintf("Since scan %s: %d new, %d resolved. %s", prev, len(fresh), resolved, totals)
+		payload.Items = e.topItems(scanID, fresh)
+		payload.Bullets = cleanBullets([]string{
+			fmt.Sprintf("Critical %d (was %d), high %d (was %d).", critical, prevCritical, high, prevHigh),
+			topAccountBullet(fresh),
+		})
+		if critical > prevCritical {
+			payload.Severity = SeverityCritical
+		} else if high > prevHigh {
+			payload.Severity = SeverityWarning
+		}
 	}
-	res := makeResult(rule, scanID, true, payload, len(findings), meta)
-	if top, ok := topFindingByPriority(filterCriticalHigh(findings)); ok {
-		res.Context.BlastSummary = e.maybeEnrichAlertWithBlast(scanID, blastradius.ModeBlastRadius, &top, &res.Context.Payload, res.Context.Metadata)
+	res := makeResult(rule, scanID, triggered, payload, len(fresh), meta)
+	if triggered {
+		if top, ok := topFindingByPriority(filterCriticalHigh(fresh)); ok {
+			res.Context.BlastSummary = e.maybeEnrichAlertWithBlast(scanID, blastradius.ModeBlastRadius, &top, &res.Context.Payload, res.Context.Metadata)
+		}
 	}
 	return res, nil
 }
@@ -161,15 +184,7 @@ func (e *Evaluator) evalScanCompletion(rule AlertRule, scanID string, findings [
 func (e *Evaluator) evalNewCritical(rule AlertRule, scanID string, findings []models.Finding) (AlertEvaluationResult, error) {
 	prev := e.previousScanID(scanID)
 	if prev == "" {
-		payload := AlertPayload{
-			Title:       "New critical findings",
-			Severity:    SeverityInfo,
-			Summary:     "No baseline scan available yet for critical delta detection.",
-			Bullets:     []string{"Run another scan to enable delta-based critical alerts."},
-			ActionLabel: "Open findings",
-			ActionURL:   e.url("/findings", map[string]string{"scan_id": scanID, "severity": "critical"}),
-		}
-		return makeResult(rule, scanID, false, payload, 0, map[string]any{"baseline_available": false}), nil
+		return e.baselineMissing(rule, scanID, "New critical findings", "/findings", map[string]string{"severity": "critical"}), nil
 	}
 
 	_, oldFindings, err := scans.LoadScanArtifacts(e.outputDir, prev)
@@ -228,12 +243,17 @@ func (e *Evaluator) evalNewCritical(rule AlertRule, scanID string, findings []mo
 	}
 
 	payload := AlertPayload{
-		Title:       "New critical findings detected",
+		Title:       fmt.Sprintf("%d new critical %s", len(newCritical), plural(len(newCritical), "finding", "findings")),
 		Severity:    SeverityCritical,
 		Summary:     summary,
 		Bullets:     cleanBullets(bullets),
+		Items:       e.topItems(scanID, newCritical),
 		ActionLabel: "Review critical findings",
 		ActionURL:   e.url("/findings", map[string]string{"scan_id": scanID, "severity": "critical"}),
+	}
+	if len(newCritical) == 0 {
+		payload = quiet(payload, "No new critical findings", fmt.Sprintf("No new critical findings since scan %s.", prev))
+		payload.Bullets = nil
 	}
 	meta := map[string]any{
 		"baseline_scan_id": prev,
@@ -255,115 +275,35 @@ func isEscalation(f models.Finding) bool {
 	return category == "privilege_escalation"
 }
 
-// evalNewEscalation triggers on escalation paths the previous scan did not have. With no previous scan it
-// does not trigger: a first scan has no baseline, so nothing in it is new.
-func (e *Evaluator) evalNewEscalation(rule AlertRule, scanID string, findings []models.Finding) (AlertEvaluationResult, error) {
-	url := e.url("/findings", map[string]string{"scan_id": scanID, "search": "privilege_escalation"})
-	prev := e.previousScanID(scanID)
-	if prev == "" {
-		payload := AlertPayload{
-			Title:       "New privilege-escalation paths",
-			Severity:    SeverityInfo,
-			Summary:     "No baseline scan available yet for escalation-path delta detection.",
-			Bullets:     []string{"Run another scan to enable alerts on new escalation paths."},
-			ActionLabel: "Open escalation paths",
-			ActionURL:   url,
-		}
-		return makeResult(rule, scanID, false, payload, 0, map[string]any{"baseline_available": false}), nil
-	}
-	_, oldFindings, err := scans.LoadScanArtifacts(e.outputDir, prev)
-	if err != nil {
-		return AlertEvaluationResult{}, err
-	}
-	oldIdx := map[string]struct{}{}
-	for _, f := range FilterFindingsByAccountScope(rule, oldFindings) {
-		oldIdx[diffIdentity(f)] = struct{}{}
-	}
-	var fresh []models.Finding
-	severity := SeverityWarning
-	for _, f := range findings {
-		if !isEscalation(f) {
-			continue
-		}
-		if _, ok := oldIdx[diffIdentity(f)]; ok {
-			continue
-		}
-		fresh = append(fresh, f)
-		if s := strings.ToLower(string(f.Severity)); s == "high" || s == "critical" {
-			severity = SeverityCritical
-		}
-	}
-	bullets := []string{fmt.Sprintf("%d new escalation path(s) vs baseline %s.", len(fresh), prev)}
-	summary := fmt.Sprintf("%d new privilege-escalation path(s) since the last scan.", len(fresh))
-	if top, ok := topFindingByPriority(fresh); ok {
-		bullets = append(bullets, "Highest-signal item: "+shortenTitle(top.Title, 80)+".")
-		if len(fresh) == 1 {
-			summary = "New escalation path: " + shortenTitle(top.Title, 80) + "."
-		}
-	}
-	if len(fresh) > 0 {
-		bullets = append(bullets, topAccountBullet(fresh))
-	}
-	payload := AlertPayload{
-		Title:       "New privilege-escalation paths detected",
-		Severity:    severity,
-		Summary:     summary,
-		Bullets:     cleanBullets(bullets),
-		ActionLabel: "Review escalation paths",
-		ActionURL:   url,
-	}
-	return makeResult(rule, scanID, len(fresh) > 0, payload, len(fresh), map[string]any{"baseline_scan_id": prev}), nil
-}
-
 func (e *Evaluator) evalReclaimable(rule AlertRule, scanID string, findings []models.Finding) (AlertEvaluationResult, error) {
 	reclaimable := make([]models.Finding, 0)
-	var reclaimRisk float64
 	for _, f := range findings {
 		if strings.EqualFold(string(f.Claimability), "reclaimable") {
 			reclaimable = append(reclaimable, f)
-			reclaimRisk += f.MonthlyRiskCost
 		}
 	}
-	triggered := (rule.Threshold.CountMin > 0 && len(reclaimable) >= rule.Threshold.CountMin) ||
-		(rule.Threshold.RiskCostUSDMin > 0 && reclaimRisk >= rule.Threshold.RiskCostUSDMin) ||
-		(rule.Threshold.CountMin == 0 && rule.Threshold.RiskCostUSDMin == 0 && len(reclaimable) > 0)
-
-	bullets := []string{
-		fmt.Sprintf("%d reclaimable (~$%.0f/mo modeled).", len(reclaimable), reclaimRisk),
+	countMin := rule.Threshold.CountMin
+	if countMin <= 0 {
+		countMin = 1
 	}
-	if top, ok := topFindingByPriority(reclaimable); ok {
-		if o := ownerOneLiner(top); o != "" {
-			bullets = append(bullets, fmt.Sprintf("Start with %s (%s).", shortenTitle(top.Title, 64), o))
-		} else {
-			bullets = append(bullets, fmt.Sprintf("Start with %s.", shortenTitle(top.Title, 72)))
-		}
-	}
-	if line := topRemediationLine(reclaimable); line != "" {
-		bullets = append(bullets, line)
-	}
-	bullets = append(bullets, topAccountBullet(reclaimable))
-
-	summary := fmt.Sprintf("Reclaimable volume crossed your threshold on %s — idle spend and mis-claims add up.", scanID)
-	if len(reclaimable) > 0 {
-		summary = fmt.Sprintf("%d reclaimable on %s — close the highest-cost items first.", len(reclaimable), scanID)
-	}
-
+	triggered := len(reclaimable) >= countMin
 	payload := AlertPayload{
-		Title:       "Reclaimable findings threshold reached",
-		Severity:    SeverityWarning,
-		Summary:     summary,
-		Bullets:     cleanBullets(bullets),
 		ActionLabel: "Review reclaimable fixes",
 		ActionURL:   e.url("/findings", map[string]string{"scan_id": scanID, "claimability": "reclaimable"}),
 	}
-	meta := map[string]any{
-		"count_min":            rule.Threshold.CountMin,
-		"risk_cost_usd_min":    rule.Threshold.RiskCostUSDMin,
-		"reclaimable_count":    len(reclaimable),
-		"reclaimable_risk_usd": reclaimRisk,
+	if triggered {
+		noun := plural(len(reclaimable), "finding", "findings")
+		payload.Title = fmt.Sprintf("%d reclaimable %s", len(reclaimable), noun)
+		payload.Severity = SeverityWarning
+		payload.Summary = fmt.Sprintf("%d reclaimable %s on scan %s (your limit is %d). Each one is a dangling record or orphaned resource an attacker could claim.", len(reclaimable), noun, scanID, countMin)
+		payload.Items = e.topItems(scanID, reclaimable)
+		payload.Bullets = cleanBullets([]string{topRemediationLine(reclaimable), topAccountBullet(reclaimable)})
+	} else {
+		payload = quiet(payload, "Reclaimable findings below limit", fmt.Sprintf("%d reclaimable %s on scan %s; the limit is %d.", len(reclaimable), plural(len(reclaimable), "finding", "findings"), scanID, countMin))
 	}
+	meta := map[string]any{"count_min": countMin, "reclaimable_count": len(reclaimable)}
 	res := makeResult(rule, scanID, triggered, payload, len(reclaimable), meta)
-	if top, ok := topFindingByPriority(reclaimable); ok && top.MonthlyRiskCost >= 50 {
+	if top, ok := topFindingByPriority(reclaimable); ok && triggered {
 		res.Context.BlastSummary = e.maybeEnrichAlertWithBlast(scanID, blastradius.ModeBlastRadius, &top, &res.Context.Payload, res.Context.Metadata)
 	}
 	return res, nil
@@ -408,12 +348,17 @@ func (e *Evaluator) evalStaleExternalPrivileged(rule AlertRule, scanID string, f
 	bullets = append(bullets, "Next: validate vendor, shrink roles, or revoke unused trust.")
 
 	payload := AlertPayload{
-		Title:       "Stale privileged external trust detected",
+		Title:       fmt.Sprintf("%d stale privileged external %s", len(matches), plural(len(matches), "trust", "trusts")),
 		Severity:    SeverityCritical,
-		Summary:     fmt.Sprintf("%d stale privileged external role(s) — third-party access is the blast radius to cut first.", len(matches)),
+		Summary:     fmt.Sprintf("%d external %s can still assume a privileged role but has not been used recently.", len(matches), plural(len(matches), "party", "parties")),
 		Bullets:     cleanBullets(bullets),
+		Items:       e.topItems(scanID, matches),
 		ActionLabel: "Inspect external access",
 		ActionURL:   e.url("/external-entities", map[string]string{"scan_id": scanID, "has_stale_role": "true", "has_privileged_role": "true"}),
+	}
+	if !triggered {
+		payload = quiet(payload, "No stale privileged external trust", fmt.Sprintf("%d stale privileged external %s found; the limit is %d.", len(matches), plural(len(matches), "trust", "trusts"), countMin))
+		payload.Bullets, payload.Items = nil, nil
 	}
 	meta := map[string]any{
 		"count_min":   countMin,
@@ -486,7 +431,7 @@ func (e *Evaluator) url(path string, query map[string]string) string {
 func makeResult(rule AlertRule, scanID string, triggered bool, payload AlertPayload, count int, metadata map[string]any) AlertEvaluationResult {
 	summary := payload.Summary
 	if !triggered {
-		summary = "Rule evaluated without trigger: " + payload.Summary
+		summary = "Not triggered: " + payload.Summary
 	}
 	now := time.Now().UTC()
 	return AlertEvaluationResult{

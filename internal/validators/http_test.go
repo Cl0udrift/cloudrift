@@ -60,11 +60,13 @@ func TestTakeoverSignatureCatalog(t *testing.T) {
 		{"github pages unclaimed", 404, "GitHub.com", "There isn't a GitHub Pages site here.", "github_pages_unclaimed", true},
 		{"heroku no such app", 404, "Cowboy", "<title>No such app</title>", "heroku_no_such_app", true},
 		{"shopify unavailable", 404, "", "Sorry, this shop is currently unavailable.", "shopify_unavailable", true},
+		{"fastly unknown domain", 500, "", "Fastly error: unknown domain: docs.example.com", "fastly_unknown_domain", true},
+		{"zendesk closed", 404, "", "<title>Help Center Closed</title>", "zendesk_help_center_closed", true},
 		{"healthy page no match", 200, "nginx", "<html>hello</html>", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sig, ok := matchTakeoverSignature(tc.status, tc.server, tc.body)
+			sig, ok := matchTakeoverSignature(tc.status, tc.server, tc.body, map[string]string{"github_pages_unclaimed": "org.github.io", "heroku_no_such_app": "x.herokuapp.com", "shopify_unavailable": "shops.myshopify.com", "fastly_unknown_domain": "x.global.prod.fastly.net", "zendesk_help_center_closed": "acme.zendesk.com"}[tc.wantID])
 			if tc.wantID == "" {
 				if ok {
 					t.Fatalf("expected no match, got %s", sig.ID)
@@ -146,5 +148,83 @@ func TestTargetForProbeOverride(t *testing.T) {
 	host, target, scheme := targetForProbe(node)
 	if host != "localhost" || scheme != "http" || !strings.Contains(target, "localhost:9000") {
 		t.Fatalf("unexpected target parse host=%s scheme=%s target=%s", host, scheme, target)
+	}
+}
+
+func TestThirdPartyFingerprintNeedsTheMatchingTarget(t *testing.T) {
+	body := "There isn't a GitHub Pages site here."
+	if _, ok := matchTakeoverSignature(404, "GitHub.com", body, "evil.example.net"); ok {
+		t.Fatal("a body match alone must not count when the record does not point at the service")
+	}
+	if _, ok := matchTakeoverSignature(404, "", body, "org.github.io."); !ok {
+		t.Fatal("matching target and body must count")
+	}
+}
+
+type mapResolver map[string]error
+
+func (f mapResolver) LookupHost(_ context.Context, h string) ([]string, error) {
+	if err, ok := f[h]; ok {
+		return nil, err
+	}
+	return []string{"1.2.3.4"}, nil
+}
+
+func TestDeletedAWSTargetIsFoundFromTheTarget(t *testing.T) {
+	node := models.AssetNode{Name: "app.example.com", Properties: map[string]any{"type": "CNAME", "value": "old-env.us-east-1.elasticbeanstalk.com", "target_service": "elasticbeanstalk"}}
+	res := validateNode(context.Background(), node, true, time.Second, "ua", mapResolver{"app.example.com": dnsNotFoundErr(), "old-env.us-east-1.elasticbeanstalk.com": dnsNotFoundErr()}, nil, nil)
+	if res.ErrorFingerprint != "target_deleted_elasticbeanstalk" || !res.Claimable {
+		t.Fatalf("a deleted Beanstalk environment is claimable: %+v", res)
+	}
+	node.Properties["value"], node.Properties["target_service"] = "x.us-east-1.elb.amazonaws.com", "alb"
+	res = validateNode(context.Background(), node, true, time.Second, "ua", mapResolver{"app.example.com": dnsNotFoundErr(), "x.us-east-1.elb.amazonaws.com": dnsNotFoundErr()}, nil, nil)
+	if res.ErrorFingerprint != "target_deleted_alb" || res.Claimable {
+		t.Fatalf("a deleted load balancer is dangling, not claimable: %+v", res)
+	}
+	res = validateNode(context.Background(), node, true, time.Second, "ua", mapResolver{"app.example.com": dnsNotFoundErr()}, nil, nil)
+	if res.ErrorFingerprint != "dns_nxdomain" {
+		t.Fatalf("a target that still resolves keeps the plain result: %+v", res)
+	}
+}
+
+func TestLameDelegation(t *testing.T) {
+	defer func(old func(context.Context, string, string) string) { delegationProbe = old }(delegationProbe)
+	node := models.AssetNode{Name: "sub.example.com", Properties: map[string]any{"type": "NS", "values": []string{"ns-1.awsdns-01.org.", "ns-2.awsdns-02.com."}}}
+	delegationProbe = func(context.Context, string, string) string { return "refused" }
+	res := validateDelegation(context.Background(), node, nil)
+	if res.ErrorFingerprint != "ns_delegation_lame" || !res.Claimable {
+		t.Fatalf("all Route 53 servers refusing is a claimable lame delegation: %+v", res)
+	}
+	delegationProbe = func(_ context.Context, _, h string) string {
+		if strings.HasPrefix(h, "ns-1") {
+			return "refused"
+		}
+		return "answered"
+	}
+	if res = validateDelegation(context.Background(), node, nil); res.ErrorFingerprint != "" {
+		t.Fatalf("one server that answers means the zone is served: %+v", res)
+	}
+	delegationProbe = func(context.Context, string, string) string { return "timeout" }
+	if res = validateDelegation(context.Background(), node, nil); res.ErrorFingerprint != "" {
+		t.Fatalf("a timeout proves nothing: %+v", res)
+	}
+}
+
+func TestBucketStateFromResponse(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+		want   string
+	}{{404, "<Code>NoSuchBucket</Code>", "missing"}, {403, "<Code>AccessDenied</Code>", "exists"}, {301, "", "exists"}, {200, "", "exists"}, {503, "", "unknown"}, {404, "other", "unknown"}}
+	for _, c := range cases {
+		if got := bucketStateFrom(c.status, c.body); got != c.want {
+			t.Errorf("%d %q: got %s want %s", c.status, c.body, got, c.want)
+		}
+	}
+}
+
+func TestAnyEC2Name(t *testing.T) {
+	if !anyEC2Name([]string{"ec2-3-0-0-1.compute-1.amazonaws.com."}) || anyEC2Name([]string{"host.example.net.", "lb-1.elb.amazonaws.com"}) {
+		t.Fatal("only ec2-… names under amazonaws.com count")
 	}
 }

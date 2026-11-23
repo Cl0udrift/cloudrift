@@ -118,7 +118,7 @@ export function emptyRuleDraft(catalogType?: string): AlertRuleDraft {
       slack_webhook_url: ""
     },
     scope: { scan_ids: [], account_ids: [] },
-    threshold: { count_min: 0, risk_cost_usd_min: 0 },
+    threshold: { count_min: 0 },
     cooldown_minutes: 0
   };
 }
@@ -134,8 +134,7 @@ export function ruleToDraft(rule: AlertRule): AlertRuleDraft {
       account_ids: [...(rule.scope.account_ids ?? [])]
     },
     threshold: {
-      count_min: rule.threshold.count_min ?? 0,
-      risk_cost_usd_min: rule.threshold.risk_cost_usd_min ?? 0
+      count_min: rule.threshold.count_min ?? 0
     },
     cooldown_minutes: rule.cooldown_minutes ?? 0
   };

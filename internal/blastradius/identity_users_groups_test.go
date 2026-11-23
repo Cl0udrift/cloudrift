@@ -338,3 +338,35 @@ func TestWhoCanOnABucketIsAPlainCanWhenOnlyACLAndPublicAccessEvidenceIsMissing(t
 		t.Fatalf("missing ACL evidence: allowed caller still can, caller without allow stays undecided: %#v %#v", got, unknown)
 	}
 }
+
+func TestAttackSearchSkipsServiceLinkedRolesAndListsOneEscalationPerTarget(t *testing.T) {
+	const slr = "arn:aws:iam::111111111111:role/aws-service-role/x.amazonaws.com/AWSServiceRoleForX"
+	const normal = "arn:aws:iam::111111111111:role/Normal"
+	admin := `{"Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}`
+	user := ugUserNode(admin)
+	got := attackFrom([]models.AssetNode{user, controlledRole(slr, "", ""), controlledRole(normal, "", "")})
+	if hasEscalation(got, "TRUST_REWRITE", slr) || hasEscalation(got, "GRANT_ON_REACHABLE_ROLE", slr) {
+		t.Fatalf("AWS does not let anyone rewrite or grant on a service-linked role: %#v", got.Escalations)
+	}
+	for _, tr := range got.Transitions {
+		if tr.TargetARN == slr {
+			t.Fatalf("no transition may target a service-linked role: %#v", tr)
+		}
+	}
+	if !hasEscalation(got, "TRUST_REWRITE", normal) {
+		t.Fatalf("an ordinary role is still reported: %#v", got.Escalations)
+	}
+
+	// AttachGroupPolicy and PutGroupPolicy both enable the same step; it is listed once.
+	group := ugGroupNode(admin)
+	got = attackFrom([]models.AssetNode{ugUserNode(allowDoc("iam:*", ugGroup)), group}, memberOf())
+	n := 0
+	for _, e := range got.Escalations {
+		if e.Kind == "SELF_POLICY_GRANT" && e.TargetARN == ugGroup {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("one escalation per kind and target, got %d: %#v", n, got.Escalations)
+	}
+}

@@ -12,6 +12,9 @@ import (
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/acm"
+	"github.com/aws/aws-sdk-go-v2/service/apigateway"
+	"github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
 	"github.com/aws/aws-sdk-go-v2/service/apprunner"
 	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
 	"github.com/aws/aws-sdk-go-v2/service/batch"
@@ -19,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
 	"github.com/aws/aws-sdk-go-v2/service/codebuild"
 	"github.com/aws/aws-sdk-go-v2/service/codedeploy"
+	"github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
@@ -72,6 +76,12 @@ type WorkloadClients struct {
 	SecurityGroups SecurityGroupAPI
 	ELBv2          ELBv2API
 	RDS            RDSAPI
+	// Names and addresses that can be registered again. Nil skips them (scan.network_resources off).
+	Addresses    AddressAPI
+	ACM          ACMAPI
+	APIGateway   APIGatewayAPI
+	APIGatewayV2 APIGatewayV2API
+	Cognito      CognitoAPI
 }
 
 // OrganizationAccountNodes records discovered organization membership.
@@ -114,6 +124,7 @@ var regionalWorkloadClients = func(cfg awsv2.Config) WorkloadClients {
 		Glue: glue.NewFromConfig(cfg), Batch: batch.NewFromConfig(cfg), AppRunner: apprunner.NewFromConfig(cfg), SageMaker: sagemaker.NewFromConfig(cfg),
 		AgentCore: bedrockagentcorecontrol.NewFromConfig(cfg), CodeDeploy: codedeploy.NewFromConfig(cfg), AutoScaling: autoscaling.NewFromConfig(cfg), LaunchTemplate: ec2.NewFromConfig(cfg),
 		SecurityGroups: ec2.NewFromConfig(cfg), ELBv2: elasticloadbalancingv2.NewFromConfig(cfg), RDS: rds.NewFromConfig(cfg),
+		Addresses: ec2.NewFromConfig(cfg), ACM: acm.NewFromConfig(cfg), APIGateway: apigateway.NewFromConfig(cfg), APIGatewayV2: apigatewayv2.NewFromConfig(cfg), Cognito: cognitoidentityprovider.NewFromConfig(cfg),
 	}
 }
 
@@ -188,6 +199,7 @@ func CollectWorkloads(ctx context.Context, cfg *config.Config, accounts []Accoun
 			}
 			if cfg != nil && !cfg.Scan.NetworkResources {
 				clients.SecurityGroups, clients.ELBv2, clients.RDS = nil, nil, nil
+				clients.Addresses, clients.ACM, clients.APIGateway, clients.APIGatewayV2, clients.Cognito = nil, nil, nil, nil, nil
 			}
 			nodes, edges, err := CollectRegionalWorkloads(ctx, job.account.ID, job.region, clients, time.Now().UTC())
 			mu.Lock()
@@ -255,6 +267,8 @@ func CollectRegionalWorkloads(ctx context.Context, accountID, region string, cli
 	netAssets, netRels := collectNetwork(ctx, accountID, region, clients.SecurityGroups, clients.ELBv2, clients.RDS, collectedAt, assets)
 	assets = append(assets, netAssets...)
 	rels = append(rels, netRels...)
+	edgeAssets, _ := collectEdgeServices(ctx, accountID, region, clients, collectedAt)
+	assets = append(assets, edgeAssets...)
 	svcAssets, svcRels := collectServiceResources(ctx, accountID, region, clients, collectedAt, assets, rels)
 	assets = append(assets, svcAssets...)
 	rels = append(rels, svcRels...)

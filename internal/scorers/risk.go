@@ -3,7 +3,6 @@ package scorers
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"strings"
 
 	"github.com/Zero0x00/cloudrift/internal/models"
@@ -13,35 +12,54 @@ import (
 func ScoreRisk(node models.AssetNode, validation validators.ValidationResult, bucketNames map[string]bool) models.Finding {
 	claimability, severity := classifyRisk(node, validation, bucketNames)
 
-	title := fmt.Sprintf("%s -> %s", node.Name, claimability)
+	title := orphanTitle(node, claimability, validation.ErrorFingerprint)
 	// Stable identity: derived from module + affected ARN only, NOT the (mutable) claimability.
 	// This keeps a finding's ID constant across scans when its verdict changes, so scan diffs
 	// can report it as "changed" rather than remove+add.
 	h := sha256.Sum256([]byte(string(models.ModuleOrphanedEdge) + "|" + node.ARN))
 	id := hex.EncodeToString(h[:])[:12]
-	return models.Finding{
-		ID:           id,
-		Title:        title,
-		Severity:     severity,
-		Module:       models.ModuleOrphanedEdge,
-		Claimability: claimability,
-		AffectedARN:  node.ARN,
-		AccountID:    node.AccountID,
-		Hostname:     node.Name,
-		Impact:       impactFor(claimability),
-		Recommendation: recommendationFor(claimability),
-		Evidence: map[string]any{
+	cmd, why := route53DeleteCommand(node)
+	f := models.Finding{
+		ID:             id,
+		Title:          title,
+		Severity:       severity,
+		Module:         models.ModuleOrphanedEdge,
+		Claimability:   claimability,
+		AffectedARN:    node.ARN,
+		AccountID:      node.AccountID,
+		Hostname:       node.Name,
+		Impact:         impactForFingerprint(claimability, validation.ErrorFingerprint),
+		Recommendation: recommendationForFingerprint(claimability, validation.ErrorFingerprint),
+		RemediationCmd: cmd,
+		Evidence: mergeFacts(map[string]any{
 			"dns_status":     validation.DNSStatus,
 			"http_status":    validation.HTTPStatus,
 			"fingerprint":    validation.ErrorFingerprint,
 			"claimable":      validation.Claimable,
 			"target_service": targetService(node),
 			"bucket_name":    bucketNameFromTarget(node),
-		},
+		}, recordFacts(node)),
 	}
+	annotateRemediation(&f, validation.ErrorFingerprint, true, why)
+	return f
+}
+
+func mergeFacts(a, b map[string]any) map[string]any {
+	for k, v := range b {
+		a[k] = v
+	}
+	return a
 }
 
 func classifyRisk(node models.AssetNode, validation validators.ValidationResult, bucketNames map[string]bool) (models.Claimability, models.Severity) {
+	// Deleted AWS target or lame delegation: found by the validator from the record's target, not from a web page.
+	if fp := validation.ErrorFingerprint; strings.HasPrefix(fp, "target_deleted_") || fp == "ns_delegation_lame" {
+		if validation.Claimable {
+			return models.ClaimReclaimable, models.SeverityHigh
+		}
+		return models.ClaimDangling, models.SeverityHigh
+	}
+
 	// RECLAIMABLE: resolved + deleted S3 website target + bucket missing in all scanned accounts.
 	if validation.DNSStatus == "resolved" &&
 		validation.ErrorFingerprint == "s3_bucket_deleted" &&
@@ -125,6 +143,18 @@ func isCloudFrontSignal(node models.AssetNode, validation validators.ValidationR
 }
 
 func impactFor(c models.Claimability) string {
+	return impactForFingerprint(c, "")
+}
+
+func impactForFingerprint(c models.Claimability, fp string) string {
+	switch {
+	case fp == "ns_delegation_lame":
+		return "The name servers this name is delegated to do not serve it. Anyone who can create a zone with this name on those servers can answer for the whole subdomain."
+	case strings.HasPrefix(fp, "target_deleted_elasticbeanstalk"):
+		return "The Elastic Beanstalk environment this name points at was deleted. Beanstalk names can be registered again by anyone, who would then serve content under your hostname."
+	case strings.HasPrefix(fp, "target_deleted_"):
+		return "The AWS resource this name points at was deleted, so the name leads nowhere. It is not directly claimable, but it should not stay in DNS."
+	}
 	switch c {
 	case models.ClaimReclaimable:
 		return "Potential subdomain takeover via reclaimable endpoint."
@@ -140,6 +170,13 @@ func impactFor(c models.Claimability) string {
 }
 
 func recommendationFor(c models.Claimability) string {
+	return recommendationForFingerprint(c, "")
+}
+
+func recommendationForFingerprint(c models.Claimability, fp string) string {
+	if fp == "ns_delegation_lame" || strings.HasPrefix(fp, "target_deleted_") {
+		return "Delete the record, or recreate the resource it points at in an account you own."
+	}
 	switch c {
 	case models.ClaimReclaimable:
 		return "Remove DNS record immediately or recreate/secure claimed bucket in owned account."

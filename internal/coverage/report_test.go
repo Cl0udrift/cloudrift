@@ -99,3 +99,19 @@ func TestRegistryPrintsTheGoldenCaseCountFromTheTests(t *testing.T) {
 	}
 	t.Fatal("no module cites the golden corpus")
 }
+
+func TestEdgeDetailExplainsAnEmptyScan(t *testing.T) {
+	live := &Live{State: "completed"}
+	edgeDetail(live, nil)
+	if live.State != "no_data" || !strings.Contains(live.Detail, "nothing to look at") {
+		t.Fatalf("an empty DNS check must say so: %+v", live)
+	}
+	live = &Live{State: "completed"}
+	edgeDetail(live, []models.AssetNode{
+		{AssetType: models.AssetDNSRecord, Properties: map[string]any{"zone_id": "Z1"}},
+		{AssetType: models.AssetDNSRecord, Properties: map[string]any{"zone_id": "Z2", "private": true}},
+	})
+	if live.State != "completed" || !strings.Contains(live.Detail, "1 DNS records in 2 zones checked, 1 in private zones not probed") {
+		t.Fatalf("counts wrong: %+v", live)
+	}
+}

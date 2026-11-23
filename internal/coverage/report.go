@@ -93,6 +93,9 @@ func Build(cfg *config.Config, scanID string, assets []models.AssetNode) Report 
 		default:
 			live.Detail = "scan data is not checked for this module"
 		}
+		if m.ID == "orphaned-edge" && live != nil && scanID != "" {
+			edgeDetail(live, assets)
+		}
 		if live != nil && live.Enabled != nil && !*live.Enabled && live.State == "no_data" {
 			live.Detail = "off in the config, so no data is expected"
 		}
@@ -211,4 +214,40 @@ func policyInventoryState(assets []models.AssetNode) (string, string) {
 		return "partial", fmt.Sprintf("%d of %d roles have policy documents", withDocs, roles)
 	}
 	return "completed", fmt.Sprintf("all %d roles have policy documents", roles)
+}
+
+// edgeDetail says what the DNS check had to work with, so a count of zero is explained: nothing to check is
+// not the same as nothing wrong.
+func edgeDetail(live *Live, assets []models.AssetNode) {
+	records, private, dists, buckets := 0, 0, 0, 0
+	zones := map[string]bool{}
+	for _, a := range assets {
+		switch a.AssetType {
+		case models.AssetDNSRecord:
+			records++
+			if p, _ := a.Properties["private"].(bool); p {
+				private++
+			}
+			if z, _ := a.Properties["zone_id"].(string); z != "" {
+				zones[z] = true
+			}
+		case models.AssetCloudFrontDist:
+			dists++
+		case models.AssetS3Bucket:
+			buckets++
+		}
+	}
+	if live.State != "completed" && live.State != "partial" && live.State != "data_present" {
+		return
+	}
+	if records == 0 && dists == 0 {
+		live.State = "no_data"
+		live.Detail = fmt.Sprintf("Route 53 returned no records and there are no CloudFront distributions (%d buckets seen), so DNS and origin checks had nothing to look at. This is not the same as nothing to take over.", buckets)
+		return
+	}
+	if records == 0 {
+		live.Detail = fmt.Sprintf("no DNS records; %d CloudFront distributions and references to buckets (%d held by scanned accounts) were checked", dists, buckets)
+		return
+	}
+	live.Detail = fmt.Sprintf("%d DNS records in %d zones checked, %d in private zones not probed, %d CloudFront distributions", records-private, len(zones), private, dists)
 }

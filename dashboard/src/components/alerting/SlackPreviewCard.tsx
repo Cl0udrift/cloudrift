@@ -55,6 +55,16 @@ export function SlackPreviewCard({
             ))}
           </ul>
         ) : null}
+        {(payload.items ?? []).length > 0 ? (
+          <ul className="space-y-1 text-slate-700 dark:text-slate-300">
+            {(payload.items ?? []).map((it) => (
+              <li key={`${it.title}-${it.url}`}>
+                <a href={it.url} className="font-medium underline">{it.title}</a>
+                {it.detail ? <span className="ml-2 text-xs italic text-slate-500">{it.detail}</span> : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
           <span className="cr-helper text-xs">Action</span>
           <a

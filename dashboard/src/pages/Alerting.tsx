@@ -28,7 +28,7 @@ import {
 } from "../hooks/useAlertingQueries";
 import { useScanContext } from "../hooks/useScanContext";
 
-const RULE_TYPES_NO_THRESHOLD = new Set(["scan_completion", "new_critical_findings", "new_escalation_paths"]);
+const RULE_TYPES_NO_THRESHOLD = new Set(["scan_completion", "new_critical_findings", "new_internet_exposure", "new_escalation_paths", "new_public_bucket", "new_console_users_without_mfa", "new_access_key_issues", "new_admin_identities", "new_orphaned_edge"]);
 
 function formatTime(iso: string | undefined): string {
   if (!iso) {
@@ -80,10 +80,6 @@ function thresholdSummary(rule: AlertRule): string {
     return "—";
   }
   const cm = rule.threshold.count_min ?? 0;
-  const rm = rule.threshold.risk_cost_usd_min ?? 0;
-  if (rule.type === "reclaimable_findings_threshold") {
-    return rm > 0 ? `≥${cm} · $${rm}/mo` : `≥${cm}`;
-  }
   return `≥${cm}`;
 }
 
@@ -420,8 +416,7 @@ export function AlertingPage() {
         account_ids: parseList(draft.scopeAccountsText)
       },
       threshold: {
-        count_min: draft.threshold.count_min ?? 0,
-        risk_cost_usd_min: draft.threshold.risk_cost_usd_min ?? 0
+        count_min: draft.threshold.count_min ?? 0
       },
       cooldown_minutes: Math.min(43200, Math.max(0, Math.floor(Number(draft.cooldown_minutes)) || 0))
     };
@@ -1008,7 +1003,7 @@ export function AlertingPage() {
                     setDraft((d) => {
                       const next = { ...d, type: t };
                       if (RULE_TYPES_NO_THRESHOLD.has(t)) {
-                        next.threshold = { count_min: 0, risk_cost_usd_min: 0 };
+                        next.threshold = { count_min: 0 };
                       } else if (t === "stale_external_privileged_roles" && (next.threshold.count_min ?? 0) <= 0) {
                         next.threshold = { ...next.threshold, count_min: 1 };
                       }
@@ -1119,24 +1114,6 @@ export function AlertingPage() {
                       }
                     />
                   </label>
-                  {draft.type === "reclaimable_findings_threshold" ? (
-                    <label className="mt-2 block">
-                      <span className="cr-helper text-xs">Minimum reclaimable cost (USD / month) — optional</span>
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        className="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
-                        value={draft.threshold.risk_cost_usd_min ?? 0}
-                        onChange={(e) =>
-                          setDraft((d) => ({
-                            ...d,
-                            threshold: { ...d.threshold, risk_cost_usd_min: Number(e.target.value) }
-                          }))
-                        }
-                      />
-                    </label>
-                  ) : null}
                 </div>
               ) : null}
               <div className="border-t border-slate-200 pt-2 dark:border-slate-800">

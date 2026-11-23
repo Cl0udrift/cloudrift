@@ -29,6 +29,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.12 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.12 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.23 // indirect
+	github.com/aws/aws-sdk-go-v2/service/acm v1.52.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/apigateway v1.53.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/apigatewayv2 v1.46.9 // indirect
 	github.com/aws/aws-sdk-go-v2/service/apprunner v1.48.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.82.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/batch v1.79.1 // indirect
@@ -37,6 +40,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/cloudtrail v1.65.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/codebuild v1.79.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/codedeploy v1.47.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider v1.80.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.295.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.100.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/eks v1.104.1 // indirect
