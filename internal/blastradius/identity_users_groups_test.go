@@ -246,7 +246,95 @@ func TestWhoCanIdentityOnlyAction(t *testing.T) {
 	if len(got) != 1 || got[0].ARN != ugUser || got[0].Status != "VALIDATED_ALLOWED" {
 		t.Fatalf("only alice can attach policies to bob: %#v", got)
 	}
-	if evaluated != 2 { // alice and carol; bob is the target
+	if evaluated != 3 { // alice, carol and bob: the target is checked too, for an identity-changing action
 		t.Fatalf("evaluated %d", evaluated)
+	}
+}
+
+func TestWhoCanKeepsTheTargetItselfForIdentityActionsAndSkipsServiceLinkedRoles(t *testing.T) {
+	const aliceARN = "arn:aws:iam::111111111111:user/alice"
+	alice := ugUserNode(allowDoc("iam:AttachUserPolicy", aliceARN)) // alice may attach policies to herself
+	slr := controlled(models.AssetNode{ARN: "arn:aws:iam::111111111111:role/aws-service-role/x.amazonaws.com/AWSServiceRoleForX", AssetType: models.AssetIAMRole, Name: "AWSServiceRoleForX"}, allowDoc("iam:AttachUserPolicy", aliceARN))
+	got, evaluated, _ := WhoCan(permScan, "iam:AttachUserPolicy", alice, []models.AssetNode{alice, slr}, nil, time.Time{})
+	if len(got) != 1 || got[0].ARN != aliceARN || !got[0].Self {
+		t.Fatalf("the target acting on itself must be listed and marked: %#v", got)
+	}
+	if evaluated != 1 {
+		t.Fatalf("a service-linked role is never a caller, so it is not checked: %d", evaluated)
+	}
+}
+
+func TestWhoCanOnABucketUsesTheCallersPolicyAndTheBucketPolicy(t *testing.T) {
+	const bucketARN = "arn:aws:s3:::data"
+	bucket := readyBucket(bucketARN) // the object, public-access and encryption evidence the evaluator needs before it will say allowed
+	bucket.Name = "data"
+	whole := controlled(models.AssetNode{ARN: "arn:aws:iam::111111111111:user/whole", AssetType: models.AssetIAMUser, Name: "whole"}, allowDoc("s3:GetObject", bucketARN+"/*"))
+	prefix := controlled(models.AssetNode{ARN: "arn:aws:iam::111111111111:user/prefix", AssetType: models.AssetIAMUser, Name: "prefix"}, allowDoc("s3:GetObject", bucketARN+"/logs/*"))
+	none := controlled(models.AssetNode{ARN: "arn:aws:iam::111111111111:user/none", AssetType: models.AssetIAMUser, Name: "none"})
+	got, _, evaluated := WhoCanOnResource(permScan, "s3:GetObject", bucket, []models.AssetNode{bucket, whole, prefix, none}, nil, time.Time{})
+	if len(got) != 1 || got[0].Name != "whole" || got[0].Status != "VALIDATED_ALLOWED" {
+		t.Fatalf("only a caller allowed on every object is listed; prefix-only access is not: %#v", got)
+	}
+	if evaluated != 3 {
+		t.Fatalf("every user and role is checked, not the bucket: %d", evaluated)
+	}
+	if ResourceTargetTypeFor("s3:PutObject") != models.AssetS3Bucket || ResourceTargetTypeFor("kms:Decrypt") != models.AssetKMSKey || ResourceTargetTypeFor("iam:AttachUserPolicy") != "" {
+		t.Fatal("data actions map to bucket, secret and key targets only")
+	}
+}
+
+func TestWhoCanChainFindsCallersTwoStepsAway(t *testing.T) {
+	const roleR = "arn:aws:iam::111111111111:role/R"
+	trust := func(principal string) string {
+		return `{"Statement":[{"Effect":"Allow","Principal":{"AWS":"` + principal + `"},"Action":"sts:AssumeRole"}]}`
+	}
+	target := controlledRole(ugTarget, "", trust(roleR))
+	middle := controlledRole(roleR, allowDoc("sts:AssumeRole", ugTarget), trust(ugUser))
+	alice := ugUserNode(allowDoc("sts:AssumeRole", roleR))
+	assets := []models.AssetNode{target, middle, alice}
+
+	direct, _, _ := WhoCanDetailed(permScan, "sts:AssumeRole", target, assets, nil, time.Time{})
+	if len(direct) != 1 || direct[0].ARN != roleR {
+		t.Fatalf("only R can assume the target in one step: %#v", direct)
+	}
+	got, truncated := WhoCanChain(permScan, target, assets, nil, time.Time{}, 3, 50)
+	if truncated || len(got) != 2 {
+		t.Fatalf("R directly and alice through R: %#v truncated=%v", got, truncated)
+	}
+	by := map[string]schema.RoleAssumer{}
+	for _, c := range got {
+		by[c.ARN] = c
+	}
+	if by[roleR].Depth != 1 || by[ugUser].Depth != 2 || len(by[ugUser].Chain) != 3 || by[ugUser].Chain[0] != "alice" {
+		t.Fatalf("depth and the identities passed through must be set: %#v", by)
+	}
+	if _, truncated := WhoCanChain(permScan, target, assets, nil, time.Time{}, 3, 1); !truncated {
+		t.Fatal("hitting the expansion bound must be reported")
+	}
+}
+
+func TestWhoCanOnABucketIsAPlainCanWhenOnlyACLAndPublicAccessEvidenceIsMissing(t *testing.T) {
+	const bucketARN = "arn:aws:s3:::data"
+	bucket := models.AssetNode{ARN: bucketARN, AssetType: models.AssetS3Bucket, Name: "data", AccountID: "111111111111", Properties: map[string]any{
+		"bucket_policy_status": "confirmed_absent", "bucket_policy_evidence": "fixture",
+		"object_ownership": "BucketOwnerEnforced", "object_ownership_evidence": "fixture", // ACLs are off; Block Public Access was not collected
+	}}
+	whole := controlled(models.AssetNode{ARN: "arn:aws:iam::111111111111:user/whole", AssetType: models.AssetIAMUser, Name: "whole"}, allowDoc("s3:GetObject", bucketARN+"/*"))
+	none := controlled(models.AssetNode{ARN: "arn:aws:iam::111111111111:user/none", AssetType: models.AssetIAMUser, Name: "none"}, allowDoc("s3:ListAllMyBuckets", "*"))
+	got, unknown, _ := WhoCanOnResource(permScan, "s3:GetObject", bucket, []models.AssetNode{bucket, whole, none}, nil, time.Time{})
+	if len(got) != 1 || got[0].Name != "whole" || got[0].Status != "VALIDATED_ALLOWED" || got[0].Note != "" {
+		t.Fatalf("an identity-policy allow is a plain can with no note, since Block Public Access cannot change it: %#v", got)
+	}
+	// Block Public Access cannot grant anything, so a caller with no allow is simply not a caller.
+	if len(unknown) != 0 {
+		t.Fatalf("a caller with no allow is not undecided when only Block Public Access is missing: %#v", unknown)
+	}
+
+	// With the ACL setting also missing, an ACL could grant access, so a caller with no allow cannot be ruled out.
+	delete(bucket.Properties, "object_ownership")
+	delete(bucket.Properties, "object_ownership_evidence")
+	got, unknown, _ = WhoCanOnResource(permScan, "s3:GetObject", bucket, []models.AssetNode{bucket, whole, none}, nil, time.Time{})
+	if len(got) != 1 || got[0].Status != "VALIDATED_ALLOWED" || len(unknown) != 1 || unknown[0].Name != "none" {
+		t.Fatalf("missing ACL evidence: allowed caller still can, caller without allow stays undecided: %#v %#v", got, unknown)
 	}
 }

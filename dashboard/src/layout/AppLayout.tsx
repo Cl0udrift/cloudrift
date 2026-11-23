@@ -50,7 +50,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
       { to: "/findings", label: "Findings", preserveSearch: true, Icon: IconList },
       { to: "/triage", label: "Triage", preserveSearch: true, Icon: IconAlertTriangle },
       { to: "/external-entities", label: "External entities", preserveSearch: false, Icon: IconGlobe },
-      { to: "/trust-report", label: "Access", preserveSearch: false, Icon: IconBriefcase },
+      { to: "/trust-report", label: "Trust report", preserveSearch: false, Icon: IconBriefcase },
       { to: "/diff", label: "Changes", preserveSearch: false, Icon: IconGitDiff },
       { to: "/blast-explorer", label: "Blast Explorer", preserveSearch: true, Icon: IconZap }
     ]

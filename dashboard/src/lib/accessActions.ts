@@ -1,4 +1,4 @@
-export type TargetKind = "role" | "user" | "group";
+export type TargetKind = "role" | "user" | "group" | "bucket" | "secret" | "key";
 
 /** The kind of identity each action is performed on. The server enforces the same pairing. */
 export const ACTION_TARGET: Record<string, TargetKind> = {
@@ -14,7 +14,12 @@ export const ACTION_TARGET: Record<string, TargetKind> = {
   "iam:UpdateLoginProfile": "user",
   "iam:AttachGroupPolicy": "group",
   "iam:PutGroupPolicy": "group",
-  "iam:AddUserToGroup": "group"
+  "iam:AddUserToGroup": "group",
+  "s3:GetObject": "bucket",
+  "s3:PutObject": "bucket",
+  "s3:DeleteObject": "bucket",
+  "secretsmanager:GetSecretValue": "secret",
+  "kms:Decrypt": "key"
 };
 
 /** Actions that can be asked of a target of this kind. With no target chosen, every action is offered. */
@@ -29,5 +34,5 @@ export function actionFits(action: string, kind: TargetKind | ""): boolean {
 
 /** Target kind from the label the picker uses ("role x", "user y", "group z"). */
 export function kindOf(raw: string): TargetKind | "" {
-  return raw === "role" || raw === "user" || raw === "group" ? raw : "";
+  return raw === "role" || raw === "user" || raw === "group" || raw === "bucket" || raw === "secret" || raw === "key" ? raw : "";
 }

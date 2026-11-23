@@ -1,13 +1,13 @@
 import { ACTION_TARGET, actionsFor, type TargetKind } from "../../lib/accessActions";
 
-const KIND_TITLE: Record<TargetKind, string> = { role: "On a role", user: "On a user", group: "On a group" };
+const KIND_TITLE: Record<TargetKind, string> = { role: "On a role", user: "On a user", group: "On a group", bucket: "On an S3 bucket", secret: "On a secret", key: "On a KMS key" };
 
 /**
  * Pick what to ask, as a row of labelled choices instead of a dropdown: every option is visible, one click,
  * and arrow keys move between them (they are radio buttons underneath).
  */
 export function ActionPicker({ value, kind, help, onChange }: { value: string; kind: TargetKind | ""; help: Record<string, string>; onChange: (action: string) => void }) {
-  const groups: (TargetKind | "")[] = kind ? [kind] : ["role", "user", "group"];
+  const groups: (TargetKind | "")[] = kind ? [kind] : ["role", "user", "group", "bucket", "secret", "key"];
   return (
     <fieldset className="space-y-3">
       <legend className="cr-kpi-label mb-1 block">Who can…</legend>

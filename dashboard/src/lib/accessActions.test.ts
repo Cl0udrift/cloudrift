@@ -11,6 +11,8 @@ describe("accessActions", () => {
   it("flags a mismatched pair and lets an unknown action through", () => {
     expect(actionFits("sts:AssumeRole", "user")).toBe(false);
     expect(actionFits("iam:PutUserPolicy", "user")).toBe(true);
-    expect(actionFits("s3:GetObject", "user")).toBe(true);
+    expect(actionFits("s3:GetObject", "user")).toBe(false);
+    expect(actionFits("s3:GetObject", "bucket")).toBe(true);
+    expect(actionFits("ec2:StopInstances", "user")).toBe(true); // an action the explorer does not know is not refused here
   });
 });

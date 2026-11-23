@@ -129,7 +129,7 @@ export function TrustReportPage() {
   return (
     <section className="space-y-6">
       <PageHeader
-        title="Access"
+        title="Trust report"
         description="External-access findings with privilege signals."
         details="Source: findings?module=external_access. Privileged = permission tier (trust_classification). Admin-like = separate admin_like capability flag (stronger signal); neither implies the other."
       />

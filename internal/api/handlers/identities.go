@@ -170,7 +170,7 @@ func GetRoleUsage(outputDir string) http.HandlerFunc {
 // With arn it returns that one target, so a link can show its name.
 func GetAccessTargets(outputDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scanID, assets, _, ok := loadIdentityScan(w, r, outputDir)
+		scanID, _, assets, rels, findings, ok := loadInventoryScan(w, r, outputDir)
 		if !ok {
 			return
 		}
@@ -181,6 +181,7 @@ func GetAccessTargets(outputDir string) http.HandlerFunc {
 		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
 			limit = min(n, 100)
 		}
+		hints := accessIndexFor(scanID, assets, rels, findings).hints
 		var all []schema.AccessTarget
 		for _, a := range assets {
 			var k string
@@ -191,6 +192,12 @@ func GetAccessTargets(outputDir string) http.HandlerFunc {
 				k = "user"
 			case models.AssetIAMGroup:
 				k = "group"
+			case models.AssetS3Bucket:
+				k = "bucket"
+			case models.AssetSecret:
+				k = "secret"
+			case models.AssetKMSKey:
+				k = "key"
 			default:
 				continue
 			}
@@ -200,9 +207,24 @@ func GetAccessTargets(outputDir string) http.HandlerFunc {
 			if q != "" && !strings.Contains(strings.ToLower(a.Name), q) && !strings.Contains(strings.ToLower(a.ARN), q) {
 				continue
 			}
-			all = append(all, schema.AccessTarget{ARN: a.ARN, Name: a.Name, Kind: k, AccountID: a.AccountID})
+			// AWS-owned roles are noise unless the search names one.
+			if hints[a.ARN] == "AWS-managed" && q == "" && arn == "" {
+				continue
+			}
+			name := a.Name
+			if a.AssetType == models.AssetS3Bucket {
+				name = strings.TrimPrefix(a.ARN, "arn:aws:s3:::")
+			}
+			hint := hints[a.ARN]
+			if a.AssetType == models.AssetS3Bucket && ciem.BucketLooksLikeLogs(a) {
+				hint = "Name suggests logs"
+			}
+			all = append(all, schema.AccessTarget{ARN: a.ARN, Name: name, Kind: k, AccountID: a.AccountID, Hint: hint})
 		}
 		sort.Slice(all, func(i, j int) bool {
+			if ri, rj := hintRank(all[i].Hint), hintRank(all[j].Hint); ri != rj {
+				return ri < rj
+			}
 			if all[i].Name != all[j].Name {
 				return all[i].Name < all[j].Name
 			}
@@ -246,13 +268,27 @@ func reasonText(code string) string {
 		return "An explicit Deny could not be ruled out."
 	case iamauth.ReasonMalformed:
 		return "A policy document could not be parsed."
+	case iamauth.ReasonMissingResource:
+		return "The resource's own policy was not collected, so access it grants (or denies) could not be ruled in or out."
+	case iamauth.ReasonMissingACL:
+		return "The bucket's object ownership setting was not collected, so object ACLs could not be ruled out."
+	case iamauth.ReasonMissingBPA:
+		return "The bucket's public access block settings were not collected."
+	case iamauth.ReasonMissingKMS:
+		return "The key policy of the encrypting KMS key was not collected."
+	case iamauth.ReasonCrossAccountResource:
+		return "The caller is in another account, so the resource's own policy must allow it, and that policy was not found."
+	case iamauth.ReasonKMSNotAllowed:
+		return "The key policy or a grant does not let the caller decrypt."
+	case iamauth.ReasonInvalidResource:
+		return "The target could not be turned into a concrete resource to evaluate."
 	}
 	return code
 }
 
 // whoCanAction reports the actions the explorer evaluates: role assumption and the identity-only IAM actions.
 func whoCanAction(action string) bool {
-	if action == iamauth.ActionAssumeRole {
+	if action == iamauth.ActionAssumeRole || blastradius.ResourceTargetTypeFor(action) != "" {
 		return true
 	}
 	for _, c := range iamauth.Catalog() {
@@ -266,7 +302,7 @@ func whoCanAction(action string) bool {
 // GetWhoCan lists the users and roles that stored policies allow to perform an action on a user, group or role.
 func GetWhoCan(outputDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		scanID, assets, rels, ok := loadIdentityScan(w, r, outputDir)
+		scanID, _, assets, rels, findings, ok := loadInventoryScan(w, r, outputDir)
 		if !ok {
 			return
 		}
@@ -279,7 +315,7 @@ func GetWhoCan(outputDir string) http.HandlerFunc {
 		var target models.AssetNode
 		found := false
 		for _, a := range assets {
-			if a.ARN == arn && (a.AssetType == models.AssetIAMRole || a.AssetType == models.AssetIAMUser || a.AssetType == models.AssetIAMGroup) {
+			if a.ARN == arn && (a.AssetType == models.AssetIAMRole || a.AssetType == models.AssetIAMUser || a.AssetType == models.AssetIAMGroup || blastradius.ResourceTargetTypeFor(action) == a.AssetType) {
 				target, found = a, true
 				break
 			}
@@ -288,13 +324,30 @@ func GetWhoCan(outputDir string) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "target_not_found", "that user, group or role was not collected in this scan", nil)
 			return
 		}
-		if want := whoCanTargetType(action); want != "" && want != target.AssetType {
+		want := whoCanTargetType(action)
+		if r := blastradius.ResourceTargetTypeFor(action); r != "" {
+			want = r
+		}
+		if want != "" && want != target.AssetType {
 			writeError(w, http.StatusBadRequest, "action_target_mismatch",
 				"this action applies to a "+strings.TrimPrefix(string(want), "iam_")+", but the target is a "+strings.TrimPrefix(string(target.AssetType), "iam_")+"; choose an action that fits the target",
 				map[string]any{"action": action, "target_type": string(target.AssetType), "expected_target_type": string(want)})
 			return
 		}
-		callers, unknownCallers, evaluated := blastradius.WhoCanDetailed(scanID, action, target, assets, rels, time.Time{})
+		var callers []schema.RoleAssumer
+		var unknownCallers []schema.UnknownCaller
+		var evaluated int
+		chains, truncated := false, false
+		if blastradius.ResourceTargetTypeFor(action) != "" {
+			callers, unknownCallers, evaluated = blastradius.WhoCanOnResource(scanID, action, target, assets, rels, time.Time{})
+		} else {
+			callers, unknownCallers, evaluated = blastradius.WhoCanDetailed(scanID, action, target, assets, rels, time.Time{})
+			if action == iamauth.ActionAssumeRole && r.URL.Query().Get("chain") == "true" {
+				chains = true
+				callers = nil
+				callers, truncated = blastradius.WhoCanChain(scanID, target, assets, rels, time.Time{}, 3, 150)
+			}
+		}
 		for i := range callers {
 			callers[i].ReasonText = reasonText(callers[i].Reason)
 		}
@@ -302,13 +355,19 @@ func GetWhoCan(outputDir string) http.HandlerFunc {
 			unknownCallers[i].ReasonText = reasonText(unknownCallers[i].Reason)
 		}
 		out := schema.WhoCanResponse{
-			ScanID: scanID, Action: action, TargetARN: target.ARN, Callers: callers, Evaluated: evaluated, Unknown: len(unknownCallers), UnknownCallers: unknownCallers,
+			ScanID: scanID, Action: action, TargetARN: target.ARN, Callers: callers, Evaluated: evaluated, Unknown: len(unknownCallers), UnknownCallers: unknownCallers, Chains: chains, ChainTruncated: truncated,
 			Notes: []string{
 				"Callers are users and roles in this scan, checked against their own policies, permissions boundary and any collected SCPs. Principals in accounts that were not scanned are not listed.",
+				"AWS-managed service-linked roles are not checked as callers: only the AWS service they belong to can use them.",
 				"This shows what stored policies allow, not what anyone did.",
 			},
 		}
 		out.Observed = []schema.ObservedCaller{}
+		if action == iamauth.ActionAssumeRole && target.AssetType == models.AssetIAMRole {
+			for _, t := range ciem.TrustStatements(target, assets) {
+				out.TrustSummary = append(out.TrustSummary, t.Summary)
+			}
+		}
 		if action == iamauth.ActionAssumeRole {
 			out.HistoryRead = blastradius.HasAssumeHistory(assets)
 			out.Observed = blastradius.ObservedAssumers(target, assets, rels)
@@ -320,6 +379,7 @@ func GetWhoCan(outputDir string) http.HandlerFunc {
 		if out.UnknownCallers == nil {
 			out.UnknownCallers = []schema.UnknownCaller{}
 		}
+		enrichCallers(out.Callers, accessIndexFor(scanID, assets, rels, findings).facts)
 		for _, c := range callers {
 			if c.Status == iamauth.StatusAllowed {
 				out.Allowed++

@@ -4,7 +4,7 @@ export const queryKeys = {
   config: () => ["config"] as const,
   coverage: (scanId: string | null) => ["coverage", scanId] as const,
   identityCenter: (scanId: string | null) => ["identity-center", scanId] as const,
-  whoCan: (scanId: string | null, action: string, arn: string) => ["who-can", scanId, action, arn] as const,
+  whoCan: (scanId: string | null, action: string, arn: string, chain = false) => ["who-can", scanId, action, arn, chain] as const,
   roleUsage: (scanId: string | null, arn: string | null) => ["role-usage", scanId, arn] as const,
   principals: (scanId: string | null) => ["principals", scanId] as const,
   principalPolicies: (scanId: string | null, arn: string | null) => ["principal-policies", scanId, arn] as const,

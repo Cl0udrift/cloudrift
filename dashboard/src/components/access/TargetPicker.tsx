@@ -52,7 +52,7 @@ export function TargetPicker({ scanId, value, onSelect }: { scanId: string; valu
         aria-label="Target identity"
         aria-activedescendant={open && items[active] ? `${listId}-${active}` : undefined}
         className="hs-input w-full min-w-0 text-sm sm:min-w-[18rem]"
-        placeholder={current ? `${current.kind} ${current.name}` : "Search a user, group or role…"}
+        placeholder={current ? `${current.kind} ${current.name}` : "Search a user, group or role (riskiest first)…"}
         value={text}
         onFocus={() => setOpen(true)}
         onChange={(e) => { setText(e.target.value); setOpen(true); }}
@@ -79,7 +79,7 @@ export function TargetPicker({ scanId, value, onSelect }: { scanId: string; valu
               onMouseEnter={() => setActive(i)}
               onMouseDown={(e) => { e.preventDefault(); choose(t); }}
             >
-              <span className="text-xs uppercase text-slate-500">{t.kind}</span> <span className="break-all font-medium">{t.name}</span> <span className="text-xs text-slate-500">{t.account_id}</span>
+              <span className="text-xs uppercase text-slate-500">{t.kind}</span> <span className="break-all font-medium">{t.name}</span> <span className="text-xs text-slate-500">{t.hint ? t.hint : t.account_id}</span>
             </li>
           ))}
           {!pending && matches.data && matches.data.total > items.length ? <li className="px-2 py-1 text-xs text-slate-500" aria-live="polite">Showing {items.length} of {matches.data.total}. Keep typing to narrow it.</li> : null}

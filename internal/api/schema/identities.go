@@ -464,6 +464,25 @@ type RoleAssumer struct {
 	Paths []AccessPath `json:"paths,omitempty"`
 	// Observed is set when CloudTrail history shows this caller assuming the role.
 	Observed *ObservedUse `json:"observed,omitempty"`
+	// Note says, only when it matters, what could not be verified for this caller and why it does or does not change the answer.
+	Note string `json:"note,omitempty"`
+	// Self is true when the caller is the target itself.
+	Self bool `json:"self,omitempty"`
+	// Admin is true when the caller holds administrator access, so its access is expected and not a specific grant.
+	Admin bool `json:"admin,omitempty"`
+	// Usage is person, programmatic, workload, unknown or role.
+	Usage        string `json:"usage,omitempty"`
+	ConsoleNoMFA bool   `json:"console_no_mfa,omitempty"`
+	KeyIssues    int    `json:"key_issues,omitempty"`
+	LastActivity string `json:"last_activity,omitempty"`
+	FindingCount int    `json:"finding_count,omitempty"`
+	MaxSeverity  string `json:"max_severity,omitempty"`
+	// Via names the group and policy that give the access, for grouping callers that share a route.
+	Via string `json:"via,omitempty"`
+	// Depth is how many assume-role steps the caller is from the target (1 is direct) and Chain names the identities it
+	// passes through, caller first and target last. Set only when chains were asked for.
+	Depth int      `json:"depth,omitempty"`
+	Chain []string `json:"chain,omitempty"`
 }
 
 // ObservedUse is how often a caller was seen assuming a role inside the history window.
@@ -518,6 +537,18 @@ type AccessTarget struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	AccountID string `json:"account_id"`
+	// Hint says why the target is worth asking about: Administrator access, Trusts an outside account, and so on.
+	Hint string `json:"hint,omitempty"`
+}
+
+// AccessSuggestion is a ready question worth asking of this scan.
+type AccessSuggestion struct {
+	Title      string `json:"title"`
+	Why        string `json:"why"`
+	ARN        string `json:"arn"`
+	Action     string `json:"action"`
+	TargetName string `json:"target_name"`
+	Kind       string `json:"kind"`
 }
 
 // AccessTargetList is one page of matching targets. Total counts every match, so a capped list says so.
@@ -539,10 +570,15 @@ type WhoCanResponse struct {
 	Possible int `json:"possible"`
 	Unknown  int `json:"unknown"`
 	// UnknownCallers names the Unknown callers, with the reason each could not be decided.
-	UnknownCallers []UnknownCaller  `json:"unknown_callers"`
-	HistoryRead    bool             `json:"history_read"`
-	Observed       []ObservedCaller `json:"observed"`
-	Notes          []string         `json:"notes"`
+	UnknownCallers []UnknownCaller `json:"unknown_callers"`
+	// Chains is true when callers more than one step away were included; ChainTruncated says the search stopped at its bound.
+	Chains         bool `json:"chains,omitempty"`
+	ChainTruncated bool `json:"chain_truncated,omitempty"`
+	// TrustSummary says in words who the target role's trust policy names, for sts:AssumeRole.
+	TrustSummary []string         `json:"trust_summary,omitempty"`
+	HistoryRead  bool             `json:"history_read"`
+	Observed     []ObservedCaller `json:"observed"`
+	Notes        []string         `json:"notes"`
 }
 
 // RoleUsageResponse answers "who and what can use this role".

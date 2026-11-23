@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../../api/client";
 import { formatQueryError } from "../../api/httpError";
 import { queryKeys } from "../../api/queryKeys";
-import { CallerCard, CountTile, ObservedCallersList, UnknownCallersList } from "../access/CallerCard";
+import { AnswerSummary, CallerCard, ObservedCallersList, UnknownCallersList } from "../access/CallerCard";
 import { StateChip } from "../ui/StatusChip";
 
 /** Who (users and roles) can assume this role and which workloads run as it. Policy based, not CloudTrail. */
@@ -17,22 +17,12 @@ export function RoleUsage({ scanId, roleArn }: { scanId: string; roleArn: string
         <p className="cr-helper">{formatQueryError(q.error)}</p>
       ) : (
         <div className="space-y-4 text-sm">
-          <div className="grid grid-cols-3 gap-3">
-            <CountTile label="Can assume" value={q.data.allowed} tone="info" hint="Allowed by stored policy" />
-            <CountTile label="Likely" value={q.data.possible} tone="hyp" hint="Allowed by policy, but organization rules (SCPs) were not checked" />
-            <CountTile label="Undecided" value={q.data.unknown} tone="unk" hint="Could not be decided: not allowed, not ruled out" />
-          </div>
-          <p className="cr-helper">{q.data.evaluated} users and roles were checked against stored policies.</p>
+          <AnswerSummary callers={q.data.assumers ?? []} unknown={q.data.unknown} verb="assume this role" evaluated={q.data.evaluated} />
           {(q.data.assumers ?? []).length > 0 ? (
             <ul className="space-y-3">
               {(q.data.assumers ?? []).map((a) => <CallerCard key={a.arn} caller={a} verb="assume this role" />)}
             </ul>
-          ) : (
-            <p className="cr-helper">
-              No checked user or role was found able to assume it.
-              {q.data.unknown > 0 ? ` ${q.data.unknown} could not be evaluated, so this is not a clear result.` : ""}
-            </p>
-          )}
+          ) : null}
           <UnknownCallersList callers={q.data.unknown_callers ?? []} open={(q.data.assumers ?? []).length === 0} />
           <ObservedCallersList callers={q.data.observed ?? []} historyRead={q.data.history_read ?? false} />
           {(q.data.workloads ?? []).length > 0 ? (

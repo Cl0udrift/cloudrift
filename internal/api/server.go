@@ -74,6 +74,7 @@ func apiRouter(outputDir, configPath string) http.Handler {
 	r.Get("/scans/{id}/identities/usage", handlers.GetRoleUsage(outputDir))
 	r.Get("/scans/{id}/identities/who-can", handlers.GetWhoCan(outputDir))
 	r.Get("/scans/{id}/identities/targets", handlers.GetAccessTargets(outputDir))
+	r.Get("/scans/{id}/identities/access-suggestions", handlers.GetAccessSuggestions(outputDir))
 	r.Get("/scans/{id}/identity-center", handlers.GetIdentityCenter(outputDir))
 	r.Get("/scans/{id}/principals", handlers.ListPrincipals(outputDir, configPath))
 	r.Get("/scans/{id}/principals/policies", handlers.GetPrincipalPolicies(outputDir, configPath))

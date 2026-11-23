@@ -1448,6 +1448,18 @@ export interface RoleAssumer {
   reason_text?: string;
   paths?: AccessPath[];
   observed?: ObservedUse;
+  note?: string;
+  self?: boolean;
+  admin?: boolean;
+  usage?: string;
+  console_no_mfa?: boolean;
+  key_issues?: number;
+  last_activity?: string;
+  finding_count?: number;
+  max_severity?: string;
+  via?: string;
+  depth?: number;
+  chain?: string[];
 }
 export interface AccessStep {
   kind: "caller" | "group" | "policy" | "trust" | "target";
@@ -1481,8 +1493,17 @@ export interface UnknownCaller {
 export interface AccessTarget {
   arn: string;
   name: string;
-  kind: "user" | "group" | "role";
+  kind: "user" | "group" | "role" | "bucket" | "secret" | "key";
   account_id: string;
+  hint?: string;
+}
+export interface AccessSuggestion {
+  title: string;
+  why: string;
+  arn: string;
+  action: string;
+  target_name: string;
+  kind: string;
 }
 export interface AccessTargetList {
   scan_id: string;
@@ -1499,6 +1520,9 @@ export interface WhoCanResponse {
   possible: number;
   unknown: number;
   unknown_callers: UnknownCaller[];
+  trust_summary?: string[];
+  chains?: boolean;
+  chain_truncated?: boolean;
   history_read?: boolean;
   observed?: ObservedCaller[];
   notes: string[];

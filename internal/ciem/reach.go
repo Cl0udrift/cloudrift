@@ -85,14 +85,22 @@ func reachName(a models.AssetNode) string {
 // reachHint flags a bucket whose name suggests it holds audit or access logs. It is a guess from the name: the scan
 // does not read which bucket a trail writes to.
 func reachHint(a models.AssetNode) string {
+	if BucketLooksLikeLogs(a) {
+		return "name suggests logs"
+	}
+	return ""
+}
+
+// BucketLooksLikeLogs is a guess from the bucket name that it holds audit or access logs.
+func BucketLooksLikeLogs(a models.AssetNode) bool {
 	if a.AssetType != models.AssetS3Bucket {
-		return ""
+		return false
 	}
 	n := strings.ToLower(a.ARN)
 	for _, w := range []string{"cloudtrail", "audit", "-logs", "log-", "logging"} {
 		if strings.Contains(n, w) {
-			return "name suggests logs"
+			return true
 		}
 	}
-	return ""
+	return false
 }

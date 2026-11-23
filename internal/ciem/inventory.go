@@ -62,6 +62,11 @@ func ListRoles(assets []models.AssetNode, rels []models.Relationship, filter Inv
 	return items
 }
 
+// SummarizeRole is the list row for one role, for callers outside the package.
+func SummarizeRole(role models.AssetNode, assets []models.AssetNode, rels []models.Relationship) schema.IdentityListItem {
+	return summarizeRole(role, assets, rels)
+}
+
 func summarizeRole(role models.AssetNode, assets []models.AssetNode, rels []models.Relationship) schema.IdentityListItem {
 	labels := ClassifyRole(role, rels, assets)
 	permissions := PermissionCandidates("", role, assets, rels)

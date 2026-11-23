@@ -97,3 +97,25 @@ func TestRoleExposureSeparatesNotCheckedFromNotReachable(t *testing.T) {
 		}
 	}
 }
+
+func TestEnrichCallersPutsSpecificGrantsBeforeAdministratorsAndSelfLast(t *testing.T) {
+	callers := []schema.RoleAssumer{
+		{ARN: "admin", Name: "admin", Kind: "user", Paths: []schema.AccessPath{{Steps: []schema.AccessStep{{Kind: "caller"}, {Kind: "group", Label: "IAM-Admin"}, {Kind: "policy", Label: "AdministratorAccess"}, {Kind: "target"}}}}},
+		{ARN: "narrow", Name: "narrow", Kind: "role"},
+		{ARN: "self", Name: "self", Kind: "user", Self: true},
+	}
+	facts := map[string]callerFacts{"admin": {admin: true, usage: "person", consoleNoMFA: true}, "narrow": {usage: "workload"}, "self": {}}
+	enrichCallers(callers, facts)
+	if callers[0].ARN != "narrow" {
+		t.Fatalf("a specific grant must come first: %+v", callers)
+	}
+	var admin schema.RoleAssumer
+	for _, c := range callers {
+		if c.ARN == "admin" {
+			admin = c
+		}
+	}
+	if !admin.Admin || !admin.ConsoleNoMFA || admin.Via != "IAM-Admin / AdministratorAccess" {
+		t.Fatalf("who the caller is and the shared route must be set: %+v", admin)
+	}
+}

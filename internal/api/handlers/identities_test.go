@@ -112,7 +112,7 @@ func TestWhoCanRejectsUnsupportedAction(t *testing.T) {
 	dir := t.TempDir()
 	writeScan(t, dir, "wc", time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), nil)
 	rr := httptest.NewRecorder()
-	GetWhoCan(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/wc/identities/who-can?action=s3:GetObject&arn=x", nil), "id", "wc"))
+	GetWhoCan(dir).ServeHTTP(rr, withParam(httptest.NewRequest(http.MethodGet, "/api/scans/wc/identities/who-can?action=ec2:StopInstances&arn=x", nil), "id", "wc"))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("an action the explorer cannot decide must be rejected, got %d %s", rr.Code, rr.Body.String())
 	}
@@ -192,17 +192,20 @@ func TestAccessTargetsSearchIsCappedAndReportsTheTotal(t *testing.T) {
 		mustDecode(t, rr, &out)
 		return out
 	}
-	if all := get(""); all.Total != 31 || len(all.Items) != 25 {
+	if all := get(""); all.Total != 32 || len(all.Items) != 25 { // 30 roles, a user and a bucket (a data target since the explorer answers S3, secret and key questions)
 		t.Fatalf("a capped list must still report the total: %d total, %d items", all.Total, len(all.Items))
 	}
+	if b := get("?q=bucket"); b.Total != 1 || b.Items[0].Kind != "bucket" {
+		t.Fatalf("a bucket is a target of kind bucket: %+v", b)
+	}
 	if one := get("?q=ALICE"); one.Total != 1 || one.Items[0].Kind != "user" {
-		t.Fatalf("search is case-insensitive and only lists users, groups and roles: %+v", one)
+		t.Fatalf("search is case-insensitive: %+v", one)
 	}
 	if by := get("?arn=arn:aws:iam::1:role/svc-07"); by.Total != 1 || by.Items[0].Name != "svc-07" {
 		t.Fatalf("lookup by ARN: %+v", by)
 	}
-	if none := get("?q=bucket"); none.Total != 0 || none.Items == nil {
-		t.Fatalf("a non-identity is not a target, and the list is [] not null: %+v", none)
+	if none := get("?q=no-such-name"); none.Total != 0 || none.Items == nil {
+		t.Fatalf("an empty result is [] not null: %+v", none)
 	}
 }
 

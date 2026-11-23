@@ -1,4 +1,5 @@
 import type {
+  AccessSuggestion,
   ConfigResponse,
   ConfigValue,
   CoverageReport,
@@ -105,14 +106,17 @@ export const apiClient = {
   getRoleUsage(scanId: string, arn: string): Promise<RoleUsageResponse> {
     return fetchJSON<RoleUsageResponse>(`/scans/${encodeURIComponent(scanId)}/identities/usage${makeQueryString({ arn })}`);
   },
-  getWhoCan(scanId: string, action: string, arn: string): Promise<WhoCanResponse> {
-    return fetchJSON<WhoCanResponse>(`/scans/${encodeURIComponent(scanId)}/identities/who-can${makeQueryString({ action, arn })}`);
+  getWhoCan(scanId: string, action: string, arn: string, chain = false): Promise<WhoCanResponse> {
+    return fetchJSON<WhoCanResponse>(`/scans/${encodeURIComponent(scanId)}/identities/who-can${makeQueryString({ action, arn, chain: chain ? "true" : undefined })}`);
   },
   getIdentityCenter(scanId: string): Promise<IdentityCenterResponse> {
     return fetchJSON<IdentityCenterResponse>(`/scans/${encodeURIComponent(scanId)}/identity-center`);
   },
   accessTargets(scanId: string, params: { q?: string; arn?: string; kind?: string; limit?: number }): Promise<AccessTargetList> {
     return fetchJSON<AccessTargetList>(`/scans/${encodeURIComponent(scanId)}/identities/targets${makeQueryString(params)}`);
+  },
+  accessSuggestions(scanId: string): Promise<{ items: AccessSuggestion[] }> {
+    return fetchJSON<{ items: AccessSuggestion[] }>(`/scans/${encodeURIComponent(scanId)}/identities/access-suggestions`);
   },
   getPrincipals(scanId: string): Promise<PrincipalListResponse> {
     return fetchJSON<PrincipalListResponse>(`/scans/${encodeURIComponent(scanId)}/principals`);

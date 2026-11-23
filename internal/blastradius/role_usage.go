@@ -2,6 +2,7 @@ package blastradius
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Zero0x00/cloudrift/internal/api/schema"
@@ -42,30 +43,71 @@ func WhoCanDetailed(scanID, action string, target models.AssetNode, assets []mod
 		resourceEvidence = "role assumption is governed by the trust policy"
 	}
 	rcpBase := rcpForResource(assets, models.AssetNode{}, target, action, iamauth.PolicySlot{})
-	for _, caller := range assets {
-		if caller.ARN == target.ARN || (caller.AssetType != models.AssetIAMRole && caller.AssetType != models.AssetIAMUser) {
-			continue
-		}
+	return whoCanLoop(scanID, action, target, assets, rels, func(caller models.AssetNode) iamauth.AuthorizationRequest {
 		var rcp *iamauth.PolicySlot
 		if !serviceLinked(caller) {
 			rcp = &rcpBase // the same for every caller but a service-linked role, so it is looked up once
 		}
-		req := whoCanRequest(scanID, action, caller, target, assets, rels, when, trust, resourceEvidence, rcp)
+		return whoCanRequest(scanID, action, caller, target, assets, rels, when, trust, resourceEvidence, rcp)
+	})
+}
+
+// whoCanLoop evaluates the action for every collected user and role, building each request with mk, and sorts the
+// callers that can from those that could not be decided.
+func whoCanLoop(scanID, action string, target models.AssetNode, assets []models.AssetNode, rels []models.Relationship, mk func(caller models.AssetNode) iamauth.AuthorizationRequest) (list []schema.RoleAssumer, unknownCallers []schema.UnknownCaller, evaluated int) {
+	for _, caller := range assets {
+		if caller.AssetType != models.AssetIAMRole && caller.AssetType != models.AssetIAMUser {
+			continue
+		}
+		// A role assuming itself is not a meaningful answer. For an identity-changing action the target acting on itself
+		// is: an administrator can attach a policy to its own user. That caller is kept and marked.
+		if caller.ARN == target.ARN && action == iamauth.ActionAssumeRole {
+			continue
+		}
+		// AWS-owned service-linked roles can be used only by their own service, so they are never callers.
+		if serviceLinked(caller) {
+			continue
+		}
+		req := mk(caller)
 		decision := iamauth.Evaluate(req)
 		evaluated++
 		status, reason := decision.Status, decision.Reason
 		applicable := decision.ApplicableStatements
+		var notes []string
 		if status == iamauth.StatusUnknown && reason != iamauth.ReasonNoAllow {
-			// Organization controls are often not collected. Check whether the identity and
-			// trust policies alone allow the call, and say that the controls were not checked.
 			probe := req
-			probe.SCPs = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "not checked: SCPs were not collected"}
-			probe.RCPs = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "not checked: RCPs were not collected"}
-			if again := iamauth.Evaluate(probe); again.Status == iamauth.StatusAllowed {
-				status, reason = StatusPendingControls, "identity and trust policies allow it; organization controls (SCP/RCP) were not checked"
-				applicable = again.ApplicableStatements
-				if action == iamauth.ActionAssumeRole && trustAloneAllows(probe) {
-					reason = "the trust policy names this caller, so no identity policy is needed; organization controls (SCP/RCP) were not checked"
+			// S3 object access also depends on the bucket's ACL and Block Public Access settings. An object ACL can only add
+			// access, and Block Public Access limits public bucket policies, not an identity policy allow, so when either was
+			// not collected a caller its own identity policy allows still can, and a caller with no allow gains nothing from it.
+			// A missing ACL reading cannot rule out an ACL grant, so a caller without an allow stays undecided in that case.
+			if capOf(action).Evaluation == iamauth.EvalS3Object && (reason == iamauth.ReasonMissingACL || reason == iamauth.ReasonMissingBPA) {
+				probe.S3BlockPublicAccess = iamauth.ConstraintNotApplicable
+				if reason == iamauth.ReasonMissingACL {
+					probe.S3ObjectACL = iamauth.ConstraintNotApplicable
+				}
+				again := iamauth.Evaluate(probe)
+				switch {
+				case again.Status == iamauth.StatusAllowed:
+					// Not worth a note: neither setting can change this answer, so it is a plain "can".
+					status, reason, applicable = iamauth.StatusAllowed, iamauth.ReasonAllowed, again.ApplicableStatements
+				case again.Reason == iamauth.ReasonNoAllow && reason == iamauth.ReasonMissingBPA:
+					status, reason = iamauth.StatusDenied, iamauth.ReasonNoAllow
+				case again.Reason != iamauth.ReasonNoAllow:
+					reason = again.Reason // another piece of evidence is missing; report that one
+				}
+			}
+			if status == iamauth.StatusUnknown && reason != iamauth.ReasonNoAllow {
+				// Organization controls are often not collected. Check whether the identity and trust policies alone allow
+				// the call, and say that the controls were not checked.
+				probe.SCPs = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "not checked: SCPs were not collected"}
+				probe.RCPs = iamauth.PolicySlot{State: iamauth.EvidenceAbsent, Evidence: "not checked: RCPs were not collected"}
+				if again := iamauth.Evaluate(probe); again.Status == iamauth.StatusAllowed {
+					status, reason = StatusPendingControls, "identity and trust policies allow it; organization controls (SCP/RCP) were not checked"
+					applicable = again.ApplicableStatements
+					if action == iamauth.ActionAssumeRole && trustAloneAllows(probe) {
+						reason = "the trust policy names this caller, so no identity policy is needed; organization controls (SCP/RCP) were not checked"
+					}
+					notes = append(notes, "Organization policies (SCPs) were not collected, so one could still block this.")
 				}
 			}
 		}
@@ -82,7 +124,8 @@ func WhoCanDetailed(scanID, action string, target models.AssetNode, assets []mod
 		}
 		list = append(list, schema.RoleAssumer{
 			ARN: caller.ARN, Name: caller.Name, Kind: kind, AccountID: caller.AccountID,
-			Status: status, Reason: reason, Paths: accessPaths(caller, target, applicable, assets, rels),
+			Status: status, Reason: reason, Paths: accessPaths(caller, target, applicable, assets, rels), Self: caller.ARN == target.ARN,
+			Note: strings.Join(notes, " "),
 		})
 	}
 	rank := map[string]int{iamauth.StatusAllowed: 0, StatusPendingControls: 1, iamauth.StatusConditional: 2}
