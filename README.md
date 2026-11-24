@@ -11,9 +11,9 @@ Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge asse
 - `cloudrift demo generate` populates the UI with sample data (no AWS needed)
 - Neo4j is optional for advanced graph features (blast-radius, vector search, `cloudrift query`)
 
-![A tour of the Cloudrift dashboard: Dashboard, Findings, Inventory, Access Explorer, IAM Identity Center and Coverage](docs/assets/cloudrift-tour.gif)
+![A tour of the Cloudrift dashboard: the three Dashboard views, Findings, Trust report, Identities, Access Explorer, Scan Control and Coverage](docs/assets/cloudrift-tour.gif)
 
-*A tour of the dashboard. The data is from a scan of a throwaway lab account with names and IDs replaced; the IAM Identity Center page uses sample data. To see the dashboard yourself without AWS: `cloudrift demo generate && cloudrift dashboard --open`.*
+*A tour of the dashboard. The data is the built-in synthetic demo dataset, not a real account. To see the dashboard yourself without AWS: `cloudrift demo generate && cloudrift dashboard --open`.*
 
 ---
 
