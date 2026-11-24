@@ -69,12 +69,12 @@ cloudrift dashboard --open
 
 ## Overview
 
-Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge assets (DNS, S3 websites, CloudFront) and risky cross-account IAM trust relationships. It scans your AWS organization, writes findings as local JSON (no database required), and provides evidence-backed severity scoring.
+Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge assets (DNS, S3 websites, CloudFront), risky cross-account IAM trust relationships and over-privileged identities, and for putting a price on unused resources. It scans your AWS organization, writes findings as local JSON (no database required), and provides evidence-backed severity scoring.
 
 **Key points:**
 - Calls AWS APIs to inventory edge, IAM-trust, and S3 resource-policy exposure across your org
 - Writes findings to local JSON per scan — read via dashboard, CLI reports, or your own tooling
-- Dashboard provides interactive exploration and a scan control center, plus Users & Groups, per-role usage, an attack and escalation explorer, and a live Coverage page
+- Dashboard provides interactive exploration and a scan control center (check permissions first, schedule, cancel), three Overview views (Executive, Manager, Analyst), a Cost page, Users & Groups, per-role usage, an attack and escalation explorer, and a live Coverage page
 - Read-only: no policy is changed and no secret value is read
 - `cloudrift demo generate` populates the UI with sample data (no AWS needed)
 - Neo4j is optional for advanced graph features (blast-radius, vector search, `cloudrift query`)
@@ -91,6 +91,9 @@ Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge asse
 - **Existing resources that run as a role:** CloudFormation stacks, CodeBuild projects, Step Functions state machines, Glue development endpoints, Batch job definitions, App Runner services, SageMaker notebooks, Bedrock AgentCore runtimes, interpreters and browsers, launch templates behind an Auto Scaling group, and CodeDeploy groups. If a caller may change or run one, it gets that resource's role without `iam:PassRole`
 - **Used, not just allowed:** an opt-in read of the CloudTrail event history shows which callers actually assumed a role, next to who is allowed to
 - **IAM Identity Center:** an opt-in view of permission sets, who is assigned to which account (directly or through a group), and which sets are administrative
+- **What unused resources cost:** unattached volumes, load balancers with no targets and empty hosted zones, priced from the AWS Price List (never a hardcoded price) and, when you turn it on, from what AWS actually billed. The Cost page splits it by account, owner and service and shows what is within reach of the identities that need attention
+- **Business context:** who owns each account, how fast each severity must be fixed, and (optionally) what a loss is worth to you, kept in `business-settings.json` and always labelled as your own assumptions
+- **Takeover beyond DNS:** public IP addresses, ACM certificates, API Gateway custom domains, Cognito domains and EBS volumes are checked for names or resources that no one holds any more, with a `verified` or `inferred` evidence level and a delete-safety command
 - **Honest coverage:** the Coverage page shows, live, what each part collected for the selected scan and what is not covered, with the setting to turn on for anything that is opt-in
 - **Visibility:** Self-hosted dashboard and CLI reports over the same HTTP server — no cloud dependency
 
@@ -111,7 +114,12 @@ Cloudrift is a CLI and embedded dashboard for discovering orphaned AWS edge asse
 | IAM Identity Center | Complete (fakes and a synthetic scan only) | Opt-in (`scan.identity_center`). Needs the organization management account or the delegated administrator. The account used for live checks has no instance, so only the "no instance" path ran against real AWS |
 | `cloudrift verify authz` | Complete (live-tested) | Compares Cloudrift's identity-policy answers with `iam:SimulatePrincipalPolicy`; exits non-zero on a false allow or a bad deny |
 | Coverage page | Complete | Live status of every module, the evaluated actions and attack techniques, the reference-catalog benchmark, and what is opt-in, refreshed every 15 seconds |
-| Diff | Complete | New and resolved findings, plus findings whose severity or evidence changed (new callers, techniques, exploitability) while their ID stayed the same |
+| Diff | Complete | New and resolved findings, plus findings whose severity or evidence changed while their ID stayed the same. Compares scans of the same accounts only, says when the two scans did not look at the same things, and lists what has been open the longest, the resources added and removed, and the trend |
+| Unused-resource costing | Complete (fakes, Price List and Cost Explorer reads live-tested) | Module `unused_resource`: unattached EBS volumes, load balancers with no targets, empty hosted zones. Priced from the AWS Price List API (cached 30 days in `price-cache.json`); Elastic IPs are not priced because the API has no public IPv4 price. Real billing comes from Cost Explorer and is opt-in |
+| Cost page | Complete | What unused resources cost, split by account, owner and service, savings by action, and what is within reach of the identities that need attention |
+| Business settings | Complete | Account owners, fix deadlines (critical, high, medium) and optional loss ranges, stored in `business-settings.json`. Drives owner, deadline and time-to-fix on the Manager view |
+| Trust approvals | Complete | Approve an external account from the finding; the approval is stored in `trust-approvals.json` and applies to later scans |
+| Scan Control | Complete | Check-before-scanning (16 permission reads), area picker, scheduled scans (daily or weekly, UTC, only while the dashboard runs) and cancel. A real scheduled or cancelled run was not exercised end to end |
 | Local embeddings | Stub | `provider=local` will error until implemented |
 
 **Try immediately (no AWS):** `cloudrift demo generate && cloudrift dashboard --open`. A live scan (`cloudrift scan`) runs against a real AWS organization with credentials configured.
@@ -207,13 +215,15 @@ For the full `dashboard` flag reference, see [CLI Commands](#cli-commands). For 
 
 | Page | Purpose |
 | --- | --- |
-| Overview | Summary, high-signal findings, operations view |
-| Scan Control | Start scans, validate AWS profile, runtime status |
+| Overview | Three views for three readers: Executive (the headline, how far to trust the scan, the trend), Manager (what to fix first, who owns it, deadlines, time to fix, what changed) and Analyst (the detail behind every number). `?view=executive\|manager\|analyst` |
+| Scan Control | Pick the profile and the areas to check (identity and access, external access, orphaned edges, unused resources), check permissions before scanning, start or cancel a scan, and set a repeat schedule. Advanced options are folded away |
 | Findings | Paginated findings table with filters and sorting |
 | Triage | Findings in triage/review mode |
 | Accounts | Per-account risk breakdown |
-| Diff | Compare two scans side-by-side |
-| Trust Report | IAM trust findings, external principals |
+| Diff (Changes) | What changed since the previous scan of the same accounts: new, resolved and changed findings, what has been open longest, resources added and removed, and the trend. Warns when the two scans did not look at the same things |
+| Cost | What unused resources cost each month, split by account, owner and service, with savings by action and what is within reach of the identities that need attention |
+| Business settings | Account owners, fix deadlines and optional loss ranges (your own assumptions) |
+| Trust Report | IAM trust findings, external principals, guard strength (external ID, organization, principal) and approvals for external accounts |
 | Inventory | Every collected resource by service, with related findings, collection coverage, and what changed since the previous scan (resources added and removed, and new findings). Marks what is reachable from the internet (a world-open security group rule plus a public address, load balancer scheme or database flag), shows an owner from configurable tag keys, hides AWS-managed objects by default, runs on to workloads that run as a role, and exports the filtered list as CSV. Opt-in collectors that are off say so and link to Settings |
 | Users & Groups | Every IAM user and group, which policies apply directly or through a group, explicit Deny markers, and console, MFA and access-key findings |
 | Identities | Roles listed riskiest first in a table, with findings, internet exposure and owner per role (AWS-managed roles hidden by default). Opening a role shows what it can do per service, how it is exposed and the way in, the resources it can reach by name, who can assume it (with source addresses when the CloudTrail opt-in is on), whether it is used, and suggested changes; the per-account permission matrix and an IAM users table sit beside it |
@@ -548,6 +558,28 @@ flowchart LR
 
 This is the **actual** flow. `internal/pipeline` orchestrates it end to end (collect → assemble org-wide bucket-name set → validate → score → persist JSON), and both `cloudrift scan` and the dashboard Scan Control start path route through `pipeline.Run`. For an AWS-free walkthrough, `cloudrift demo generate` still synthesizes a populated `findings.json`.
 
+#### Costing, business data and scheduling
+
+```mermaid
+flowchart LR
+  AWS[AWS APIs] --> COL[Collectors]
+  PL[AWS Price List] --> PR[internal/pricing]
+  PR --> PC[price-cache.json]
+  CE[Cost Explorer] --> ACT[Billing actuals]
+  COL --> W[ScoreUnusedResources]
+  PR --> W
+  ACT --> W
+  W --> F[findings.json]
+  F --> API[API handlers]
+  BS[business-settings.json] --> API
+  TA[trust-approvals.json] --> API
+  API --> UI[Overview, Cost, Diff]
+  SCH[Scheduler, once a minute] --> RUN[pipeline.Run]
+  RUN --> F
+```
+
+Prices are never hardcoded: a price missing from the Price List is left empty rather than guessed. Business settings and trust approvals sit beside the scans and are read at request time.
+
 #### Dashboard data path
 
 ```mermaid
@@ -576,6 +608,10 @@ Storage is intentionally flat-file JSON under `cloudrift-output/<scan-id>/`. Sca
 
 **Orchestration (`internal/pipeline`):** the detection engine is wired end to end. `pipeline.Run` drives the full flow: collect (org accounts → per-account collectors for DNS, storage/S3, edge/CloudFront, trust/IAM, activity, and bucket policies) → assemble the org-wide bucket-name set → validate (DNS/HTTP probe, skippable) → score (`internal/scorers`: `ScoreRisk`, `ScoreTrust`, `ScoreResourceExposure`, `ScoreCost`, plus optional Cost Explorer enrichment) → persist `findings.json`, `scan-metadata.json`, `assets/assets.json`, and `relationships.json`. AWS collection sits behind a `Source` interface (`pipeline.NewAWSSource`) so the scoring/persistence stages stay testable without real AWS access. Both `cloudrift scan` (`cmd/cloudrift/main.go`) and the dashboard Scan Control start path (`internal/api/handlers/scan_control.go`) route through `pipeline.Run`; the older `internal/scanrun` stub has been removed.
 
+**Modules and unused resources:** a scan covers four areas, selected with `Options.Modules` (or the area picker): `iam_entitlement`, `external_access`, `orphaned_edge` and `unused_resource`. Identity scoring is its own module, no longer inside the trust block. The unused-resource step (`scorers.ScoreUnusedResources`) finds unattached volumes, load balancers with no targets and empty hosted zones, prices them lazily from `internal/pricing` (AWS Price List, us-east-1, cached 30 days), and, when `cost.use_cur` is on, `EnrichWasteActuals` replaces the estimate with what Cost Explorer billed. Account spend is attached as an `account_spend` asset. All of it happens before the scan is persisted.
+
+**Business data and schedule:** `internal/business` keeps `business-settings.json` (owners, fix days, optional loss ranges) and `internal/trustapprovals` keeps `trust-approvals.json`; both live in the output directory beside the scans, are read by the API handlers and are never written by a scan. The scheduler (`internal/api/handlers/schedule.go`) checks once a minute inside the dashboard process and writes `schedule-state.json`.
+
 **Identity layer (CIEM):** with policy inventory on, `internal/collectors` also gathers IAM users, groups and the credential report, `internal/iamauth` evaluates actions against all policy sources, `internal/blastradius` searches escalation paths and computes who can assume a role, and `internal/ciem` turns this into identity findings (`ScoreIdentityHygiene`) and the dashboard views. Scoring runs the identity scorer alongside `ScoreEntitlements`; `scorers.ScoreVPCEndpoints` covers endpoint policies.
 
 **S3 resource-policy exposure:** cross-account / public S3 exposure is detected from resource-based bucket policies, as part of the **external_access** module. The collector `CollectBucketPolicies` (`internal/collectors/bucketpolicy.go`) reuses the already-listed buckets to read policies, and `ScoreResourceExposure` (`internal/scorers/resource_exposure.go`) grades the resulting cross-account/public grants.
@@ -593,9 +629,9 @@ Embeddings and hybrid retrieval live in `internal/graph`; operator-facing CLI en
 ### Dashboard and API behavior
 
 - Dashboard is served from the Go binary and uses left-rail primary navigation.
-- `/overview` supports in-page product modes: `Executive Summary`, `High-Signal`, and `Operations` (`?view=...`).
-- High-Signal is optimized for prioritized triage (top fixes + remediation groups); Operations is optimized for action flow (status, ownership risk, next actions).
-- Dashboard mode is preserved while navigating within dashboard context; entering dashboard from other routes defaults to executive mode.
+- `/overview` has three views for three readers (`?view=executive|manager|analyst`): Executive for the CISO or CEO (the headline, how far to trust the scan, the trend), Manager (what to fix first, owners, deadlines, time to fix, what changed) and Analyst (the detail). The older `leader`, `operator`, `high-signal` and `operations` values still work as aliases.
+- The view is preserved while navigating within the dashboard; entering from other routes defaults to executive.
+- Money is never invented: costs come from the AWS Price List or from Cost Explorer, and a loss figure appears only after you enter your own values in Business settings.
 - `scan_id` remains URL-driven and is preserved through app navigation.
 - When configured, the dashboard's Neo4j export (`exportScanToNeo4j` in `internal/api/handlers/scan_control.go`) projects **assets and relationships** alongside findings — yielding a traversable graph for blast-radius / attack paths rather than a findings-only graph — and attaches embeddings on export (best-effort, so the vector index is populated for query/RAG).
 - Theme is token-driven (`darkMode: class`) with contrast-tuned helper text, table headers, borders, and focus-visible treatment shared across pages.
@@ -756,7 +792,8 @@ Key sections:
 
 - `[aws]` — org role name, scan mode (auto, organization, account), management profile, regions to scan
 - `[scan]` — HTTP concurrency, role-assumption concurrency, timeouts
-- `[cost]` — `use_cur` attaches Cost Explorer's 30-day service spend to orphaned-edge findings as context (it reads Cost Explorer, not the Cost and Usage Report). `currency` and the two risk multipliers are read by nothing and are no longer shown on the Settings page
+- `[cost]` — `use_cur` reads Cost Explorer at scan time: each account's last-month spend, what each unused resource actually cost over 14 days (resource-level data must be switched on in the payer account) and the service spend behind each orphaned-edge finding as context. It reads Cost Explorer, not the Cost and Usage Report, and Cost Explorer charges per request. Needs `ce:GetCostAndUsage` and `ce:GetCostAndUsageWithResources`. `currency` and the two risk multipliers are read by nothing and are no longer shown on the Settings page
+- `[schedule]` — `frequency` (`""` off, `daily` or `weekly`, weekly runs Monday) and `hour_utc` (0 to 23). Runs only while the dashboard process is running; for an unattended schedule run `cloudrift scan` from cron. State is kept in `schedule-state.json`
 - `[trust]` — approved external accounts, thresholds for stale/ghost roles
 - `[output]` — scan output directory (default: `./cloudrift-output`)
 - `[neo4j]` — `uri`, `username`, `password_env` (optional)
@@ -790,7 +827,7 @@ The CLI loads `[aws].management_profile` from `cloudrift.toml` (default `"defaul
 management_profile = "my-readonly-profile"
 ```
 
-The dashboard Scan Control page accepts a named profile in the JSON body for `POST /api/scan/start` and `POST /api/runtime/validate-profile` — that is UI/API only, not mirrored as a global CLI flag. See [Getting Started](#getting-started) and [IAM Setup](#iam-setup) for credential details.
+The `management_profile` is the profile the scan runs with; the Scan Control profile picker overrides it for that run, and the Pricing and Cost Explorer reads use the same one. The dashboard Scan Control page accepts a named profile in the JSON body for `POST /api/scan/start` and `POST /api/runtime/validate-profile` — that is UI/API only, not mirrored as a global CLI flag. See [Getting Started](#getting-started) and [IAM Setup](#iam-setup) for credential details.
 
 #### Neo4j (`[neo4j]`)
 
@@ -961,10 +998,13 @@ Cloudrift assumes a read-only audit role (`CloudriftAuditRole`) into each accoun
 | **Existing resources that run as a role** *(on by default, `scan.service_resources`)* | `cloudformation:DescribeStacks`; `codebuild:ListProjects`, `BatchGetProjects`; `states:ListStateMachines`, `DescribeStateMachine`; `glue:GetDevEndpoints`; `batch:DescribeJobDefinitions`; `apprunner:ListServices`, `DescribeService`; `sagemaker:ListNotebookInstances`, `DescribeNotebookInstance`; `bedrock-agentcore` list and get calls; `ec2:DescribeLaunchTemplates`, `DescribeLaunchTemplateVersions`, `autoscaling:DescribeAutoScalingGroups`; `codedeploy:ListApplications`, `ListDeploymentGroups`, `BatchGetDeploymentGroups`. Per Region, run side by side | Finds resources a caller could change or run to obtain their role. A service the account or Region does not offer is `unsupported`, a denied call is a `failed` collector with the reason |
 | **CloudTrail** *(opt-in, `scan.assume_role_activity`)* | `cloudtrail:LookupEvents` for `AssumeRole` events (up to 90 days, 5,000 events per Region, time budget) | Shows which callers actually assumed a role |
 | **IAM Identity Center** *(opt-in, `scan.identity_center`)* | `sso:ListInstances`, `ListPermissionSets`, `DescribePermissionSet`, `ListManagedPoliciesInPermissionSet`, `ListCustomerManagedPolicyReferencesInPermissionSet`, `GetInlinePolicyForPermissionSet`, `ListAccountsForProvisionedPermissionSet`, `ListAccountAssignments`; `identitystore:DescribeUser`, `DescribeGroup`, `ListGroupMemberships`. Management account or delegated administrator only | Shows who reaches which account through single sign-on |
+| **EC2 volumes and addresses** | `ec2:DescribeVolumes`, `ec2:DescribeAddresses`, `ec2:DescribeNetworkInterfaces` | Unattached volumes for costing and takeover, and public addresses held by no resource |
+| **ACM, API Gateway, Cognito** | `acm:ListCertificates`, `acm:DescribeCertificate`; `apigateway:GET` on `/domainnames`; `cognito-idp:ListUserPools`, `DescribeUserPool` | Takeover checks for certificate validation names, API Gateway custom domains and Cognito domains |
+| **AWS Price List** | `pricing:GetProducts` (us-east-1), management credentials | Prices unused resources; cached 30 days in `price-cache.json`. Elastic IPs have no public price in the API and are left unpriced |
 | **STS** | `GetCallerIdentity` | Confirms assumed-role identity during cross-account scanning |
-| **Cost Explorer** *(optional)* | `GetCostAndUsage` (last 30 days, grouped by account + service) | Attaches the account's spend on the finding's service as context. It is the whole service's spend, never the finding's cost or priority |
+| **Cost Explorer** *(optional, `cost.use_cur`)* | `GetCostAndUsage` (last 30 days by account and service; last month per account) and `GetCostAndUsageWithResources` (last 14 days, when resource-level data is on) | Account spend as the running cost of what an administrator can reach, the actual cost of each unused resource, and service spend as context on orphaned-edge findings. Service spend is never a finding's cost or priority |
 
-> **Not collected:** ACM certificate details, API Gateway custom domains, RDS clusters and snapshots, VPCs and security groups. CloudTrail data events, CloudTrail Lake and Athena are not read either (they need customer-owned infrastructure or paid queries).
+> **Not collected:** RDS clusters and snapshots and VPCs. The Cost and Usage Report is not read. CloudTrail data events, CloudTrail Lake and Athena are not read either (they need customer-owned infrastructure or paid queries).
 
 ### What Is Mapped and How Resources Relate
 
@@ -1087,10 +1127,25 @@ Adjust parameters to match your org's naming and security standards.
 ### Minimum intent and scope
 
 - The role is **read-oriented** inventory and analysis — not `AdministratorAccess` for Cloudrift.
-- The action list covers the read-only APIs the collectors actually call: `organizations:ListAccounts/ListParents/ListTagsForResource/DescribeOrganizationalUnit`, `route53:ListHostedZones/ListResourceRecordSets`, `cloudfront:ListDistributions`, `iam` get/list role + policy reads, `iam:GetAccountAuthorizationDetails`, `iam:GenerateCredentialReport` and `iam:GetCredentialReport` (users, groups and credential state; redeploy the StackSet to pick them up), `sts:AssumeRole`, and S3 reads — `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:GetBucketWebsite`, plus **`s3:GetBucketPolicy`** (required for the S3 bucket-policy resource-exposure detection). `ce:GetCostAndUsage` is optional, for FinOps cost enrichment.
+- The action list covers the read-only APIs the collectors actually call: `organizations:ListAccounts/ListParents/ListTagsForResource/DescribeOrganizationalUnit`, `route53:ListHostedZones/ListResourceRecordSets`, `cloudfront:ListDistributions`, `iam` get/list role + policy reads, `iam:GetAccountAuthorizationDetails`, `iam:GenerateCredentialReport` and `iam:GetCredentialReport` (users, groups and credential state; redeploy the StackSet to pick them up), `sts:AssumeRole`, and S3 reads — `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:GetBucketWebsite`, plus **`s3:GetBucketPolicy`** (required for the S3 bucket-policy resource-exposure detection). `ce:GetCostAndUsage` and `ce:GetCostAndUsageWithResources` are optional and belong to the management profile, not the member role (see the table below).
 - If StackSet is **not** deployed org-wide, findings are only as complete as the accounts your role can reach. Collectors are **resilient** — a per-account failure (role not assumable, an action denied) is skipped rather than fatal — and the scan records which accounts it reached. **Incomplete coverage automatically downgrades absence-based "reclaimable/critical" subdomain-takeover verdicts to High** (the "missing" resource could live in an account you couldn't scan). See [Security Coverage](#security-coverage).
+- **Two places hold permissions.** The member-account role (`iam/stackset-template.yaml`) does the per-account reads. The profile you scan with, usually in the management account (`iam/auditing-role-policy.json`), does the organization-wide reads, Cost Explorer and the Price List. Both are read-only.
 - **Newer collectors need their own read actions.** `iam/stackset-template.yaml` (member accounts) includes the actions for the existing-resource collectors and `cloudtrail:LookupEvents`; `iam/auditing-role-policy.json` (management account) includes the organization SCP and RCP reads and the IAM Identity Center reads. Until an account's role is updated, the affected collector records a `failed` status with the reason `access_denied` for that Region; resources are never reported as absent. The full permission table is in `docs/audits/service-resource-collection.md`.
 - **Least privilege:** grant the actions in the template, not full `*`.
+
+### What each part needs
+
+| Feature | Where | Actions |
+| --- | --- | --- |
+| Security groups, load balancers, RDS | Member role | `ec2:DescribeSecurityGroups`, `elasticloadbalancing:DescribeLoadBalancers`, `DescribeTargetGroups`, `DescribeTargetHealth`, `DescribeTags`, `rds:DescribeDBInstances` |
+| Unused volumes and public addresses | Member role | `ec2:DescribeVolumes`, `ec2:DescribeAddresses`, `ec2:DescribeNetworkInterfaces` |
+| Takeover checks for certificates and domains | Member role | `acm:ListCertificates`, `acm:DescribeCertificate`, `cognito-idp:ListUserPools`, `cognito-idp:DescribeUserPool`, `apigateway:GET` limited to `/domainnames` and `/domainnames/*` (not the whole service, which would also expose API keys and stages) |
+| Hosted zones (empty-zone costing, DNS) | Member role | `route53:ListHostedZones`, `route53:ListResourceRecordSets` |
+| Pricing of unused resources | Scanning profile | `pricing:GetProducts` (the Price List API lives in us-east-1) |
+| Real billing, opt-in with `cost.use_cur` | Scanning profile (management or payer account) | `ce:GetCostAndUsage`, `ce:GetCostAndUsageWithResources`. Cost Explorer charges per request, and resource-level data must be switched on in the payer account |
+| IAM Identity Center, opt-in | Management or delegated administrator | `sso:*` reads and `identitystore:` reads listed in `iam/auditing-role-policy.json` |
+
+Redeploy the StackSet after upgrading so member accounts pick up the new member-role actions. An account that has not been updated records a `failed` collector with `access_denied`; nothing is reported as absent. To see what is missing before you scan, use **Check before scanning** on the Scan Control page: it tests the sign-in and each read for the chosen profile in one Region and lists what is denied (billing is reported untested). It does not test the member roles in other accounts.
 
 ### Verify deployment
 
@@ -1102,7 +1157,7 @@ aws sts assume-role \
   --role-session-name cloudrift-verify
 ```
 
-The dashboard **Scan Control** page can validate a profile via `POST /api/runtime/validate-profile` (see [API & Technical Reference](#api--technical-reference)).
+The dashboard **Scan Control** page can validate a profile via `POST /api/runtime/validate-profile` and test the reads a scan needs via `POST /api/runtime/preflight` (see [API & Technical Reference](#api--technical-reference)).
 
 ### Related files
 
@@ -1190,7 +1245,7 @@ The **`internal/`** packages implement a full pipeline (collectors → validator
 
 ### 3. API documentation
 
-> **Newer endpoints** (all `GET`, under `/api/scans/{id}` unless noted): `/inventory/summary`, `/inventory/resources`, `/inventory/resource`, `/inventory/export.csv` (the same filters as the list: `internet_facing`, `owner`, `new_resources`, `hide_aws`); `/identities/usage` (who and what uses a role, with who was seen assuming it), `/identities/who-can` (who can do an action to a target, with the route drawn as steps), `/identities/targets` (search for a target, riskiest first, including buckets, secrets and keys), `/identities/access-suggestions` (ready questions), and `who-can` also takes `chain=true` for roles reached through other roles; `/identity-center` (permission sets, people and groups, accounts); `/api/coverage` and `/api/coverage/reference` (module status and the reference-catalog benchmark). The scan setting keys are served and saved by `/api/config`.
+> **Newer endpoints** (all `GET`, under `/api/scans/{id}` unless noted): `/inventory/summary`, `/inventory/resources`, `/inventory/resource`, `/inventory/export.csv` (the same filters as the list: `internet_facing`, `owner`, `new_resources`, `hide_aws`); `/identities/usage` (who and what uses a role, with who was seen assuming it), `/identities/who-can` (who can do an action to a target, with the route drawn as steps), `/identities/targets` (search for a target, riskiest first, including buckets, secrets and keys), `/identities/access-suggestions` (ready questions), and `who-can` also takes `chain=true` for roles reached through other roles; `/identity-center` (permission sets, people and groups, accounts); `/api/coverage` and `/api/coverage/reference` (module status and the reference-catalog benchmark). The scan setting keys are served and saved by `/api/config`. Added with the Cost, Manager and Scan Control work: `/api/scans/{id}/cost` (the Cost page report), `/api/scans/{id}/manager-metrics` (owners, deadlines, time to fix, what changed), `GET` and `PUT /api/business` (business settings), `GET /api/trust/approvals` with `PUT` and `DELETE /api/trust/approvals/{accountID}`, `POST /api/runtime/preflight` (check permissions before a scan) and `POST /api/scan/cancel`.
 
 Base URL: same host as the dashboard (default `http://127.0.0.1:8080` — loopback by default; `--host` opts into a non-loopback bind). JSON only for REST. Authentication is optional and off by default: setting `CLOUDRIFT_API_TOKEN` gates the entire server (REST + UI) behind HTTP Basic auth (see [Security review](#9-security-review)).
 
@@ -1420,9 +1475,9 @@ GET /api/scans/20260418-120000/findings/abc123def456 HTTP/1.1
 
 **Query:** `old`, `new` - both validated scan ids (or `latest` where supported by handler).
 
-**Identity:** `lower(trim(title)) + "|" + lower(trim(affected_arn))`.
+**Identity:** the finding ID when it has one, otherwise `lower(trim(title)) + "|" + lower(trim(affected_arn))`. The same key is used by alerting, so the Diff page and alerts agree on what is new.
 
-**Outputs:** `DiffResponse` - `new_findings`, `resolved_findings`, `changed_findings`, `unchanged_count`.
+**Outputs:** `DiffResponse` - `new_findings`, `resolved_findings`, `changed_findings`, `unchanged_count`, plus `comparability` (whether the two scans looked at the same ground; if not, a missing finding may only be unseen), `open_longest`, `resources` (added and removed) and `trend`. The dashboard picks the previous scan of the **same accounts** as the baseline; scans of other accounts are never used, because every finding would look new or gone.
 
 **Changed findings:** Findings present in both scans (same stable identity) whose **severity** transitioned are reported in `changed_findings`. Each item is a `FindingListItem` plus `old_severity` and `new_severity`, sorted by new severity (descending) then id. Same-severity matches count toward `unchanged_count`.
 
@@ -1461,9 +1516,13 @@ Used by the dashboard route `/scan-control`. **No secrets** in responses (profil
 |--------|------|---------|
 | `GET` | `/api/runtime/status` | AWS profile names, default profile, booleans for OpenAI key env set, Neo4j config present, optional alert envs |
 | `POST` | `/api/runtime/validate-profile` | Body: `{ "profile": "..." }` - STS `GetCallerIdentity` check; safe operator message |
-| `POST` | `/api/scan/start` | Body: `ScanStartRequest` - `profile`, `module` (`all\|orphaned_edge\|external_access`), `no_http`, `neo4j`, optional `provider` (`openai\|local`). Validates the selected profile, then runs the **real pipeline** (`pipeline.Run`) asynchronously; the selected `module` scopes `Options.Modules`. **Graph-tier** Neo4j export runs after the scan completes when `neo4j` is true. **Single active run:** second start returns 409 while status is `running`. **`provider: local`:** local embeddings are not operational; graph embedding steps require OpenAI until `internal/graph` local path ships. |
+| `POST` | `/api/runtime/preflight` | Body: `{ "profile": "..." }` - tests sign-in first, then each read the scan needs (16 checks, one Region). Returns `ok`, `denied`, `unavailable`, `untested` per check; a rejected sign-in returns one "cannot check" note. Billing is reported `untested` because Cost Explorer charges per request |
+| `POST` | `/api/scan/cancel` | Stops the running scan and discards what it had written; 409 if none is running |
+| `POST` | `/api/scan/start` | Body: `ScanStartRequest` - `profile`, `modules` (a list of `iam_entitlement`, `external_access`, `orphaned_edge`, `unused_resource`; empty or `all` means everything; the older single `module` is still accepted), `no_http`, `neo4j`, optional `provider` (`openai\|local`). Validates the selected profile, then runs the **real pipeline** (`pipeline.Run`) asynchronously; the selected `module` scopes `Options.Modules`. **Graph-tier** Neo4j export runs after the scan completes when `neo4j` is true. **Single active run:** second start returns 409 while status is `running`. **`provider: local`:** local embeddings are not operational; graph embedding steps require OpenAI until `internal/graph` local path ships. |
 | `GET` | `/api/scan/status` | Current run: `run_id`, `status`, `stage`, `message`, `scan_id` when known, timestamps |
 | `GET` | `/api/scan/history` | Recent completed/failed runs (bounded list) |
+
+`GET /api/runtime/status` also returns `schedule` (`frequency`, `hour_utc`, `next_run`, `last_trigger`).
 
 **Note:** The started scan runs the same pipeline as the library/CLI path and produces real artifacts (`findings.json`, assets, relationships) under a new scan directory. When `neo4j` is true the export projects the full graph — metadata, **assets, and relationships** (not findings-only) — and attaches finding embeddings best-effort (`graph.AttachEmbeddingsBestEffort`) so the vector index is populated; embedding requires an OpenAI key and is skipped cleanly without one (the graph export still succeeds, without vector search).
 
@@ -1487,6 +1546,7 @@ flowchart LR
     EDGE[collectors/edge storage]
     TRUST[collectors/trust]
     ACT[collectors/activity]
+    RES[collectors/volumes addresses acm apigw cognito]
   end
 
   subgraph validate [Validation]
@@ -1497,6 +1557,13 @@ flowchart LR
     RISK[scorers/risk]
     TR[scorers/trust]
     COST[scorers/cost + CE optional]
+    WASTE[scorers/waste + pricing]
+  end
+
+  subgraph state [Beside the scans]
+    BIZ[business-settings.json]
+    APPR[trust-approvals.json]
+    PCACHE[price-cache.json]
   end
 
   subgraph persist [Persistence]
@@ -1514,6 +1581,13 @@ flowchart LR
   AWS --> EDGE
   AWS --> TRUST
   AWS --> ACT
+  AWS --> RES
+  RES --> WASTE
+  WASTE --> OUT
+  PRICE[AWS Price List] --> WASTE
+  WASTE --> PCACHE
+  BIZ --> API
+  APPR --> API
   CFG --> collect
   ORG --> EDGE
   DNS --> HTTP
@@ -1530,7 +1604,7 @@ flowchart LR
   API --> UI
 ```
 
-*These lines reflect the live pipeline: `scan` / Scan Control run `pipeline.Run` (collectors → validators → scorers → output) and populate `DIR` with real findings. Tests and **`cloudrift demo generate`** can also seed `DIR` with deterministic fixture artifacts.*
+*The state files are read by the API at request time; a scan never writes them. These lines reflect the live pipeline: `scan` / Scan Control run `pipeline.Run` (collectors → validators → scorers → output) and populate `DIR` with real findings. Tests and **`cloudrift demo generate`** can also seed `DIR` with deterministic fixture artifacts.*
 
 ### 5. Architecture (Mermaid)
 
@@ -1549,6 +1623,8 @@ flowchart TB
     MOD[models]
     OUT[output]
     APIP[api]
+    PRC[pricing]
+    BIZP[business, trustapprovals]
   end
 
   subgraph runtime [Process]
@@ -1557,6 +1633,8 @@ flowchart TB
   end
 
   SCAN --> MOD
+  SCHED[scheduler] --> SCAN
+  PRE[preflight] --> APIP
   REPORT --> OUT
   DASH --> APIP
   DASH --> CHI
@@ -1566,6 +1644,8 @@ flowchart TB
   VAL --> MOD
   SCO --> MOD
   APIP --> MOD
+  APIP --> BIZP
+  SCO --> PRC
 ```
 
 **Separation of concerns:**
@@ -1573,7 +1653,8 @@ flowchart TB
 - **collectors** - Talk to AWS; emit `AssetNode` + `Relationship`.
 - **validators** - Interpret DNS/HTTP results; no AWS writes.
 - **scorers** - Pure logic from models + validation + config; produce `Finding`.
-- **api** - Read-only filesystem projection; no mutation of scans.
+- **api** - Read-only filesystem projection; no mutation of scans. It writes only the customer's own settings (`business-settings.json`, `trust-approvals.json`) and starts or cancels runs.
+- **pricing** - Reads the AWS Price List and caches it; never hardcodes a price.
 - **dashboard** - Presentation; `fetch('/api/...')`; theme preference in `localStorage` key `cloudrift-dashboard-theme` (see `dashboard/src/hooks/useTheme.tsx`).
 
 A plain-language version of this architecture lives in the [Architecture](#architecture) section.
@@ -1587,9 +1668,13 @@ There is **no database** in core Phase 1–2 flow. **Phase 3** adds a **Neo4j gr
 | Scan metadata | `output_dir/<scan_id>/scan-metadata.json` | Written per scan; drives list timestamps |
 | Findings | `output_dir/<scan_id>/findings.json` | Source of truth for API and reports |
 | Reports | `report.json`, `report.csv`, `report.md`, `.xlsx` | Optional exports |
+| Business settings | `output_dir/business-settings.json` | Account owners, fix days, optional loss ranges; written from the dashboard, read by the API |
+| Trust approvals | `output_dir/trust-approvals.json` | Approved external accounts |
+| Price cache | `output_dir/price-cache.json` | AWS Price List results, valid 30 days |
+| Schedule state | `output_dir/schedule-state.json` | When the scheduler last started a scan |
 | Neo4j graph | External DB (see `internal/graph/schema.go`) | **Graph tier:** `cloudrift scan --neo4j` after a scan dir exists; vectors + `ScanSnapshot` embedding identity for `cloudrift query` |
 
-**Models:** `internal/models/finding.go` - severity, module (`orphaned_edge` | `external_access`), claimability, costs, evidence map, etc. `ScanSnapshot` holds scan-level metadata.
+**Models:** `internal/models/finding.go` - severity, module (`orphaned_edge` | `external_access` | `iam_entitlement` | `unused_resource`), claimability, costs, evidence map, etc. `ScanSnapshot` holds scan-level metadata.
 
 **Graph writer embedding fields:** `mergeScanSnapshotStatement` in `internal/graph/writer.go` only sets `embedding_provider` / `embedding_model` / `embedding_dimensions` on `:ScanSnapshot` when the scan has a **full** embedding identity including a **non-empty model** string, so Neo4j never stores half-written metadata that retrieval would reject.
 
