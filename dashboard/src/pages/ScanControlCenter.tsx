@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import type { PreflightResponse } from "../api/types";
 import { formatQueryError } from "../api/httpError";
 import { PageHeader } from "../components/PageHeader";
 import { StatePanel } from "../components/StatePanel";
-import { useExportNeo4jMutation, useRuntimeStatusQuery, useScanRunHistoryQuery, useScanRunStatusQuery, useStartScanMutation, useSSOLoginMutation, useValidateProfileMutation } from "../hooks/useDashboardQueries";
-import { useScanControlUrlState } from "../hooks/useScanControlUrlState";
+import { useCancelScanMutation, usePreflightMutation, useExportNeo4jMutation, useRuntimeStatusQuery, useScanRunHistoryQuery, useScanRunStatusQuery, useStartScanMutation, useSSOLoginMutation, useValidateProfileMutation } from "../hooks/useDashboardQueries";
+import { SCAN_AREAS, useScanControlUrlState } from "../hooks/useScanControlUrlState";
 
-const MODULE_OPTIONS = ["all", "orphaned_edge", "external_access"] as const;
 const PROVIDER_OPTIONS = ["", "openai", "local"] as const;
 
 function statusTone(ok: boolean): string {
@@ -23,6 +24,8 @@ export function ScanControlCenterPage() {
   const startScan = useStartScanMutation();
   const ssoLogin = useSSOLoginMutation();
   const exportNeo4j = useExportNeo4jMutation();
+  const preflight = usePreflightMutation();
+  const cancelScan = useCancelScanMutation();
 
   const [progressMessage, setProgressMessage] = useState("");
   const [socketFailed, setSocketFailed] = useState(false);
@@ -115,8 +118,8 @@ export function ScanControlCenterPage() {
   return (
     <section className="space-y-6">
       <PageHeader
-        title="Scan Control Center"
-        description="Start scans using profile and provider selections."
+        title="Scan Control"
+        description="Choose what to check, make sure the credentials can read it, and start a scan."
         details="Secrets are resolved server-side from env, shared config or role sources and are never shown here."
       />
 
@@ -142,166 +145,150 @@ export function ScanControlCenterPage() {
         </StatePanel>
       ) : (
         <>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            <Badge title="OpenAI" ok={Boolean(runtimeData.openai_configured)} />
-            <Badge title="Neo4j" ok={Boolean(runtimeData.neo4j_configured)} />
-            <Badge title="Slack alerts" ok={Boolean(runtimeData.slack_configured)} />
-            <Badge title="Email alerts" ok={Boolean(runtimeData.email_configured)} />
-            <Badge title="AWS profiles" ok={profiles.length > 0} detail={`${profiles.length} found`} />
-          </div>
-          {profiles.length === 0 ? (
-            <div className="hs-card-soft border-amber-200 bg-amber-50/90 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/25">
-              <p className="cr-body text-amber-950 dark:text-amber-100/95">
-                No named AWS profiles were detected. Ambient credentials (instance role, SSO, or env vars) may still work—use{" "}
-                <strong>Validate profile</strong> or <strong>Start scan</strong> to confirm.
-              </p>
-            </div>
-          ) : null}
           {socketFailed ? (
             <div className="hs-card-soft px-3 py-2">
-              <p className="cr-helper">
-                Live progress channel is unavailable. Scans can still run; status and history continue to refresh via API polling.
-              </p>
+              <p className="cr-helper">Live progress is unavailable. Scans still run; status refreshes by polling.</p>
             </div>
           ) : null}
-          <p className="cr-helper">
-            If no local profiles are listed, ambient AWS auth may still work (instance role, container/task role, or env-based credentials).
-          </p>
+
+          <ScheduleLine schedule={runtimeData.schedule} lastScan={historyItems.find((h) => h.status === "completed")?.finished_at} />
 
           <div className="hs-filter-bar">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <Field label="AWS profile">
-                <select
-                  value={state.profile}
-                  onChange={(e) => patch({ profile: e.target.value })}
-                  className="hs-select"
-                >
-                  <option value="">(ambient default chain)</option>
+            <div className="grid gap-5 md:grid-cols-2">
+              <Field label="Scan this AWS profile">
+                <select value={state.profile} onChange={(e) => patch({ profile: e.target.value })} className="hs-select">
+                  <option value="">(default credentials)</option>
                   {profiles.map((p) => (
                     <option key={p} value={p}>
                       {p}
                     </option>
                   ))}
                 </select>
+                <p className="cr-helper mt-1">{runtimeData?.scan_mode_plan_note ?? ""} <Link className="underline" to="/settings#cfg-aws.scan_mode">Change the scan mode</Link></p>
               </Field>
 
-              <Field label="Module">
-                <select
-                  value={state.moduleName}
-                  onChange={(e) => patch({ moduleName: e.target.value as (typeof MODULE_OPTIONS)[number] })}
-                  className="hs-select"
-                >
-                  {MODULE_OPTIONS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Embedding provider (optional)">
-                <select
-                  value={state.provider}
-                  onChange={(e) => patch({ provider: e.target.value as (typeof PROVIDER_OPTIONS)[number] })}
-                  className="hs-select"
-                >
-                  {PROVIDER_OPTIONS.map((p) => (
-                    <option key={p || "default"} value={p}>
-                      {p || "default"}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Flags">
+              <Field label="What to check">
                 <div className="space-y-2">
-                <label className="hs-toggle-inline">
-                  <input className="hs-checkbox" type="checkbox" checked={state.noHTTP} onChange={(e) => patch({ noHTTP: e.target.checked })} />
-                  no-http
-                </label>
-                <label className="hs-toggle-inline">
-                  <input className="hs-checkbox" type="checkbox" checked={ciem} onChange={(e) => setCiem(e.target.checked)} />
-                  CIEM inventory
-                </label>
-                <label className="hs-toggle-inline">
-                  <input
-                    className="hs-checkbox"
-                    type="checkbox"
-                    checked={state.neo4j}
-                    onChange={(e) => patch({ neo4j: e.target.checked })}
-                    disabled={!runtimeData.neo4j_configured}
-                  />
-                  neo4j export
-                </label>
+                  {AREAS.map((a) => {
+                    const checked = state.modules.length === 0 || state.modules.includes(a.id);
+                    return (
+                      <label key={a.id} className="flex items-start gap-2 text-sm">
+                        <input
+                          className="hs-checkbox mt-0.5"
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const current = state.modules.length === 0 ? [...SCAN_AREAS] : state.modules;
+                            const next = e.target.checked ? [...current, a.id] : current.filter((x) => x !== a.id);
+                            patch({ modules: next.length === 0 || next.length === SCAN_AREAS.length ? [] : Array.from(new Set(next)) });
+                          }}
+                        />
+                        <span>
+                          <span className="font-medium text-slate-800 dark:text-slate-100">{a.label}</span>
+                          <span className="block cr-helper">{a.what}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
+                {state.modules.length === 0 ? <p className="cr-helper mt-1">Everything is checked.</p> : null}
               </Field>
             </div>
 
-            {runtimeData?.region_plan_note ? (
-              <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
-                {ciem && runtimeData.region_mode !== "explicit" && runtimeData.region_mode !== "auto"
-                  ? "Automatic: after this scan starts, Cloudrift will discover enabled Regions separately for every assumed account. Discovery has not run yet."
-                  : runtimeData.region_plan_note}
-              </p>
-            ) : null}
-
-            {runtimeData?.scan_mode_plan_note ? (
-              <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{runtimeData.scan_mode_plan_note} Change it under Settings → AWS access → Scan mode.</p>
-            ) : null}
-
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => validateProfile.mutate(state.profile)}
-                disabled={validateProfile.isPending}
-                className="hs-btn-primary"
-              >
-                Validate profile
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <button type="button" onClick={() => preflight.mutate(state.profile)} disabled={preflight.isPending || isRunning} className="hs-btn-primary">
+                {preflight.isPending ? "Checking…" : "Check before scanning"}
               </button>
               <button
                 type="button"
                 onClick={() =>
-                  startScan.mutate({
-                    profile: state.profile,
-                    module: state.moduleName,
-                    provider: state.provider || undefined,
-                    no_http: state.noHTTP,
-                    neo4j: state.neo4j,
-                    ciem
-                  })
+                  startScan.mutate({ profile: state.profile, modules: state.modules, module: "", provider: state.provider || undefined, no_http: state.noHTTP, neo4j: state.neo4j, ciem })
                 }
                 disabled={isRunning || startScan.isPending}
                 className="hs-btn-success"
               >
                 {isRunning ? "Scan running…" : "Start scan"}
               </button>
-              <button
-                type="button"
-                onClick={() => exportNeo4j.mutate(scanStatus.data?.scan_id || "latest")}
-                disabled={!runtimeData.neo4j_configured || exportNeo4j.isPending}
-                title={
-                  runtimeData.neo4j_configured
-                    ? "Project the latest scan into Neo4j without re-scanning (populates the blast-radius graph)"
-                    : "Configure Neo4j (uri/username/password env) to enable graph export"
-                }
-                className="hs-btn-neutral"
-              >
-                {exportNeo4j.isPending ? "Exporting to Neo4j…" : "Export latest scan to Neo4j"}
+              {isRunning ? (
+                <button type="button" onClick={() => cancelScan.mutate()} disabled={cancelScan.isPending} className="hs-btn-neutral">
+                  {cancelScan.isPending ? "Stopping…" : "Stop the scan"}
+                </button>
+              ) : null}
+              <button type="button" onClick={() => validateProfile.mutate(state.profile)} disabled={validateProfile.isPending} className="hs-btn-neutral">
+                Test sign-in only
               </button>
             </div>
-            {exportNeo4j.isSuccess ? (
-              <p className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">
-                Exported scan <code className="cr-mono">{exportNeo4j.data.scan_id}</code> to Neo4j
-                {exportNeo4j.data.clustered
-                  ? " and clustered it (GDS Louvain communities + PageRank centrality written back)"
-                  : " (GDS clustering skipped — install the Neo4j Graph Data Science plugin to add communities + centrality)"}
-                {" "}— open the Blast Explorer to view the graph.
-              </p>
-            ) : null}
-            {exportNeo4j.isError ? <p className="mt-3 text-sm text-rose-700 dark:text-rose-300">{formatQueryError(exportNeo4j.error)}</p> : null}
-            <p className="mt-2 text-[11px] text-slate-500">
-              Limitation: this control center currently supports a single active run at a time (latest run state is shared across tabs/users).
-            </p>
+            {startScan.isError ? <p className="mt-2 text-sm text-rose-700 dark:text-rose-300">{formatQueryError(startScan.error)}</p> : null}
+            {validateProfile.data && !validateProfile.data.sso_login_required ? <p className={`mt-2 text-sm ${validateProfile.data.ok ? "text-emerald-700 dark:text-emerald-300" : "text-rose-700 dark:text-rose-300"}`}>{validateProfile.data.message}</p> : null}
+
+            {preflight.isError ? <p className="mt-3 text-sm text-rose-700 dark:text-rose-300">{formatQueryError(preflight.error)}</p> : null}
+            {preflight.data ? <PreflightResult result={preflight.data} /> : null}
+
+            <details className="mt-5">
+              <summary className="hs-focus-ring w-fit cursor-pointer rounded text-sm font-medium text-slate-700 dark:text-slate-200">Advanced options</summary>
+              <div className="mt-3 space-y-4">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  <Badge title="OpenAI" ok={Boolean(runtimeData.openai_configured)} />
+                  <Badge title="Neo4j" ok={Boolean(runtimeData.neo4j_configured)} />
+                  <Badge title="Slack alerts" ok={Boolean(runtimeData.slack_configured)} />
+                  <Badge title="Email alerts" ok={Boolean(runtimeData.email_configured)} />
+                  <Badge title="AWS profiles" ok={profiles.length > 0} detail={`${profiles.length} found`} />
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="Embedding provider (for Query)">
+                    <select value={state.provider} onChange={(e) => patch({ provider: e.target.value as "" | "openai" | "local" })} className="hs-select">
+                      {PROVIDER_OPTIONS.map((p) => (
+                        <option key={p || "default"} value={p}>
+                          {p || "default"}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Options">
+                    <div className="space-y-2">
+                      <label className="hs-toggle-inline">
+                        <input className="hs-checkbox" type="checkbox" checked={state.noHTTP} onChange={(e) => patch({ noHTTP: e.target.checked })} />
+                        Skip web probes (DNS only; takeover checks that need a request are skipped)
+                      </label>
+                      <label className="hs-toggle-inline">
+                        <input className="hs-checkbox" type="checkbox" checked={ciem} onChange={(e) => setCiem(e.target.checked)} />
+                        Read IAM policies for this run even if Settings has it off
+                      </label>
+                      <label className="hs-toggle-inline">
+                        <input className="hs-checkbox" type="checkbox" checked={state.neo4j} onChange={(e) => patch({ neo4j: e.target.checked })} disabled={!runtimeData.neo4j_configured} />
+                        Send the scan to Neo4j for the connections graph
+                      </label>
+                    </div>
+                  </Field>
+                </div>
+                {runtimeData?.region_plan_note ? (
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    {ciem && runtimeData.region_mode !== "explicit" && runtimeData.region_mode !== "auto"
+                      ? "Automatic: after this scan starts, Cloudrift will discover enabled Regions separately for every assumed account."
+                      : runtimeData.region_plan_note}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => exportNeo4j.mutate(scanStatus.data?.scan_id || "latest")}
+                    disabled={!runtimeData.neo4j_configured || exportNeo4j.isPending}
+                    title={runtimeData.neo4j_configured ? "Project the latest scan into Neo4j without re-scanning" : "Configure Neo4j (uri/username/password env) to enable graph export"}
+                    className="hs-btn-neutral"
+                  >
+                    {exportNeo4j.isPending ? "Exporting to Neo4j…" : "Export latest scan to Neo4j"}
+                  </button>
+                </div>
+                {exportNeo4j.isSuccess ? (
+                  <p className="text-sm text-emerald-700 dark:text-emerald-300">
+                    Exported scan <code className="cr-mono">{exportNeo4j.data.scan_id}</code> to Neo4j
+                    {exportNeo4j.data.clustered ? " and clustered it." : " (clustering skipped: install the Neo4j Graph Data Science plugin to add it)."}
+                  </p>
+                ) : null}
+                {exportNeo4j.isError ? <p className="text-sm text-rose-700 dark:text-rose-300">{formatQueryError(exportNeo4j.error)}</p> : null}
+                <p className="text-[11px] text-slate-500">One scan runs at a time; its state is shared across tabs and people.</p>
+              </div>
+            </details>
 
             {validateProfile.data?.sso_login_required ? (
               <div className="mt-3 rounded border border-amber-300 bg-amber-50/90 p-3 dark:border-amber-700/60 dark:bg-amber-950/25">
@@ -371,7 +358,7 @@ export function ScanControlCenterPage() {
               <Stat label="State" value={scanStatus.data?.status || "idle"} />
               <Stat label="Stage" value={scanStatus.data?.stage || "idle"} />
               <Stat label="Profile" value={scanStatus.data?.profile || state.profile || "—"} />
-              <Stat label="Module" value={scanStatus.data?.module || state.moduleName} />
+              <Stat label="Checking" value={scanStatus.data?.module && scanStatus.data.module !== "all" ? scanStatus.data.module.split(",").map((m) => AREAS.find((a) => a.id === m)?.label ?? m).join(", ") : state.modules.length ? state.modules.map((m) => AREAS.find((a) => a.id === m)?.label ?? m).join(", ") : "Everything"} />
               <Stat label="Scan ID" value={scanStatus.data?.scan_id || "—"} />
               <Stat label="Message" value={effectiveStatus || "—"} />
             </dl>
@@ -496,4 +483,97 @@ function toShortTs(ts?: string): string {
     return "—";
   }
   return d.toISOString().replace("T", " ").replace("Z", "Z");
+}
+
+const AREAS: { id: string; label: string; what: string }[] = [
+  { id: "iam_entitlement", label: "Identity and access", what: "Who can do what: broad permissions, users without MFA, administrators, escalation paths. Needs IAM policy documents." },
+  { id: "external_access", label: "Trust and external access", what: "Roles other accounts can assume, open trust, public bucket policies." },
+  { id: "orphaned_edge", label: "Takeover risk", what: "DNS names, buckets and CloudFront origins that point at something that is gone." },
+  { id: "unused_resource", label: "Unused resources", what: "Volumes, load balancers and zones that cost money and do nothing, with their monthly cost." }
+];
+
+const CHECK_LABEL: Record<string, { text: string; tone: string }> = {
+  ok: { text: "Can read", tone: "cr-tone-ok" },
+  denied: { text: "Not allowed", tone: "cr-tone-bad" },
+  unavailable: { text: "Not available here", tone: "cr-tone-unk" },
+  error: { text: "Problem", tone: "cr-tone-warn" },
+  untested: { text: "Not tested", tone: "cr-tone-unk" }
+};
+
+/** What a scan with this profile will be able to read, grouped by what it is for. */
+function PreflightResult({ result }: { result: PreflightResponse }) {
+  const groups = Array.from(new Set(result.checks.map((c) => c.group)));
+  const bad = result.summary.denied + result.summary.problems;
+  if (result.checks.length === 0) {
+    return (
+      <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-100" role="status">
+        <span className="cr-chip-state cr-tone-warn mr-2">Cannot check</span>
+        {result.notes.join(" ")}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-4 rounded border border-slate-200 p-3 dark:border-slate-800" role="status">
+      <p className="text-sm">
+        <span className={`cr-chip-state mr-2 ${bad === 0 ? "cr-tone-ok" : "cr-tone-warn"}`}>{bad === 0 ? "Ready" : `${bad} need attention`}</span>
+        {result.account_id ? `Account ${result.account_id}. ` : ""}
+        {result.summary.ok} of {result.checks.length} checks can be read{result.summary.untested ? `, ${result.summary.untested} not tested` : ""}.
+      </p>
+      <div className="mt-3 space-y-3">
+        {groups.map((g) => (
+          <div key={g}>
+            <p className="cr-kpi-label mb-1">{g}</p>
+            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+              {result.checks.filter((c) => c.group === g).map((c) => {
+                const st = CHECK_LABEL[c.status] ?? { text: c.status, tone: "cr-tone-unk" };
+                return (
+                  <li key={c.id} className="flex flex-wrap items-baseline justify-between gap-2 py-1.5 text-sm">
+                    <span className="text-slate-800 dark:text-slate-100">{c.label}{c.status === "denied" ? <span className="ml-2 font-mono text-xs text-slate-500">{c.permission}</span> : null}</span>
+                    <span className="flex items-center gap-2">
+                      {c.detail ? <span className="cr-helper">{c.detail}</span> : null}
+                      <span className={`cr-chip-state ${st.tone}`}>{st.text}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
+      {result.notes.map((n) => (
+        <p key={n} className="cr-helper mt-2">{n}</p>
+      ))}
+    </div>
+  );
+}
+
+function ago(iso?: string): string | null {
+  if (!iso) return null;
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  return days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+/** Whether scans repeat, and when the last one ran. History and trends need regular scans. */
+function ScheduleLine({ schedule, lastScan }: { schedule?: { frequency: string; hour_utc: number; next_run?: string }; lastScan?: string }) {
+  const last = ago(lastScan);
+  const hour = schedule ? `${String(schedule.hour_utc).padStart(2, "0")}:00 UTC` : "";
+  return (
+    <div className="hs-card-soft px-3 py-2 text-sm">
+      {schedule?.frequency ? (
+        <p>
+          <span className="cr-chip-state cr-tone-ok mr-2">Repeats {schedule.frequency}</span>
+          at {hour}
+          {schedule.next_run ? `, next ${new Date(schedule.next_run).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}.
+          {last ? ` Last scan from this page: ${last}.` : ""} It runs while this dashboard is open.
+        </p>
+      ) : (
+        <p>
+          <span className="cr-chip-state cr-tone-unk mr-2">Not scheduled</span>
+          Scans only run when you start one. History, deadlines and the trend need regular scans.{" "}
+          <Link className="underline" to="/settings#cfg-schedule.frequency">Repeat them daily or weekly</Link>.
+          {last ? ` Last scan from this page: ${last}.` : ""}
+        </p>
+      )}
+    </div>
+  );
 }

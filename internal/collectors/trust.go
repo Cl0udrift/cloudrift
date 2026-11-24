@@ -229,7 +229,7 @@ func collectTrustFromClient(ctx context.Context, accountID string, client IAMAPI
 	for _, role := range roles {
 		role := role
 		principals := extractExternalPrincipals(accountID, awsv2.ToString(role.AssumeRolePolicyDocument))
-		if len(principals) == 0 && !inventory {
+		if len(principals) == 0 && !inventory && !trustsEveryone(awsv2.ToString(role.AssumeRolePolicyDocument)) {
 			continue
 		}
 		wg.Add(1)
@@ -895,4 +895,40 @@ func isDigits(v string) bool {
 		}
 	}
 	return true
+}
+
+// trustsEveryone reports a trust policy with an Allow statement for the principal "*". Such a role has no named
+// outside account, so it must be collected on its own for its trust policy to be scored.
+func trustsEveryone(raw string) bool {
+	doc, ok := parsePolicyDocument(raw)
+	if ok {
+		for _, st := range doc.Statement {
+			if !strings.EqualFold(st.Effect, "Allow") {
+				continue
+			}
+			for _, v := range principalValues(st.Principal["AWS"]) {
+				if v == "*" {
+					return true
+				}
+			}
+		}
+	}
+	decoded, err := url.QueryUnescape(raw)
+	if err != nil {
+		decoded = raw
+	}
+	var anyDoc map[string]any
+	if json.Unmarshal([]byte(decoded), &anyDoc) != nil {
+		return false
+	}
+	items, _ := anyDoc["Statement"].([]any)
+	if m, ok := anyDoc["Statement"].(map[string]any); ok {
+		items = []any{m}
+	}
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok && strings.EqualFold(stringValue(m["Effect"]), "Allow") && m["Principal"] == "*" {
+			return true
+		}
+	}
+	return false
 }

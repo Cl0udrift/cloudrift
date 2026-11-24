@@ -1,5 +1,7 @@
 package models
 
+import "strings"
+
 type Severity string
 type Claimability string
 type Module string
@@ -20,6 +22,8 @@ const (
 	ModuleOrphanedEdge   Module = "orphaned_edge"
 	ModuleExternalAccess Module = "external_access"
 	ModuleIAMEntitlement Module = "iam_entitlement"
+	// ModuleUnusedResource is a resource that costs money to hold and does nothing: its finding carries the monthly cost.
+	ModuleUnusedResource Module = "unused_resource"
 )
 
 type Finding struct {
@@ -42,4 +46,14 @@ type Finding struct {
 	Evidence          map[string]any `json:"evidence"`
 	ScanID            string         `json:"scan_id"`
 	Embedding         []float32      `json:"-"`
+}
+
+// DiffKey identifies a finding across scans. The stable ID is authoritative, so a finding that is retitled or
+// reclassified still matches itself; title and ARN are the fallback for a finding with no ID. The scan diff and the
+// alert rules both use it, so they never disagree about what is new.
+func (f Finding) DiffKey() string {
+	if id := strings.TrimSpace(f.ID); id != "" {
+		return id
+	}
+	return strings.ToLower(strings.TrimSpace(f.Title)) + "|" + strings.ToLower(strings.TrimSpace(f.AffectedARN))
 }

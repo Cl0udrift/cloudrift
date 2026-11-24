@@ -1,5 +1,10 @@
 import { ScanSnapshotStrip } from "../components/overview/ScanSnapshotStrip";
-import type { ReactNode } from "react";
+import { AttentionPanel } from "../components/overview/AttentionPanel";
+import { LossPanel } from "../components/overview/LossPanel";
+import { SavingsCard } from "../components/overview/SavingsCard";
+import { SpendInReachCard } from "../components/overview/SpendInReachCard";
+import { ManagerMetricsPanel } from "../components/overview/ManagerMetricsPanel";
+import { ScanHealthStrip } from "../components/overview/ScanHealthStrip";
 import { formatQueryError } from "../api/httpError";
 import type { ExternalEntityRow, ScanListItem, ScanSummaryResponse } from "../api/types";
 import { ExecutiveSummaryStrip } from "../components/overview/ExecutiveSummaryStrip";
@@ -12,7 +17,6 @@ import { HighRiskCombinationStrip } from "../components/overview/HighRiskCombina
 import { RemediationGroupingPanel } from "../components/overview/RemediationGroupingPanel";
 import {
   ClaimabilityDistribution,
-  DirectVsRiskCostSplit,
   ModuleDistribution,
   SeverityDistribution
 } from "../components/overview/SummaryVisualizations";
@@ -29,7 +33,6 @@ import { useAccountsQuery, useSummaryQuery } from "../hooks/useDashboardQueries"
 import { useDashboardViewUrlState } from "../hooks/useDashboardViewUrlState";
 import { useScanContext } from "../hooks/useScanContext";
 import { formatCount } from "../lib/format";
-import { IconAlertTriangle, IconGlobe, IconZap } from "../lib/icons";
 import { Link, useNavigate } from "react-router-dom";
 
 export function OverviewPage() {
@@ -72,8 +75,7 @@ export function OverviewPage() {
     <section className="space-y-8">
       <PageHeader
         title="Dashboard"
-        description="Scan snapshot, items needing attention and drill-downs."
-        details="Switch modes to emphasize leadership summaries, urgent signals, or day-to-day operations. Drilldowns open the same Findings, Access, and External views."
+        description="What needs attention in the selected scan, how far to trust it, and where to go next."
       />
 
       {!selectedScanId ? (
@@ -81,7 +83,9 @@ export function OverviewPage() {
       ) : (
         <>
           {modeSwitch}
-          <ScanSnapshotStrip scanId={selectedScanId} summary={summary} hasPreviousScan={scans.length >= 2} />
+          {summary ? <AttentionPanel summary={summary} scanId={selectedScanId} hasPreviousScan={scans.length >= 2} compact={view === "executive"} /> : null}
+          {summary ? <ScanHealthStrip summary={summary} /> : null}
+          {view !== "executive" ? <ScanSnapshotStrip scanId={selectedScanId} /> : null}
           {query.isLoading ? (
             <StatePanel>Loading summary…</StatePanel>
           ) : query.isError ? (
@@ -100,28 +104,28 @@ export function OverviewPage() {
                   goToTrust={goToTrust}
                   goToExternalEntities={goToExternalEntities}
                 />
-              ) : view === "high-signal" ? (
-                <HighSignalLayout
+              ) : view === "manager" ? (
+                <ManagerLayout
                   summary={summary}
                   selectedScanId={selectedScanId}
-                  goToFindings={goToFindings}
-                  goToTrust={goToTrust}
-                  goToExternalEntities={goToExternalEntities}
-                />
-              ) : (
-                <OperationsLayout
-                  summary={summary}
-                  selectedScanId={selectedScanId}
+                  scans={scans}
+                  trendEnabled={trendEnabled}
                   accountsQuery={accountsQuery}
                   goToFindings={goToFindings}
                   goToTrust={goToTrust}
+                />
+              ) : (
+                <AnalystLayout
+                  summary={summary}
+                  selectedScanId={selectedScanId}
+                  goToFindings={goToFindings}
                   goToExternalEntities={goToExternalEntities}
                 />
               )}
             </>
           ) : (
-            <StatePanel intent="empty" title="No data">
-              Summary response was empty.
+            <StatePanel intent="empty" title="No summary">
+              The scan returned no summary.
             </StatePanel>
           )}
         </>
@@ -159,12 +163,16 @@ function ExecutiveLayout({
 
   return (
     <div className="hs-section space-y-6">
+      <SavingsCard savings={summary.savings} scanId={selectedScanId} />
+
+      <SpendInReachCard reach={summary.spend_in_reach} />
+
       <ExecutiveSummaryStrip
         summary={summary}
         criticalDelta={criticalDelta}
         riskDelta={riskDelta}
-        criticalSparkline={criticalSeries.length >= 2 ? criticalSeries : undefined}
-        riskSparkline={riskSeries.length >= 2 ? riskSeries : undefined}
+        criticalSparkline={criticalSeries.length >= 2 && Math.max(...criticalSeries) > 0 ? criticalSeries : undefined}
+        riskSparkline={riskSeries.length >= 2 && Math.max(...riskSeries) > 0 ? riskSeries : undefined}
         onOpenCritical={() => goToFindings({ severity: "critical", page: "1" })}
         onOpenHigh={() => goToFindings({ severity: "high", page: "1" })}
         onOpenRiskCost={() => goToFindings({ page: "1" })}
@@ -174,10 +182,11 @@ function ExecutiveLayout({
 
       <ScanRiskTrendChart scans={scans} selectedScanId={selectedScanId} enabled={trendEnabled} />
 
-      <div className={`grid gap-6 ${summary.total_monthly_direct_cost_usd + summary.total_monthly_risk_cost_usd > 0 ? "lg:grid-cols-2" : ""}`}>
-        {summary.total_monthly_direct_cost_usd + summary.total_monthly_risk_cost_usd > 0 ? <DirectVsRiskCostSplit summary={summary} /> : null}
+      <div className="grid gap-6">
         <SeverityDistribution summary={summary} onSeverityClick={(severity) => goToFindings({ severity, page: "1" })} />
       </div>
+
+      <LossPanel loss={summary.loss} />
 
       {(summary.external_entity_count ?? 0) > 0 ? (
         <div className="space-y-4">
@@ -207,45 +216,53 @@ function ExecutiveLayout({
   );
 }
 
-function HighSignalLayout({
+/** Shortcuts, only for things that exist in this scan. */
+function NextActions({ actions }: { actions: { label: string; count: number; onClick: () => void }[] }) {
+  const live = actions.filter((a) => a.count > 0);
+  if (live.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2" aria-label="Shortcuts">
+      <span className="cr-kpi-label mr-1">Go to</span>
+      {live.map((a) => (
+        <ActionPill key={a.label} label={`${a.label} (${a.count})`} onClick={a.onClick} />
+      ))}
+    </div>
+  );
+}
+
+function ManagerLayout({
   summary,
   selectedScanId,
+  scans,
+  trendEnabled,
+  accountsQuery,
   goToFindings,
-  goToTrust,
-  goToExternalEntities
+  goToTrust
 }: {
   summary: ScanSummaryResponse;
   selectedScanId: string;
+  scans: ScanListItem[];
+  trendEnabled: boolean;
+  accountsQuery: ReturnType<typeof useAccountsQuery>;
   goToFindings: (params: Record<string, string>) => void;
   goToTrust: (params: Record<string, string>) => void;
-  goToExternalEntities: (params: Record<string, string>) => void;
 }) {
   return (
     <div className="hs-section space-y-6">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MiniSignalKpi label="Critical" value={formatCount(summary.critical_count)} onClick={() => goToFindings({ severity: "critical", page: "1" })} />
-        <MiniSignalKpi label="High" value={formatCount(summary.high_count)} onClick={() => goToFindings({ severity: "high", page: "1" })} />
-        <MiniSignalKpi label="Reclaimable" value={formatCount(summary.reclaimable_count)} onClick={() => goToFindings({ claimability: "reclaimable", page: "1" })} />
-        <MiniSignalKpi label="External Access" value={formatCount(summary.external_access_count)} onClick={() => goToTrust({ page: "1" })} />
-      </div>
+      <SavingsCard savings={summary.savings} scanId={selectedScanId} />
 
-      <HighRiskCombinationStrip
-        summary={summary}
-        onOpenReclaimable={() => goToFindings({ claimability: "reclaimable", page: "1" })}
-        onOpenPrivilegedExternal={() =>
-          goToFindings({ module: "external_access", trust_classification: "privileged", page: "1" })
-        }
-        onOpenStaleTrustExternal={() => goToFindings({ module: "external_access", trust_stale: "true", page: "1" })}
-        onOpenAdminLikeExternal={() => goToFindings({ module: "external_access", admin_like: "true", page: "1" })}
-        onOpenIdentity={(category) => goToFindings({ search: category, page: "1" })}
-        onOpenStalePrivilegedExternal={() =>
-          goToFindings({
-            module: "external_access",
-            trust_stale: "true",
-            trust_classification: "privileged",
-            page: "1"
-          })
-        }
+      <SpendInReachCard reach={summary.spend_in_reach} />
+
+      <ManagerMetricsPanel scanId={selectedScanId} />
+
+      <NextActions
+        actions={[
+          { label: "Fix reclaimable assets", count: summary.reclaimable_count, onClick: () => goToFindings({ claimability: "reclaimable", page: "1" }) },
+          { label: "Review trust and exposure", count: summary.external_access_count, onClick: () => goToTrust({ page: "1" }) },
+          { label: "Stale trust", count: summary.external_trust_stale_count ?? 0, onClick: () => goToFindings({ module: "external_access", trust_stale: "true", page: "1" }) },
+          { label: "Administrator-like roles", count: summary.external_admin_like_count ?? 0, onClick: () => goToFindings({ module: "external_access", admin_like: "true", page: "1" }) },
+          { label: "High findings", count: summary.high_count, onClick: () => goToFindings({ severity: "high", page: "1" }) }
+        ]}
       />
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -271,91 +288,47 @@ function HighSignalLayout({
             goToFindings({ module: "orphaned_edge", claimability: "broken", page: "1" });
           }}
         />
-        <TopFixesPanel
-          scanId={selectedScanId}
-          limit={5}
-          onDrilldown={(item) => goToFindings({ finding_id: item.id, page: "1" })}
-        />
+        <TopFixesPanel scanId={selectedScanId} limit={5} onDrilldown={(item) => goToFindings({ finding_id: item.id, page: "1" })} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ExternalPrincipalTypesStrip
-          summary={summary}
-          onOpenPrincipalType={(principalType) =>
-            goToFindings({
-              module: "external_access",
-              principal_type: principalType,
-              page: "1"
-            })
+      {accountsQuery.isLoading ? (
+        <StatePanel>Loading accounts…</StatePanel>
+      ) : accountsQuery.isError ? (
+        <StatePanel intent="error" title="Accounts unavailable">
+          Could not load the account breakdown for this scan.
+        </StatePanel>
+      ) : accountsQuery.data ? (
+        <OwnershipRiskPanel
+          items={accountsQuery.data.items}
+          onAccountClick={(accountId) => goToFindings({ account_id: accountId, page: "1" })}
+          action={
+            <Link to={selectedScanId ? `/accounts?scan_id=${encodeURIComponent(selectedScanId)}` : "/accounts"} className="cr-chip-state cr-tone-unk hs-focus-ring">
+              Open accounts →
+            </Link>
           }
         />
-        {(summary.external_entities_preview?.length ?? 0) > 0 ? (
-          <TopRiskyExternalEntitiesPreview
-            summary={summary}
-            onOpenExternalEntitiesPage={() => goToExternalEntities({ page: "1" })}
-            onOpenEntityFindings={(row: ExternalEntityRow) =>
-              goToFindings({
-                module: "external_access",
-                page: "1",
-                principal_type: row.principal_type,
-                external_principal: row.external_principal,
-                external_account_id: row.external_account_id
-              })
-            }
-          />
-        ) : (
-          <div className="hs-card-soft border-dashed border-slate-300 p-6 dark:border-slate-700">
-            <p className="hs-section-title">Top external entities</p>
-            <p className="cr-helper mt-2">No high-signal external preview for this scan.</p>
-          </div>
-        )}
-      </div>
+      ) : null}
 
-      <div className="hs-card-soft border-slate-300 p-4 dark:border-slate-700">
-        <h3 className="cr-section-title !text-xs">Next actions</h3>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <ActionPill label="All External Access" onClick={() => goToTrust({ page: "1" })} />
-          <ActionPill label="Stale Trust" onClick={() => goToFindings({ module: "external_access", trust_stale: "true", page: "1" })} />
-          <ActionPill label="Admin-like" onClick={() => goToFindings({ module: "external_access", admin_like: "true", page: "1" })} />
-          <ActionPill label="Fix Reclaimable Assets" onClick={() => goToFindings({ claimability: "reclaimable", page: "1" })} />
-          <ActionPill label="Review External Access" onClick={() => goToTrust({ page: "1" })} />
-          <ActionPill label="Investigate High-Risk Accounts" onClick={() => goToFindings({ severity: "high", page: "1" })} />
-        </div>
-      </div>
+      <ScanRiskTrendChart scans={scans} selectedScanId={selectedScanId} enabled={trendEnabled} />
     </div>
   );
 }
 
-function MiniSignalKpi({ label, value, onClick }: { label: string; value: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="hs-card-soft hs-interactive-card border-slate-300 px-3 py-3 text-left dark:border-slate-700"
-    >
-      <p className="cr-kpi-label">{label}</p>
-      <p className="mt-1 text-lg font-semibold tabular-nums text-slate-900 dark:text-slate-100">{value}</p>
-    </button>
-  );
-}
-
-function OperationsLayout({
+function AnalystLayout({
   summary,
   selectedScanId,
-  accountsQuery,
   goToFindings,
-  goToTrust,
   goToExternalEntities
 }: {
   summary: ScanSummaryResponse;
   selectedScanId: string;
-  accountsQuery: ReturnType<typeof useAccountsQuery>;
   goToFindings: (params: Record<string, string>) => void;
-  goToTrust: (params: Record<string, string>) => void;
   goToExternalEntities: (params: Record<string, string>) => void;
 }) {
   return (
     <div className="hs-section space-y-6">
+      <SavingsCard savings={summary.savings} scanId={selectedScanId} />
+
       <OperationsScanSummaryCard scanId={selectedScanId} />
 
       {summary.orphaned_edge_count === 0 ? <EdgeCoverageNotice scanId={selectedScanId} /> : null}
@@ -368,99 +341,36 @@ function OperationsLayout({
         onOpenOrphaned={() => goToFindings({ module: "orphaned_edge", page: "1" })}
       />
 
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="cr-section-title !normal-case !tracking-normal text-sm text-slate-800 dark:text-slate-200">
-              Ownership risk
-            </h3>
-            <p className="cr-helper mt-0.5">Where risk lives now by owning account and team.</p>
-          </div>
-          <Link
-            to={selectedScanId ? `/accounts?scan_id=${encodeURIComponent(selectedScanId)}` : "/accounts"}
-            className="hs-btn-default cr-chip px-2.5 py-1.5 font-medium"
-          >
-            Open Accounts
-          </Link>
-        </div>
-        <div className="rounded-lg border border-cyan-200/70 bg-cyan-50/40 p-2 dark:border-cyan-800/60 dark:bg-cyan-950/20">
-          {accountsQuery.isLoading ? (
-            <StatePanel>Loading ownership risk…</StatePanel>
-          ) : accountsQuery.isError ? (
-            <StatePanel intent="error" title="Ownership risk unavailable">
-              Could not load account aggregation for this scan.
-            </StatePanel>
-          ) : accountsQuery.data ? (
-            <OwnershipRiskPanel
-              items={accountsQuery.data.items}
-              onAccountClick={(accountId) => goToFindings({ account_id: accountId, page: "1" })}
-            />
-          ) : null}
-        </div>
-      </div>
+      <HighRiskCombinationStrip
+        summary={summary}
+        onOpenReclaimable={() => goToFindings({ claimability: "reclaimable", page: "1" })}
+        onOpenPrivilegedExternal={() => goToFindings({ module: "external_access", trust_classification: "privileged", page: "1" })}
+        onOpenStaleTrustExternal={() => goToFindings({ module: "external_access", trust_stale: "true", page: "1" })}
+        onOpenAdminLikeExternal={() => goToFindings({ module: "external_access", admin_like: "true", page: "1" })}
+        onOpenIdentity={(category) => goToFindings({ search: category, page: "1" })}
+        onOpenStalePrivilegedExternal={() =>
+          goToFindings({ module: "external_access", trust_stale: "true", trust_classification: "privileged", page: "1" })
+        }
+      />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ClaimabilityDistribution
-          summary={summary}
-          onClaimabilityClick={(claimability) => goToFindings({ claimability, page: "1" })}
-        />
+      <div className="grid gap-6 lg:grid-cols-2 [&:empty]:hidden">
+        <ClaimabilityDistribution summary={summary} onClaimabilityClick={(claimability) => goToFindings({ claimability, page: "1" })} />
         <ModuleDistribution summary={summary} onModuleClick={(module) => goToFindings({ module, page: "1" })} />
       </div>
 
       {(summary.external_entity_count ?? 0) > 0 ? (
-        <ExternalEntityByPrincipalTypeStrip
-          summary={summary}
-          onOpenEntityListForPrincipalType={(pt) => goToExternalEntities({ page: "1", principal_type: pt })}
-        />
+        <div className="grid gap-4 xl:grid-cols-2">
+          <ExternalPrincipalTypesStrip
+            summary={summary}
+            onOpenPrincipalType={(principalType) => goToFindings({ module: "external_access", principal_type: principalType, page: "1" })}
+          />
+          <ExternalEntityByPrincipalTypeStrip
+            summary={summary}
+            onOpenEntityListForPrincipalType={(pt) => goToExternalEntities({ page: "1", principal_type: pt })}
+          />
+        </div>
       ) : null}
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <OpsNextLink
-          title="Fix reclaimable assets"
-          detail="Open reclaimable findings and clear the fastest wins."
-          icon={<IconZap className="text-emerald-600 dark:text-emerald-400" />}
-          onClick={() => goToFindings({ claimability: "reclaimable", page: "1" })}
-        />
-        <OpsNextLink
-          title="Review external access"
-          detail="Inspect stale trust and admin-like exposure."
-          icon={<IconGlobe className="text-cyan-600 dark:text-cyan-400" />}
-          onClick={() => goToTrust({ page: "1" })}
-        />
-        <OpsNextLink
-          title="Investigate high-risk accounts"
-          detail="Jump into account-ranked findings from Ownership Risk."
-          icon={<IconAlertTriangle className="text-rose-600 dark:text-rose-400" />}
-          onClick={() => goToFindings({ severity: "high", page: "1" })}
-        />
-      </div>
     </div>
-  );
-}
-
-function OpsNextLink({
-  title,
-  detail,
-  icon,
-  onClick
-}: {
-  title: string;
-  detail: string;
-  icon: ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="hs-card-soft hs-interactive-card h-24 px-3 py-2.5 text-left"
-    >
-      <span className="inline-flex rounded-md border border-slate-200 bg-white p-1.5 dark:border-slate-700 dark:bg-slate-900">
-        {icon}
-      </span>
-      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{title}</p>
-      <p className="cr-helper mt-1">{detail}</p>
-    </button>
   );
 }
 

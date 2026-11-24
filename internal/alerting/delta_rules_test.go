@@ -1,6 +1,9 @@
 package alerting
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -117,5 +120,41 @@ func TestOrphanedEdgeRuleCountsReclaimableAndDanglingOnly(t *testing.T) {
 	res, _ := NewEvaluator(dir, "http://x").Evaluate(ruleOf(RuleNewOrphanedEdge), "s2")
 	if !res.Triggered || res.Context.SignalCount != 2 || res.Context.Payload.Severity != SeverityCritical {
 		t.Fatalf("a broken name is not a takeover risk: %d %s", res.Context.SignalCount, res.Context.Payload.Severity)
+	}
+}
+
+func TestARetitledFindingIsNotNewForAnAlert(t *testing.T) {
+	dir := t.TempDir()
+	old := idFinding("same-id", "old wording", "arn:aws:iam::1:user/a", "user_console_without_mfa")
+	renamed := idFinding("same-id", "new wording", "arn:aws:iam::1:user/a", "user_console_without_mfa")
+	writeScanBundle(t, dir, "s1", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), []models.Finding{old})
+	writeScanBundle(t, dir, "s2", time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), []models.Finding{renamed})
+	res, _ := NewEvaluator(dir, "http://x").Evaluate(ruleOf(RuleNewConsoleNoMFA), "s2")
+	if res.Triggered {
+		t.Fatal("the same finding under a new title must not alert as new; the Diff page would call it unchanged")
+	}
+}
+
+func TestAlertBaselineIsTheSameAccountsNotJustTheLastScan(t *testing.T) {
+	dir := t.TempDir()
+	f := idFinding("a", "alice has no MFA", "arn:aws:iam::1:user/alice", "user_console_without_mfa")
+	writeScanBundle(t, dir, "s1", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), []models.Finding{f})
+	writeScanBundle(t, dir, "s2", time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), nil)
+	writeScanBundle(t, dir, "s3", time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC), []models.Finding{f})
+	for id, accounts := range map[string]string{"s1": `["1"]`, "s2": `["9"]`, "s3": `["1"]`} {
+		path := filepath.Join(dir, id, "scan-metadata.json")
+		raw, _ := os.ReadFile(path)
+		var m map[string]any
+		_ = json.Unmarshal(raw, &m)
+		_ = json.Unmarshal([]byte(accounts), new([]string))
+		var ids []string
+		_ = json.Unmarshal([]byte(accounts), &ids)
+		m["account_ids"] = ids
+		out, _ := json.Marshal(m)
+		_ = os.WriteFile(path, out, 0o644)
+	}
+	res, _ := NewEvaluator(dir, "http://x").Evaluate(ruleOf(RuleNewConsoleNoMFA), "s3")
+	if res.Triggered {
+		t.Fatal("the finding was already in s1, the previous scan of this account; the scan of another account in between must not make it new")
 	}
 }

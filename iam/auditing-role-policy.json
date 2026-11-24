@@ -61,7 +61,10 @@
     {
       "Sid": "CostExplorerRead",
       "Effect": "Allow",
-      "Action": "ce:GetCostAndUsage",
+      "Action": [
+        "ce:GetCostAndUsage",
+        "ce:GetCostAndUsageWithResources"
+      ],
       "Resource": "*"
     },
     {
@@ -79,6 +82,14 @@
         "identitystore:DescribeUser",
         "identitystore:DescribeGroup",
         "identitystore:ListGroupMemberships"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "PriceListRead",
+      "Effect": "Allow",
+      "Action": [
+        "pricing:GetProducts"
       ],
       "Resource": "*"
     }

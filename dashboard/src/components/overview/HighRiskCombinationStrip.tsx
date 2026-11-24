@@ -43,13 +43,20 @@ export function HighRiskCombinationStrip({
       ].map((i) => ({ label: i.label, count: idc[i.category] ?? 0, onClick: () => onOpenIdentity(i.category) }))
     : [];
 
+  const present = items.filter((i) => i.count > 0);
+  const presentIdentity = identityItems.filter((i) => i.count > 0);
+  if (present.length === 0 && presentIdentity.length === 0) {
+    return null;
+  }
   return (
     <div className="hs-card-soft border-slate-300 p-4 dark:border-slate-700">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="cr-section-title !text-xs">High-signal combinations</h3>
-      </div>
+      {present.length > 0 ? (
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="cr-section-title !text-xs">High-signal combinations</h3>
+        </div>
+      ) : null}
       <div className="flex flex-wrap gap-2">
-        {items.map((item) => (
+        {present.map((item) => (
           <button
             key={item.label}
             type="button"
@@ -61,11 +68,11 @@ export function HighRiskCombinationStrip({
           </button>
         ))}
       </div>
-      {identityItems.length > 0 ? (
+      {presentIdentity.length > 0 ? (
         <>
           <h3 className="cr-section-title mt-3 !text-xs">Identity combinations</h3>
           <div className="mt-2 flex flex-wrap gap-2">
-            {identityItems.map((item) => (
+            {presentIdentity.map((item) => (
               <button key={item.label} type="button" onClick={item.onClick} className="hs-action-pill gap-2">
                 <span>{item.label}</span>
                 <span className={`tabular-nums ${item.count > 0 ? "font-semibold text-red-700 dark:text-red-300" : "text-slate-500 dark:text-slate-400"}`}>{formatCount(item.count)}</span>

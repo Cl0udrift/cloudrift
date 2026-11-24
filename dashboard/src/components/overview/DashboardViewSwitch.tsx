@@ -1,10 +1,10 @@
 import type { DashboardViewId } from "../../hooks/useDashboardViewUrlState";
 import { IconBriefcase, IconSliders, IconZap } from "../../lib/icons";
 
-const MODES: { id: DashboardViewId; label: string; Icon: typeof IconBriefcase }[] = [
-  { id: "executive", label: "Executive Summary", Icon: IconBriefcase },
-  { id: "high-signal", label: "High-Signal", Icon: IconZap },
-  { id: "operations", label: "Operations", Icon: IconSliders }
+const MODES: { id: DashboardViewId; label: string; who: string; Icon: typeof IconBriefcase }[] = [
+  { id: "executive", label: "Executive", who: "For the CISO or CEO: the headline, how far to trust it, and the trend.", Icon: IconBriefcase },
+  { id: "manager", label: "Manager", who: "For the manager: what to fix first, who owns it, and what changed.", Icon: IconZap },
+  { id: "analyst", label: "Analyst", who: "For the analyst: every count, combination and coverage gap, to drill into.", Icon: IconSliders }
 ];
 
 export function DashboardViewSwitch({
@@ -15,10 +15,11 @@ export function DashboardViewSwitch({
   onChange: (v: DashboardViewId) => void;
 }) {
   return (
+    <div className="flex flex-col items-start gap-2">
     <div
       className="hs-card-soft flex flex-wrap gap-1.5 p-1.5"
       role="tablist"
-      aria-label="Dashboard mode"
+      aria-label="Dashboard view by audience"
     >
       {MODES.map(({ id, label, Icon }) => {
         const active = view === id;
@@ -41,6 +42,8 @@ export function DashboardViewSwitch({
           </button>
         );
       })}
+    </div>
+    <p className="cr-helper">{MODES.find((m) => m.id === view)?.who}</p>
     </div>
   );
 }

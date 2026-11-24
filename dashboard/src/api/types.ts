@@ -29,8 +29,166 @@ export interface ExternalPrincipalTypeCount {
   count: number;
 }
 
+export interface AccountSpend {
+  account_id: string;
+  monthly: number;
+  period?: string;
+  source?: string;
+  top_services: { service: string; usd: number }[];
+}
+
+export interface SpendInReach {
+  applicable: boolean;
+  available: boolean;
+  reason?: string;
+  monthly: number;
+  source?: string;
+  accounts: AccountSpend[];
+  subjects: string[];
+}
+
+export interface CostSplitRow {
+  key: string;
+  label: string;
+  count: number;
+  monthly: number;
+}
+
+export interface CostResource {
+  id: string;
+  name: string;
+  kind: string;
+  kind_label: string;
+  detail: string;
+  region?: string;
+  account_id: string;
+  owner?: string;
+  owner_source?: string;
+  monthly: number;
+  yearly: number;
+  priced: boolean;
+  source: "estimate" | "actual" | string;
+  /** At least this many days; -1 when unknown. */
+  unused_days: number;
+}
+
+export interface CostReport {
+  savings: Savings;
+  exposed: SpendInReach;
+  resources: CostResource[];
+  by_kind: CostSplitRow[];
+  by_account: CostSplitRow[];
+  by_owner: CostSplitRow[];
+  by_service: CostSplitRow[];
+  checked: { label: string; status: string }[];
+}
+
+export interface Savings {
+  actual?: number;
+  actuals_status?: string;
+  actuals_detail?: string;
+  monthly: number;
+  yearly: number;
+  count: number;
+  priced: number;
+  unpriced: number;
+  source?: string;
+  by_kind: { kind: string; label: string; count: number; monthly: number }[];
+}
+
+export interface LossRange {
+  low: number;
+  high: number;
+}
+
+export interface BusinessSettings {
+  owners: Record<string, string>;
+  fix_days: { critical: number; high: number; medium: number };
+  loss: {
+    currency: string;
+    store_cost: LossRange;
+    hostname_cost: LossRange;
+    likelihood_critical: LossRange;
+    likelihood_high: LossRange;
+  };
+}
+
+export interface LossEstimate {
+  configured: boolean;
+  currency?: string;
+  low: number;
+  high: number;
+  items: { subject: string; low: number; high: number; why: string }[];
+  not_estimated: number;
+}
+
+export interface OpenFinding {
+  id: string;
+  title: string;
+  severity: string;
+  owner?: string;
+  owner_source?: string;
+  age_days: number;
+  overdue: boolean;
+  days_over?: number;
+}
+
+export interface OwnerLoad {
+  owner: string;
+  open: number;
+  overdue: number;
+  critical: number;
+  high: number;
+}
+
+export interface ManagerMetrics {
+  fix_days: { critical: number; high: number; medium: number };
+  open_count: number;
+  overdue_count: number;
+  no_owner_count: number;
+  open: OpenFinding[];
+  by_owner: OwnerLoad[];
+  median_days_to_fix?: number;
+  fixed_samples: number;
+}
+
+export interface AttentionGroup {
+  owner?: string;
+  owner_source?: string;
+  loss_low?: number;
+  loss_high?: number;
+  subject: string;
+  subject_arn?: string;
+  severity: string;
+  issue_count: number;
+  issue_kinds: number;
+  sentence: string;
+  finding_ids: string[];
+}
+
+export interface ScanHealth {
+  scan_time: string;
+  account_count: number;
+  region_count: number;
+  coverage_complete: boolean;
+  failed_account_ids: string[];
+  failed_collectors: string[];
+  partial_collectors: string[];
+  unsupported_count: number;
+  complete: boolean;
+}
+
 export interface ScanSummaryResponse {
   scan_id: string;
+  /** Findings by module, all modules. */
+  module_counts?: Record<string, number>;
+  /** One sentence for what needs attention, and the identities or resources behind it. */
+  headline?: string;
+  attention?: AttentionGroup[];
+  health?: ScanHealth;
+  loss?: LossEstimate;
+  savings?: Savings;
+  spend_in_reach?: SpendInReach;
   /** Identity findings by issue category. Missing on scans summarized by an older server. */
   identity_issue_counts?: Record<string, number>;
   finding_count: number;
@@ -127,6 +285,9 @@ export interface PaginationMeta {
 }
 
 export interface FindingListItem {
+  /** Who answers for it: the owner tag, else the owner set for the account. */
+  owner?: string;
+  owner_source?: string;
   id: string;
   title: string;
   severity: string;
@@ -189,6 +350,9 @@ export interface TrustDisplay {
   admin_eval_state?: string;
   unknown_vendor?: boolean;
   activity_status?: string;
+  guard_strength?: string;
+  guards?: string[];
+  in_organization?: boolean;
 }
 
 export interface PermissionCapabilityFlags {
@@ -637,20 +801,80 @@ export interface AccountsBreakdownResponse {
   items: AccountBreakdownItem[];
 }
 
+export interface DiffAge {
+  first_seen: string;
+  scans_present: number;
+  /** Seen before, went away, and came back. */
+  returned?: boolean;
+}
+
+export interface DiffNewFinding extends FindingListItem {
+  age?: DiffAge;
+}
+
+export interface DiffResolvedFinding extends FindingListItem {
+  reason: "resource_gone" | "no_longer_reported" | "account_not_scanned" | "not_a_resource" | string;
+  reason_text: string;
+  age?: DiffAge;
+}
+
+export interface DiffOpenFinding extends FindingListItem {
+  age: DiffAge;
+}
+
 export interface DiffChangedFinding extends FindingListItem {
   old_severity: string;
   new_severity: string;
   /** What moved in the evidence while the ID stayed the same: new callers, techniques, how direct it is. */
   changes?: string[];
+  age?: DiffAge;
+}
+
+export interface DiffComparability {
+  comparable: boolean;
+  differences: string[];
+  note?: string;
+}
+
+export interface ResourceBrief {
+  arn: string;
+  name: string;
+  type: string;
+  account_id?: string;
+  region?: string;
+  why?: string;
+}
+
+export interface ResourceChanges {
+  added_count: number;
+  removed_count: number;
+  added: ResourceBrief[];
+  removed: ResourceBrief[];
+  newly_internet_facing: ResourceBrief[];
+}
+
+export interface DiffTrendPoint {
+  scan_id: string;
+  timestamp: string;
+  critical: number;
+  high: number;
+  total: number;
+  /** False when this scan covered different accounts than the new one, so a rise or fall may be coverage. */
+  comparable: boolean;
 }
 
 export interface DiffResponse {
   old_scan_id: string;
   new_scan_id: string;
-  new_findings: FindingListItem[];
-  resolved_findings: FindingListItem[];
+  new_findings: DiffNewFinding[];
+  resolved_findings: DiffResolvedFinding[];
   changed_findings: DiffChangedFinding[];
   unchanged_count: number;
+  comparability: DiffComparability;
+  open_longest: DiffOpenFinding[];
+  history_limited?: boolean;
+  resources?: ResourceChanges;
+  trend?: DiffTrendPoint[];
 }
 
 export interface FindingsQueryParams {
@@ -694,6 +918,25 @@ export interface RuntimeStatusResponse {
   region_plan_note?: string;
   scan_mode?: string;
   scan_mode_plan_note?: string;
+  schedule?: { frequency: string; hour_utc: number; next_run?: string; last_trigger?: string };
+}
+
+export interface PreflightCheck {
+  id: string;
+  group: string;
+  label: string;
+  permission: string;
+  status: "ok" | "denied" | "unavailable" | "error" | "untested" | string;
+  detail?: string;
+}
+
+export interface PreflightResponse {
+  profile: string;
+  account_id?: string;
+  region?: string;
+  checks: PreflightCheck[];
+  summary: { ok: number; denied: number; problems: number; untested: number };
+  notes: string[];
 }
 
 export interface ValidateProfileRequest {
@@ -720,6 +963,8 @@ export interface SSOLoginResponse {
 
 export interface ScanStartRequest {
   profile: string;
+  /** Areas to check; empty means everything. */
+  modules?: string[];
   module: string;
   no_http: boolean;
   neo4j: boolean;
@@ -1597,4 +1842,10 @@ export interface IdentityCenterResponse {
   principals: IdentityCenterPrincipal[];
   accounts: IdentityCenterAccount[];
   notes: string[];
+}
+
+export interface TrustApproval {
+  account_id: string;
+  note: string;
+  approved_at: string;
 }

@@ -14,6 +14,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Zero0x00/cloudrift/internal/api/schema"
+	"github.com/Zero0x00/cloudrift/internal/business"
+	"github.com/Zero0x00/cloudrift/internal/inventory"
 	"github.com/Zero0x00/cloudrift/internal/models"
 	"github.com/Zero0x00/cloudrift/internal/scans"
 )
@@ -51,7 +53,20 @@ func GetScanSummary(outputDir string) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, summarizeScan(scanID, meta, findings))
+		resp := summarizeScan(scanID, meta, findings)
+		assets, _ := scans.LoadAssets(outputDir, scanID)
+		resp.Health = buildHealth(meta, assets)
+		resp.SpendInReach = buildSpendInReach(findings, assets)
+		settings, _ := business.Load(outputDir)
+		var per map[string]lossRange
+		resp.Loss, per = estimateLoss(findings, assets, settings.Loss)
+		for i := range resp.Attention {
+			if r, ok := per[resp.Attention[i].SubjectARN]; ok {
+				lo, hi := r.low, r.high
+				resp.Attention[i].LossLow, resp.Attention[i].LossHigh = &lo, &hi
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -86,7 +101,7 @@ func DiffScans(outputDir string) http.HandlerFunc {
 			return
 		}
 
-		_, oldFindings, err := scans.LoadScanArtifacts(outputDir, oldScan)
+		oldMeta, oldFindings, err := scans.LoadScanArtifacts(outputDir, oldScan)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				writeError(w, http.StatusNotFound, "scan_not_found", "old scan not found", map[string]any{"scan_id": oldScan})
@@ -95,7 +110,7 @@ func DiffScans(outputDir string) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "scan_load_error", "failed to load old scan artifacts", nil)
 			return
 		}
-		_, newFindings, err := scans.LoadScanArtifacts(outputDir, newScan)
+		newMeta, newFindings, err := scans.LoadScanArtifacts(outputDir, newScan)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				writeError(w, http.StatusNotFound, "scan_not_found", "new scan not found", map[string]any{"scan_id": newScan})
@@ -106,13 +121,66 @@ func DiffScans(outputDir string) http.HandlerFunc {
 		}
 
 		newItems, resolvedItems, changedItems, unchanged := diffFindings(oldFindings, newFindings)
+		oldAssets, _ := scans.LoadAssets(outputDir, oldScan)
+		newAssets, _ := scans.LoadAssets(outputDir, newScan)
+		cmp := diffComparability(oldMeta, newMeta, oldAssets, newAssets)
+		atNew, atOld, limited, trend := findingHistory(outputDir, oldScan, newScan)
+		oldRels, _ := scans.LoadRelationships(outputDir, oldScan)
+		newRels, _ := scans.LoadRelationships(outputDir, newScan)
+		resources := inventory.ChangeLists(oldAssets, newAssets, oldRels, newRels)
+
+		newOut := make([]schema.DiffNewFinding, 0, len(newItems))
+		for _, it := range newItems {
+			s, ok := atNew[it.ID]
+			newOut = append(newOut, schema.DiffNewFinding{FindingListItem: it, Age: ageOf(s, ok)})
+		}
+		resolvedOut := make([]schema.DiffResolvedFinding, 0, len(resolvedItems))
+		for _, it := range resolvedItems {
+			reason, text := resolvedReason(it, oldAssets, newAssets, newMeta, cmp.Comparable)
+			s, ok := atOld[it.ID]
+			resolvedOut = append(resolvedOut, schema.DiffResolvedFinding{FindingListItem: it, Reason: reason, ReasonText: text, Age: ageOf(s, ok)})
+		}
+		for i := range changedItems {
+			s, ok := atNew[changedItems[i].ID]
+			changedItems[i].Age = ageOf(s, ok)
+		}
+		// The findings that have stayed open longest, which a diff of two scans would otherwise hide.
+		changedIDs := map[string]bool{}
+		for _, c := range changedItems {
+			changedIDs[c.ID] = true
+		}
+		var longest []schema.DiffOpenFinding
+		for _, f := range newFindings {
+			s, ok := atNew[f.DiffKey()]
+			if !ok || s.count < 2 || changedIDs[f.ID] {
+				continue
+			}
+			if _, inOld := atOld[f.DiffKey()]; !inOld {
+				continue
+			}
+			longest = append(longest, schema.DiffOpenFinding{FindingListItem: toFindingListItem(f), Age: *ageOf(s, true)})
+		}
+		sort.SliceStable(longest, func(i, j int) bool {
+			if longest[i].Age.ScansPresent != longest[j].Age.ScansPresent {
+				return longest[i].Age.ScansPresent > longest[j].Age.ScansPresent
+			}
+			return severityRank(models.Severity(longest[i].Severity)) > severityRank(models.Severity(longest[j].Severity))
+		})
+		if len(longest) > 10 {
+			longest = longest[:10]
+		}
 		writeJSON(w, http.StatusOK, schema.DiffResponse{
 			OldScanID:        oldScan,
 			NewScanID:        newScan,
-			NewFindings:      newItems,
-			ResolvedFindings: resolvedItems,
+			NewFindings:      newOut,
+			ResolvedFindings: resolvedOut,
 			ChangedFindings:  changedItems,
 			UnchangedCount:   unchanged,
+			Comparability:    cmp,
+			OpenLongest:      longest,
+			HistoryLimited:   limited,
+			Resources:        resources,
+			Trend:            trend,
 		})
 	}
 }
@@ -209,7 +277,11 @@ func summarizeScan(scanID string, meta *models.ScanSnapshot, findings []models.F
 		ExternalEntityByPrincipalType: []schema.ExternalEntityPrincipalTypeCount{},
 		ExternalEntitiesPreview:       []schema.ExternalEntityRow{},
 	}
+	resp.ModuleCounts = map[string]int{}
+	resp.Attention, resp.Headline = buildAttention(findings)
+	resp.Savings = buildSavings(findings)
 	for _, f := range findings {
+		resp.ModuleCounts[string(f.Module)]++
 		if v, _ := f.Evidence["assessment_version"].(string); strings.HasPrefix(v, "ciem-identity") {
 			if c, _ := f.Evidence["issue_category"].(string); c != "" {
 				resp.IdentityIssueCounts[c]++
@@ -408,15 +480,8 @@ func indexFindings(findings []models.Finding) map[string]models.Finding {
 	return index
 }
 
-// diffIdentity keys a finding for cross-scan matching. Stable finding IDs are authoritative
-// (so reclassified findings match across scans); the (title, ARN) composite is a fallback for
-// legacy/hand-authored findings that lack an ID.
-func diffIdentity(f models.Finding) string {
-	if id := strings.TrimSpace(f.ID); id != "" {
-		return id
-	}
-	return strings.ToLower(strings.TrimSpace(f.Title)) + "|" + strings.ToLower(strings.TrimSpace(f.AffectedARN))
-}
+// diffIdentity keys a finding for cross-scan matching; see models.Finding.DiffKey.
+func diffIdentity(f models.Finding) string { return f.DiffKey() }
 
 func parsePagination(r *http.Request) (page int, pageSize int, err error) {
 	page = 1

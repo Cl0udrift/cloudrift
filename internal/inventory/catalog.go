@@ -32,6 +32,7 @@ type serviceDef struct {
 // when the selected scan has no counted assets for it.
 var catalog = []serviceDef{
 	{ID: "ec2", Name: "EC2", Types: []string{"ec2_instance"}},
+	{ID: "ebs", Name: "EBS volumes", Types: []string{"ebs_volume"}},
 	{ID: "lambda", Name: "Lambda", Types: []string{"lambda_function"}},
 	{ID: "s3", Name: "S3", Types: []string{"s3_bucket", "s3_object"}},
 	{ID: "iam", Name: "IAM", Types: []string{"iam_role", "iam_user", "iam_group", "iam_policy", "instance_profile"}},
@@ -54,7 +55,7 @@ var catalog = []serviceDef{
 	{ID: "security_groups", Name: "Security groups", Types: []string{"ec2_security_group"}},
 	{ID: "vpc_endpoints", Name: "VPC endpoints", Types: []string{"vpc_endpoint"}},
 	{ID: "identity_center", Name: "IAM Identity Center", Types: []string{"identity_center_instance", "identity_center_permission_set", "identity_center_user", "identity_center_group"}},
-	{ID: "route53", Name: "Route 53", Types: []string{"dns_record"}},
+	{ID: "route53", Name: "Route 53", Types: []string{"dns_record", "hosted_zone"}},
 	{ID: "cloudfront", Name: "CloudFront", Types: []string{"cloudfront_dist"}},
 	{ID: "apigateway", Name: "API Gateway", Types: []string{"apigateway_domain"}},
 	{ID: "acm", Name: "ACM", Types: []string{"acm_cert"}},
@@ -74,7 +75,7 @@ var typeName = map[string]string{
 	"secret": "Secret", "kms_key": "KMS key", "rds_instance": "RDS instance", "vpc_endpoint": "VPC endpoint", "load_balancer": "Load balancer", "ec2_security_group": "Security group",
 	"cloudformation_stack": "CloudFormation stack", "codebuild_project": "CodeBuild project", "state_machine": "Step Functions state machine",
 	"eks_cluster": "EKS cluster", "eks_pod_identity_association": "EKS Pod Identity association",
-	"dns_record": "DNS record", "cloudfront_dist": "CloudFront distribution",
+	"dns_record": "DNS record", "hosted_zone": "Hosted zone", "ebs_volume": "EBS volume", "cloudfront_dist": "CloudFront distribution",
 	"apigateway_domain": "API Gateway domain", "acm_cert": "ACM certificate", "cognito_user_pool": "Cognito user pool domain",
 }
 
@@ -89,6 +90,7 @@ var excludedAssetTypes = map[models.AssetType]bool{
 	"workload_collection_status":         true,
 	"collection_status":                  true,
 	models.AssetPublicAddressSet:         true,
+	models.AssetAccountSpend:             true,
 }
 
 var typeCategory = map[string]string{
@@ -102,7 +104,7 @@ var typeCategory = map[string]string{
 	"s3_bucket": categoryStorage, "s3_object": categoryStorage,
 	"iam_role": categoryIdentity, "iam_user": categoryIdentity, "iam_group": categoryIdentity, "iam_policy": categoryIdentity, "instance_profile": categoryIdentity,
 	"ecs_task_definition": categoryConfiguration, "eks_pod_identity_association": categoryConfiguration,
-	"dns_record": categoryNetwork, "cloudfront_dist": categoryNetwork, "apigateway_domain": categoryNetwork, "acm_cert": categoryNetwork, "cognito_user_pool": categoryIdentity,
+	"dns_record": categoryNetwork, "hosted_zone": categoryNetwork, "ebs_volume": categoryStorage, "cloudfront_dist": categoryNetwork, "apigateway_domain": categoryNetwork, "acm_cert": categoryNetwork, "cognito_user_pool": categoryIdentity,
 }
 
 var categoryOrder = []struct{ ID, Name string }{
@@ -118,12 +120,12 @@ var categoryOrder = []struct{ ID, Name string }{
 // collector whose result was not recorded.
 // optInSetting names the setting that turns on the collectors behind a service card. A card with no assets and no collection record
 // for one of these is reported as off, with the setting to turn on, not as a gap.
-var optInSetting = map[string]string{"identity_center": "scan.identity_center", "secrets": "scan.resource_policies", "kms": "scan.resource_policies", "rds": "scan.network_resources", "elbv2": "scan.network_resources", "security_groups": "scan.network_resources", "vpc_endpoints": "scan.resource_policies", "acm": "scan.network_resources", "apigateway": "scan.network_resources", "cognito": "scan.network_resources"}
+var optInSetting = map[string]string{"identity_center": "scan.identity_center", "secrets": "scan.resource_policies", "kms": "scan.resource_policies", "rds": "scan.network_resources", "elbv2": "scan.network_resources", "security_groups": "scan.network_resources", "vpc_endpoints": "scan.resource_policies", "acm": "scan.network_resources", "ebs": "scan.network_resources", "apigateway": "scan.network_resources", "cognito": "scan.network_resources"}
 
 var noCollector = map[string]bool{}
 
 var serviceScope = map[string]string{
-	"ec2": "regional", "elbv2": "regional", "security_groups": "regional", "rds": "regional", "lambda": "regional", "ecs": "regional", "eks": "regional",
+	"ec2": "regional", "ebs": "regional", "elbv2": "regional", "security_groups": "regional", "rds": "regional", "lambda": "regional", "ecs": "regional", "eks": "regional",
 	"apigateway": "regional", "acm": "regional", "cognito": "regional",
 	"iam": "global", "s3": "global", "route53": "global", "cloudfront": "global",
 }

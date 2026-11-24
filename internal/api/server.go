@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"github.com/Zero0x00/cloudrift/internal/business"
 	"io/fs"
 	"net"
 	"net/http"
@@ -53,6 +54,8 @@ func apiRouter(outputDir, configPath string) http.Handler {
 	queryHandler := handlers.NewQueryHandler(querySvc)
 	control := handlers.NewScanControlCenter(outputDir, configPath)
 	control.SetAlertService(alertSvc)
+	handlers.SetActiveControl(control)
+	handlers.SetBusinessCache(business.NewCache(outputDir))
 	alertingHandler := handlers.NewAlertingHandler(outputDir, alertSvc)
 	r.Get("/scans", handlers.ListScans(outputDir))
 	r.Get("/scans/{id}/summary", handlers.GetScanSummary(outputDir))
@@ -92,8 +95,10 @@ func apiRouter(outputDir, configPath string) http.Handler {
 	r.Get("/scan/progress", handlers.ScanProgressWS(control))
 	r.Get("/runtime/status", control.RuntimeStatus())
 	r.Post("/runtime/validate-profile", control.ValidateProfile())
+	r.Post("/runtime/preflight", control.Preflight())
 	r.Post("/runtime/sso-login", control.SSOLogin())
 	r.Post("/scan/start", control.StartScan())
+	r.Post("/scan/cancel", control.CancelScan())
 	r.Get("/scan/status", control.CurrentRunStatus())
 	r.Get("/scan/history", control.RunHistory())
 	r.Get("/alerts/catalog", alertingHandler.Catalog())
@@ -108,13 +113,22 @@ func apiRouter(outputDir, configPath string) http.Handler {
 	r.Post("/alerts/rules/{ruleID}/preview", alertingHandler.PreviewRule())
 	r.Post("/alerts/rules/{ruleID}/test", alertingHandler.TestRule())
 	r.Get("/alerts/events", alertingHandler.ListEvents())
+	r.Get("/trust/approvals", handlers.ListTrustApprovals(outputDir))
+	r.Put("/trust/approvals/{accountID}", handlers.ApproveTrustAccount(outputDir))
+	r.Delete("/trust/approvals/{accountID}", handlers.RemoveTrustApproval(outputDir))
+	r.Get("/scans/{id}/manager-metrics", handlers.GetManagerMetrics(outputDir))
+	r.Get("/scans/{id}/cost", handlers.GetCostReport(outputDir))
+	r.Get("/business", handlers.GetBusinessSettings(outputDir))
+	r.Put("/business", handlers.PutBusinessSettings(outputDir))
 	r.Post("/query", queryHandler.Query())
 	return r
 }
 
 func StartServer(host string, port int, outputDir, configPath string, staticFS fs.FS) error {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	return http.ListenAndServe(addr, NewRouter(outputDir, configPath, staticFS))
+	router := NewRouter(outputDir, configPath, staticFS)
+	go handlers.RunSchedule(context.Background())
+	return http.ListenAndServe(addr, router)
 }
 
 // SetBuildVersion sets the tool version stamped into dashboard-initiated scans so it matches

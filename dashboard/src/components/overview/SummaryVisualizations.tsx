@@ -5,7 +5,7 @@ import { EXEC_CHART_COLORS } from "./chartColors";
 
 export type SummaryDrilldownHandlers = {
   onSeverityClick?: (severity: "critical" | "high" | "medium" | "low") => void;
-  onModuleClick?: (module: "orphaned_edge" | "external_access") => void;
+  onModuleClick?: (module: string) => void;
   onClaimabilityClick?: (claimability: "reclaimable" | "dangling" | "broken" | "edge_obscured") => void;
 };
 
@@ -32,139 +32,102 @@ export function SeverityDistribution({
   summary: ScanSummaryResponse;
   onSeverityClick?: SummaryDrilldownHandlers["onSeverityClick"];
 }) {
-  const rows: { key: "critical" | "high" | "medium" | "low"; label: string; count: number; color: string }[] = [
-    { key: "critical", label: "Critical", count: summary.critical_count, color: EXEC_CHART_COLORS.severity.critical },
-    { key: "high", label: "High", count: summary.high_count, color: EXEC_CHART_COLORS.severity.high },
-    { key: "medium", label: "Medium", count: summary.medium_count, color: EXEC_CHART_COLORS.severity.medium },
-    { key: "low", label: "Low / info", count: summary.low_count, color: EXEC_CHART_COLORS.severity.low }
+  const rows: { key: "critical" | "high" | "medium" | "low"; label: string; count: number; bar: string; dot: string }[] = [
+    { key: "critical", label: "Critical", count: summary.critical_count, bar: "bg-rose-500", dot: "bg-rose-500" },
+    { key: "high", label: "High", count: summary.high_count, bar: "bg-amber-500", dot: "bg-amber-500" },
+    { key: "medium", label: "Medium", count: summary.medium_count, bar: "bg-cyan-500", dot: "bg-cyan-500" },
+    { key: "low", label: "Low / info", count: summary.low_count, bar: "bg-slate-400", dot: "bg-slate-400" }
   ];
-  const chartData = rows.map((r) => ({
-    severity: r.label,
-    key: r.key,
-    Critical: r.key === "critical" ? r.count : 0,
-    High: r.key === "high" ? r.count : 0,
-    Medium: r.key === "medium" ? r.count : 0,
-    "Low / info": r.key === "low" ? r.count : 0
-  }));
+  const total = rows.reduce((n, r) => n + r.count, 0);
 
   return (
     <div className="hs-card p-5">
-      <h3 className="cr-section-title">Risk distribution</h3>
-      <p className="cr-helper mt-1">Current severity composition by finding count.</p>
-      {summary.finding_count === 0 ? (
+      <h3 className="cr-section-title">Findings by severity</h3>
+      {total === 0 ? (
         <p className="mt-3 text-sm text-slate-500">No findings in this scan.</p>
       ) : (
-        <div className="cr-chart-focusable mt-4 rounded-md" tabIndex={0} aria-label="Risk distribution bar chart by severity">
-          <BarChart
-            className="h-64"
-            data={chartData}
-            index="severity"
-            categories={["Critical", "High", "Medium", "Low / info"]}
-            layout="vertical"
-            colors={[
-              EXEC_CHART_COLORS.severity.critical,
-              EXEC_CHART_COLORS.severity.high,
-              EXEC_CHART_COLORS.severity.medium,
-              EXEC_CHART_COLORS.severity.low
-            ]}
-            valueFormatter={(value) => formatCount(value)}
-            yAxisWidth={88}
-            onValueChange={(value) => {
-              if (!onSeverityClick || !value) {
-                return;
-              }
-              const row = chartData.find((item) => item.severity === String(value.severity));
-              if (row) {
-                onSeverityClick(row.key);
-              }
-            }}
-          />
-        </div>
+        <>
+          <div className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800" role="img" aria-label={rows.map((r) => `${r.count} ${r.label}`).join(", ")}>
+            {rows.filter((r) => r.count > 0).map((r) => (
+              <span key={r.key} className={r.bar} style={{ width: `${(r.count / total) * 100}%` }} />
+            ))}
+          </div>
+          <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {rows.map((r) => (
+              <li key={r.key}>
+                <button
+                  type="button"
+                  disabled={r.count === 0}
+                  onClick={() => onSeverityClick?.(r.key)}
+                  className={`hs-focus-ring w-full rounded-md px-2 py-1.5 text-left ${r.count > 0 ? "hover:bg-slate-100 dark:hover:bg-slate-800/70" : "opacity-50"}`}
+                >
+                  <span className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
+                    <span className={`h-2 w-2 rounded-full ${r.dot}`} />
+                    {r.label}
+                  </span>
+                  <span className="mt-0.5 block text-xl font-semibold tabular-nums text-slate-900 dark:text-slate-100">{formatCount(r.count)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
 }
 
-/** Two-way split from summary: orphaned edge vs external access (counts — summary has no USD-by-module split). */
+const MODULE_LABEL: Record<string, string> = {
+  iam_entitlement: "Identity and access",
+  external_access: "Trust and exposure",
+  orphaned_edge: "Takeover risk",
+  unused_resource: "Unused resources"
+};
+
+/** Findings by module, every module the scan produced. Hidden when there are none. */
 export function ModuleDistribution({
   summary,
   onModuleClick
 }: {
   summary: ScanSummaryResponse;
-  onModuleClick?: SummaryDrilldownHandlers["onModuleClick"];
+  onModuleClick?: (module: string) => void;
 }) {
-  const a = summary.orphaned_edge_count;
-  const b = summary.external_access_count;
-  const total = a + b;
-
+  const rows = Object.entries(summary.module_counts ?? {})
+    .filter(([, n]) => n > 0)
+    .map(([module, count]) => ({ module, label: MODULE_LABEL[module] ?? module.replace(/_/g, " "), count }))
+    .sort((x, y) => y.count - x.count);
+  const total = rows.reduce((n, r) => n + r.count, 0);
+  if (total === 0) {
+    return null;
+  }
   return (
     <div className="hs-card p-5">
-      <h3 className="cr-section-title">Findings by module</h3>
-      <p className="cr-helper mt-1">Composition of orphaned edge vs external access findings.</p>
-      {total === 0 ? (
-        <p className="mt-3 text-sm text-slate-500">No orphaned-edge or external-access findings in summary.</p>
-      ) : (
-        <div
-          className="cr-chart-focusable mt-4 rounded-md"
-          tabIndex={0}
-          aria-label="Findings by module donut composition chart"
-        >
-          <div className="mt-2 flex items-center justify-center">
-            <DonutChart
-              className="h-44"
-              data={[
-                { label: "Orphaned edge", value: a },
-                { label: "External access", value: b }
-              ]}
-              category="value"
-              index="label"
-              colors={["cyan", "violet"]}
-              valueFormatter={(value) => formatCount(value)}
-              showAnimation
-              onValueChange={(value) => {
-                if (!onModuleClick || !value?.label) {
-                  return;
-                }
-                if (value.label === "Orphaned edge") {
-                  onModuleClick("orphaned_edge");
-                  return;
-                }
-                onModuleClick("external_access");
-              }}
-            />
-          </div>
-          <ul className="mt-4 space-y-2 text-sm text-slate-700 dark:text-slate-300">
-            <li
-              className={`flex justify-between gap-4 ${
-                onModuleClick ? "cursor-pointer rounded px-1 py-1 hover:bg-slate-100 dark:hover:bg-slate-800/70" : ""
-              }`}
-              onClick={onModuleClick ? () => onModuleClick("orphaned_edge") : undefined}
-            >
-              <span className="flex items-center gap-2">
-                <span className="h-2 w-2 shrink-0 rounded-sm bg-cyan-600" />
-                Orphaned edge
-              </span>
-              <span className="tabular-nums text-slate-600 dark:text-slate-400">
-                {formatCount(a)} ({pct(a, total)}%)
-              </span>
-            </li>
-            <li
-              className={`flex justify-between gap-4 ${
-                onModuleClick ? "cursor-pointer rounded px-1 py-1 hover:bg-slate-100 dark:hover:bg-slate-800/70" : ""
-              }`}
-              onClick={onModuleClick ? () => onModuleClick("external_access") : undefined}
-            >
-              <span className="flex items-center gap-2">
-                <span className="h-2 w-2 shrink-0 rounded-sm bg-violet-600" />
-                External access
-              </span>
-              <span className="tabular-nums text-slate-600 dark:text-slate-400">
-                {formatCount(b)} ({pct(b, total)}%)
-              </span>
-            </li>
-          </ul>
+      <h3 className="cr-section-title">Findings by area</h3>
+      <p className="cr-helper mt-1">Where the findings are: identity and access, trust and exposure, takeover risk.</p>
+      <div className="cr-chart-focusable mt-4 rounded-md" tabIndex={0} aria-label="Findings by area donut chart">
+        <div className="mt-2 flex items-center justify-center">
+          <DonutChart
+            className="h-44"
+            data={rows.map((r) => ({ label: r.label, value: r.count }))}
+            category="value"
+            index="label"
+            colors={["cyan", "violet", "amber", "slate"]}
+            valueFormatter={(value) => formatCount(value)}
+            showAnimation
+            onValueChange={(value) => {
+              const row = rows.find((r) => r.label === value?.label);
+              if (row && onModuleClick) onModuleClick(row.module);
+            }}
+          />
         </div>
-      )}
+        <ul className="mt-4 space-y-2 text-sm text-slate-700 dark:text-slate-300">
+          {rows.map((r) => (
+            <li key={r.module} className="flex cursor-pointer justify-between gap-4 rounded px-1 py-1 hover:bg-slate-100 dark:hover:bg-slate-800/70" onClick={() => onModuleClick?.(r.module)}>
+              <span>{r.label}</span>
+              <span className="tabular-nums text-slate-600 dark:text-slate-400">{formatCount(r.count)} ({pct(r.count, total)}%)</span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
@@ -184,14 +147,15 @@ export function ClaimabilityDistribution({
     { key: "edge_obscured", label: "Edge obscured", count: summary.edge_obscured_count }
   ].sort((a, b) => b.count - a.count);
   const total = rows.reduce((s, r) => s + r.count, 0);
+  if (total === 0) {
+    return null;
+  }
 
   return (
     <div className="hs-card p-5">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">Claimability breakdown</h3>
-      <p className="mt-1 text-[11px] text-slate-500">Reclaimable, dangling, broken, and edge_obscured counts from summary.</p>
-      {total === 0 ? (
-        <p className="mt-3 text-sm text-slate-500">No claimability-tagged findings in summary.</p>
-      ) : (
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">Takeover findings by state</h3>
+      <p className="mt-1 text-[11px] text-slate-500">Reclaimable, dangling, broken and edge-obscured findings.</p>
+      {(
         <div
           className="cr-chart-focusable mt-4 rounded-md"
           tabIndex={0}

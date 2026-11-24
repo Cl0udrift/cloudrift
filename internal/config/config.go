@@ -93,6 +93,11 @@ type Config struct {
 		// read the Cost and Usage Report.
 		UseCUR bool `toml:"use_cur"`
 	} `toml:"cost"`
+	// Schedule repeats scans while the dashboard is running. Empty frequency means scans are started by hand.
+	Schedule struct {
+		Frequency string `toml:"frequency"`
+		HourUTC   int    `toml:"hour_utc"`
+	} `toml:"schedule"`
 	Inventory struct {
 		// OwnerTagKeys are the resource tag keys read as the owner, in priority order, matched case-insensitively.
 		OwnerTagKeys []string `toml:"owner_tag_keys"`

@@ -17,6 +17,15 @@ type RuntimeStatusResponse struct {
 	// ScanMode is the configured mode (auto, organization or account) and ScanModePlanNote says what it will do.
 	ScanMode         string `json:"scan_mode"`
 	ScanModePlanNote string `json:"scan_mode_plan_note"`
+	// Schedule says whether scans repeat, when the next one is due and when one last started.
+	Schedule *ScheduleInfo `json:"schedule,omitempty"`
+}
+
+type ScheduleInfo struct {
+	Frequency   string     `json:"frequency"`
+	HourUTC     int        `json:"hour_utc"`
+	NextRun     *time.Time `json:"next_run,omitempty"`
+	LastTrigger *time.Time `json:"last_trigger,omitempty"`
 }
 
 type ValidateProfileRequest struct {
@@ -42,11 +51,14 @@ type SSOLoginResponse struct {
 }
 
 type ScanStartRequest struct {
-	Profile  string `json:"profile"`
-	Module   string `json:"module"`
-	NoHTTP   bool   `json:"no_http"`
-	Neo4j    bool   `json:"neo4j"`
-	Provider string `json:"provider,omitempty"`
+	Profile string `json:"profile"`
+	// Modules lists the areas to check: iam_entitlement, external_access, orphaned_edge, unused_resource. Empty or
+	// "all" checks everything. Module is the older single-value form and is still accepted.
+	Modules  []string `json:"modules,omitempty"`
+	Module   string   `json:"module"`
+	NoHTTP   bool     `json:"no_http"`
+	Neo4j    bool     `json:"neo4j"`
+	Provider string   `json:"provider,omitempty"`
 	// CIEM turns on identity inventory for this run. Region discovery still happens during the scan.
 	CIEM bool `json:"ciem,omitempty"`
 }
@@ -91,4 +103,31 @@ type ScanRunHistoryItem struct {
 
 type ScanRunHistoryResponse struct {
 	Items []ScanRunHistoryItem `json:"items"`
+}
+
+// PreflightCheck is one read the scan will make, and whether the credentials can make it.
+type PreflightCheck struct {
+	ID         string `json:"id"`
+	Group      string `json:"group"`
+	Label      string `json:"label"`
+	Permission string `json:"permission"`
+	// Status is ok, denied, unavailable, error or untested.
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type PreflightSummary struct {
+	OK       int `json:"ok"`
+	Denied   int `json:"denied"`
+	Problems int `json:"problems"`
+	Untested int `json:"untested"`
+}
+
+type PreflightResponse struct {
+	Profile   string           `json:"profile"`
+	AccountID string           `json:"account_id,omitempty"`
+	Region    string           `json:"region,omitempty"`
+	Checks    []PreflightCheck `json:"checks"`
+	Summary   PreflightSummary `json:"summary"`
+	Notes     []string         `json:"notes"`
 }

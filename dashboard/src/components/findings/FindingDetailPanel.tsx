@@ -3,6 +3,8 @@ import { CopyIdentifier } from "../ui/CopyIdentifier";
 import { SeverityBadge } from "../SeverityBadge";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { TrustApproval } from "./TrustApproval";
+import { formatMoney } from "../../lib/money";
 import { RemediationCommand } from "./RemediationCommand";
 import { IdentityPath, ReachableByList, RemediationOptions } from "./IdentityPath";
 import { formatQueryError } from "../../api/httpError";
@@ -33,8 +35,11 @@ function TrustBlock({ trust }: { trust: NonNullable<FindingDetailItem["trust"]> 
     ["Verdict", trust.verdict],
     ["Reason", trust.reason],
     ["Admin evaluation", formatAdminEvalStateLabel(trust.admin_eval_state)],
-    ["Unknown vendor", trust.unknown_vendor !== undefined ? String(trust.unknown_vendor) : undefined]
+    ["Unknown vendor", trust.unknown_vendor !== undefined ? String(trust.unknown_vendor) : undefined],
+    ["In your organization", trust.in_organization ? "yes" : undefined],
+    ["Guard on the trust", trust.guard_strength ? `${trust.guard_strength}${trust.guards?.length ? ` (${trust.guards.join(", ")})` : ""}` : undefined]
   ];
+  const canApprove = trust.principal_type === "aws_account" && Boolean(trust.external_account_id) && !trust.in_organization;
   const visible = rows.filter(([, v]) => v !== undefined && v !== "");
   const hasPermissionVisibility = Boolean(trust.permission_visibility);
 
@@ -54,6 +59,7 @@ function TrustBlock({ trust }: { trust: NonNullable<FindingDetailItem["trust"]> 
           ))}
         </dl>
       ) : null}
+      {canApprove ? <TrustApproval accountId={trust.external_account_id as string} /> : null}
       <div className="rounded-md border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-900/40">
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           Permission visibility
@@ -277,6 +283,19 @@ export function FindingDetailPanelContent({
       {item.impact ? (
         <Section title="Impact">
           <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-300">{item.impact}</p>
+        </Section>
+      ) : null}
+      {item.module === "unused_resource" ? (
+        <Section title="What it costs">
+          <dl className="grid gap-2 text-sm sm:grid-cols-2">
+            <div><dt className="text-xs text-slate-500">Per month</dt><dd className="font-semibold text-slate-900 dark:text-slate-100">{typeof ev.monthly_cost_usd === "number" ? formatMoney(ev.monthly_cost_usd) : "Not priced"}</dd></div>
+            <div><dt className="text-xs text-slate-500">Per year</dt><dd className="font-semibold text-slate-900 dark:text-slate-100">{typeof ev.yearly_cost_usd === "number" ? formatMoney(ev.yearly_cost_usd) : "—"}</dd></div>
+            <div><dt className="text-xs text-slate-500">Cost from</dt><dd>{ev.cost_source === "actual" ? "Your billing (Cost Explorer, last 14 days, scaled to a month)" : "AWS list price estimate"}</dd></div>
+            <div><dt className="text-xs text-slate-500">Source</dt><dd>{String(ev.price_source ?? "—")}</dd></div>
+            {typeof ev.estimate_usd === "number" && ev.cost_source === "actual" ? <div><dt className="text-xs text-slate-500">List-price estimate was</dt><dd>{formatMoney(ev.estimate_usd)} a month</dd></div> : null}
+            {ev.cost_scope ? <div className="sm:col-span-2"><dt className="text-xs text-slate-500">What it includes</dt><dd>{String(ev.cost_scope)}</dd></div> : null}
+          </dl>
+          {ev.actuals_status === "not_enabled" ? <p className="cr-helper mt-2">To use your actual billing, switch on resource-level data in Cost Explorer settings in the payer account.</p> : null}
         </Section>
       ) : null}
       {item.recommendation ? (

@@ -50,6 +50,12 @@ func CollectDNSWithConfig(ctx context.Context, cfg *config.Config, accounts []Ac
 					return
 				}
 				for _, zone := range zonePage.HostedZones {
+					zoneID := strings.TrimPrefix(awsv2.ToString(zone.Id), "/hostedzone/")
+					local = append(local, models.AssetNode{
+						ARN: "arn:aws:route53:::hostedzone/" + zoneID, AssetType: models.AssetHostedZone, Name: strings.TrimSuffix(awsv2.ToString(zone.Name), "."),
+						AccountID: account.ID, Region: "global",
+						Properties: map[string]any{"zone_id": zoneID, "record_count": awsv2.ToInt64(zone.ResourceRecordSetCount), "private": zone.Config != nil && zone.Config.PrivateZone, "source_api": "route53:ListHostedZones"},
+					})
 					rp := route53.NewListResourceRecordSetsPaginator(client, &route53.ListResourceRecordSetsInput{
 						HostedZoneId: zone.Id,
 					})

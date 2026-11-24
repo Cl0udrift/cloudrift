@@ -78,6 +78,7 @@ type WorkloadClients struct {
 	RDS            RDSAPI
 	// Names and addresses that can be registered again. Nil skips them (scan.network_resources off).
 	Addresses    AddressAPI
+	Volumes      VolumeAPI
 	ACM          ACMAPI
 	APIGateway   APIGatewayAPI
 	APIGatewayV2 APIGatewayV2API
@@ -124,7 +125,7 @@ var regionalWorkloadClients = func(cfg awsv2.Config) WorkloadClients {
 		Glue: glue.NewFromConfig(cfg), Batch: batch.NewFromConfig(cfg), AppRunner: apprunner.NewFromConfig(cfg), SageMaker: sagemaker.NewFromConfig(cfg),
 		AgentCore: bedrockagentcorecontrol.NewFromConfig(cfg), CodeDeploy: codedeploy.NewFromConfig(cfg), AutoScaling: autoscaling.NewFromConfig(cfg), LaunchTemplate: ec2.NewFromConfig(cfg),
 		SecurityGroups: ec2.NewFromConfig(cfg), ELBv2: elasticloadbalancingv2.NewFromConfig(cfg), RDS: rds.NewFromConfig(cfg),
-		Addresses: ec2.NewFromConfig(cfg), ACM: acm.NewFromConfig(cfg), APIGateway: apigateway.NewFromConfig(cfg), APIGatewayV2: apigatewayv2.NewFromConfig(cfg), Cognito: cognitoidentityprovider.NewFromConfig(cfg),
+		Addresses: ec2.NewFromConfig(cfg), Volumes: ec2.NewFromConfig(cfg), ACM: acm.NewFromConfig(cfg), APIGateway: apigateway.NewFromConfig(cfg), APIGatewayV2: apigatewayv2.NewFromConfig(cfg), Cognito: cognitoidentityprovider.NewFromConfig(cfg),
 	}
 }
 
@@ -199,7 +200,7 @@ func CollectWorkloads(ctx context.Context, cfg *config.Config, accounts []Accoun
 			}
 			if cfg != nil && !cfg.Scan.NetworkResources {
 				clients.SecurityGroups, clients.ELBv2, clients.RDS = nil, nil, nil
-				clients.Addresses, clients.ACM, clients.APIGateway, clients.APIGatewayV2, clients.Cognito = nil, nil, nil, nil, nil
+				clients.Addresses, clients.Volumes, clients.ACM, clients.APIGateway, clients.APIGatewayV2, clients.Cognito = nil, nil, nil, nil, nil, nil
 			}
 			nodes, edges, err := CollectRegionalWorkloads(ctx, job.account.ID, job.region, clients, time.Now().UTC())
 			mu.Lock()
@@ -329,6 +330,7 @@ func collectEC2(ctx context.Context, accountID, region string, api EC2API, profi
 			node.Properties["tags"] = tags
 		}
 		node.Properties["vpc_id"] = awsv2.ToString(instance.VpcId)
+		node.Properties["instance_type"] = string(instance.InstanceType)
 		if ip := awsv2.ToString(instance.PublicIpAddress); ip != "" {
 			node.Properties["public_ip"] = ip
 		}

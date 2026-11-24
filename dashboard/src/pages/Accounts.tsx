@@ -83,8 +83,7 @@ function AccountCard({ account, scanId }: { account: AccountBreakdownItem; scanI
         <MetricDt label="Findings" value={formatCount(account.finding_count)} />
         <MetricDt label="Critical" value={formatCount(account.critical_count)} emphasize />
         <MetricDt label="High" value={formatCount(account.high_count)} />
-        <MetricDt label="Direct / mo" value={formatUsd(account.total_monthly_direct_cost_usd)} mono />
-        <MetricDt label="Risk / mo" value={formatUsd(account.total_monthly_risk_cost_usd)} mono />
+        <MetricDt label="Unused resources / mo" value={formatUsd(account.total_monthly_direct_cost_usd)} mono />
       </dl>
 
       <div className="mt-4 border-t border-slate-200 pt-3 dark:border-t-slate-800/90">

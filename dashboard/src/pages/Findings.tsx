@@ -47,10 +47,11 @@ const SAVED_VIEWS: { label: string; hint: string; filter: { module?: string; cla
   { label: "External access", hint: "Trust and resource policies naming external principals", filter: { module: "external_access" } },
   { label: "Admin-like trust", hint: "Trusted roles with admin-like declared permissions", filter: { adminLike: true } },
   { label: "Stale trust", hint: "Trust with no recent observed activity", filter: { trustStale: true } },
+  { label: "Unused resources", hint: "Resources that cost money and do nothing", filter: { module: "unused_resource" } },
   { label: "Reclaimable assets", hint: "Orphaned edge assets that can be reclaimed", filter: { module: "orphaned_edge", claimability: "reclaimable" } }
 ];
 
-const MODULE_OPTIONS = ["", "orphaned_edge", "external_access", "iam_entitlement"] as const;
+const MODULE_OPTIONS = ["", "orphaned_edge", "external_access", "iam_entitlement", "unused_resource"] as const;
 const CLAIM_OPTIONS = ["", "reclaimable", "dangling", "broken", "edge_obscured"] as const;
 
 const columnHelper = createColumnHelper<FindingListItem>();
@@ -449,8 +450,9 @@ export function FindingsPage({ triage = false }: FindingsPageProps) {
           </div>
         )
       }),
-      columnHelper.accessor("monthly_risk_cost_usd", {
-        header: () => <span className="whitespace-nowrap" title="Modeled monthly cost of an orphaned asset at AWS list price. Identity findings have none.">Modeled cost / mo</span>,
+      columnHelper.accessor((row) => row.monthly_direct_cost_usd || row.monthly_risk_cost_usd, {
+        id: "monthly_cost_usd",
+        header: () => <span className="whitespace-nowrap" title="What the resource costs to hold each month, estimated from the AWS list price. Only unused resources have one; identity and takeover findings have none.">Cost / mo</span>,
         cell: (info) => (
           <span className="tabular-nums text-slate-800 dark:text-slate-200">{formatUsd(info.getValue())}</span>
         )

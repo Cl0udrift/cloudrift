@@ -135,11 +135,11 @@ func TestScoreTrust_MissingActivityJoinIsExplicit(t *testing.T) {
 		map[string]collectors.RoleActivity{},
 		testTrustConfig([]string{"222222222222"}),
 	)
-	assertSingleSeverity(t, findings, models.SeverityHigh)
+	assertSingleSeverity(t, findings, models.SeverityMedium)
 	assertEvidenceValue(t, findings[0], "activity_status", "missing_join")
-	assertEvidenceValue(t, findings[0], "reason", "missing activity join; treated conservatively as stale")
-	if got := findings[0].Recommendation; got == "" || !contains(got, "conservative") {
-		t.Fatalf("expected recommendation to mention conservative telemetry fallback, got %q", got)
+	assertEvidenceValue(t, findings[0], "verdict", "activity_unknown")
+	if got := findings[0].Recommendation; got == "" || !contains(got, "unavailable") {
+		t.Fatalf("expected recommendation to say telemetry was unavailable, got %q", got)
 	}
 }
 
@@ -301,4 +301,29 @@ func assertEvidenceValue(t *testing.T, f models.Finding, key string, expected an
 
 func contains(s, sub string) bool {
 	return strings.Contains(s, sub)
+}
+
+func TestScoreTrust_MissingActivityDoesNotLowerAnUnapprovedAccountBelowHigh(t *testing.T) {
+	findings := ScoreTrust(
+		[]models.AssetNode{baseRole(false), basePrincipal("arn:aws:iam::222222222222:root", "aws_account")},
+		[]models.Relationship{baseRel()},
+		map[string]collectors.RoleActivity{},
+		testTrustConfig(nil),
+	)
+	assertSingleSeverity(t, findings, models.SeverityHigh)
+	assertEvidenceValue(t, findings[0], "verdict", "unknown_vendor")
+}
+
+func TestScoreTrust_StaleButStronglyGuardedIsMedium(t *testing.T) {
+	doc := `{"Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::222222222222:root"},"Action":"sts:AssumeRole","Condition":{"StringEquals":{"sts:ExternalId":"x"}}}]}`
+	role := baseRole(false)
+	role.Properties["trust_policy_document"] = doc
+	findings := ScoreTrust(
+		[]models.AssetNode{role, basePrincipal("arn:aws:iam::222222222222:root", "aws_account")},
+		[]models.Relationship{baseRel()},
+		map[string]collectors.RoleActivity{roleARN: {RoleARN: roleARN, DaysSinceUsed: 400}},
+		testTrustConfig([]string{"222222222222"}),
+	)
+	assertSingleSeverity(t, findings, models.SeverityMedium)
+	assertEvidenceValue(t, findings[0], "verdict", "stale_review_now")
 }

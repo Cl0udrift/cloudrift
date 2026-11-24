@@ -1,14 +1,25 @@
-import type { FindingListItem } from "../../api/types";
+import type { DiffAge, FindingListItem } from "../../api/types";
 import { displayTarget, formatUsd, shortenArn } from "../../lib/format";
 import { SeverityBadge } from "../SeverityBadge";
 
 const variantStyles = {
   new: "border-l-4 border-l-amber-500/90",
-  resolved: "border-l-4 border-l-emerald-600/85"
+  resolved: "border-l-4 border-l-emerald-600/85",
+  // Gone for a reason that is not a fix: the resource was deleted, or the scan did not look.
+  gone: "border-l-4 border-l-slate-400/90",
+  open: "border-l-4 border-l-slate-300/90"
 } as const;
 
+/** "Open since 12 Nov, 5 scans" or "Came back; first here 12 Nov". */
+export function ageText(age?: DiffAge): string | null {
+  if (!age) return null;
+  const since = new Date(age.first_seen).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const scans = `${age.scans_present} ${age.scans_present === 1 ? "scan" : "scans"}`;
+  return age.returned ? `Came back; this run began ${since} (${scans})` : `Open since ${since} (${scans})`;
+}
+
 /** Compact finding summary for diff lists (matches audit styling, lighter than full Findings table). */
-export function DiffFindingCard({ item, variant }: { item: FindingListItem; variant: "new" | "resolved" }) {
+export function DiffFindingCard({ item, variant, note, age }: { item: FindingListItem; variant: keyof typeof variantStyles; note?: string; age?: DiffAge }) {
   const target = displayTarget(item.hostname, item.affected_arn);
   const accent = variantStyles[variant];
   return (
@@ -27,6 +38,8 @@ export function DiffFindingCard({ item, variant }: { item: FindingListItem; vari
         </div>
         <SeverityBadge severity={item.severity} />
       </div>
+      {note ? <p className="mt-2 text-xs text-slate-700 dark:text-slate-300">{note}</p> : null}
+      {ageText(age) ? <p className="mt-1 text-xs text-slate-500">{ageText(age)}</p> : null}
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
         <div>
           <dt className="text-slate-500">Account</dt>

@@ -44,6 +44,9 @@ export function RemediationGroupingPanel({
   ).slice(0, 8);
   const maxRisk = Math.max(...groups.map((group) => group.totalMonthlyRiskUsd), 1);
 
+  if (!groupsQuery.isLoading && !groupsQuery.isError && groups.length === 0) {
+    return null;
+  }
   return (
     <div className="hs-card p-5">
       <h3 className="cr-section-title">Remediation grouping</h3>

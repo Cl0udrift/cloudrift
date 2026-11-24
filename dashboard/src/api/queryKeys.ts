@@ -2,6 +2,9 @@ import type { ExternalEntitiesQueryParams, FindingsQueryParams } from "./types";
 
 export const queryKeys = {
   config: () => ["config"] as const,
+  business: ["business"] as const,
+  managerMetrics: (scanId: string) => ["manager-metrics", scanId] as const,
+  trustApprovals: ["trust-approvals"] as const,
   coverage: (scanId: string | null) => ["coverage", scanId] as const,
   identityCenter: (scanId: string | null) => ["identity-center", scanId] as const,
   whoCan: (scanId: string | null, action: string, arn: string, chain = false) => ["who-can", scanId, action, arn, chain] as const,

@@ -55,6 +55,7 @@ Resources:
                   - ec2:DescribeRegions
                   - ec2:DescribeSecurityGroups
                   - ec2:DescribeAddresses
+                  - ec2:DescribeVolumes
                   - ec2:DescribeNetworkInterfaces
                   - acm:ListCertificates
                   - acm:DescribeCertificate

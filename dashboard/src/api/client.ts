@@ -1,4 +1,9 @@
 import type {
+  PreflightResponse,
+  CostReport,
+  BusinessSettings,
+  ManagerMetrics,
+  TrustApproval,
   AccessSuggestion,
   ConfigResponse,
   ConfigValue,
@@ -126,6 +131,27 @@ export const apiClient = {
   },
   getReferenceCoverage(): Promise<ReferenceCoverage> {
     return fetchJSON<ReferenceCoverage>("/coverage/reference");
+  },
+  getBusinessSettings(): Promise<{ settings: BusinessSettings; loss_configured: boolean }> {
+    return fetchJSON<{ settings: BusinessSettings; loss_configured: boolean }>("/business");
+  },
+  saveBusinessSettings(settings: BusinessSettings): Promise<{ settings: BusinessSettings; loss_configured: boolean }> {
+    return fetchJSON<{ settings: BusinessSettings; loss_configured: boolean }>("/business", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) });
+  },
+  getCost(scanId: string): Promise<CostReport> {
+    return fetchJSON<CostReport>(`/scans/${encodeURIComponent(scanId)}/cost`);
+  },
+  getManagerMetrics(scanId: string): Promise<ManagerMetrics> {
+    return fetchJSON<ManagerMetrics>(`/scans/${encodeURIComponent(scanId)}/manager-metrics`);
+  },
+  getTrustApprovals(): Promise<{ items: TrustApproval[]; note: string }> {
+    return fetchJSON<{ items: TrustApproval[]; note: string }>("/trust/approvals");
+  },
+  approveTrustAccount(accountId: string, note: string): Promise<{ item: TrustApproval }> {
+    return fetchJSON<{ item: TrustApproval }>(`/trust/approvals/${encodeURIComponent(accountId)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }) });
+  },
+  removeTrustApproval(accountId: string): Promise<unknown> {
+    return fetchJSON<unknown>(`/trust/approvals/${encodeURIComponent(accountId)}`, { method: "DELETE" });
   },
   getCoverage(scanId: string | null): Promise<CoverageReport> {
     return fetchJSON<CoverageReport>(`/coverage${makeQueryString({ scan_id: scanId ?? undefined })}`);
@@ -262,6 +288,12 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({ profile })
     });
+  },
+  preflight(profile: string): Promise<PreflightResponse> {
+    return fetchJSON<PreflightResponse>("/runtime/preflight", { method: "POST", body: JSON.stringify({ profile }) });
+  },
+  cancelScan(): Promise<unknown> {
+    return fetchJSON<unknown>("/scan/cancel", { method: "POST" });
   },
   triggerSSOLogin(profile: string): Promise<SSOLoginResponse> {
     return fetchJSON<SSOLoginResponse>("/runtime/sso-login", {

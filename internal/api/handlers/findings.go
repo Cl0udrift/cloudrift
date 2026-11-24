@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"github.com/Zero0x00/cloudrift/internal/business"
 	"net/http"
 	"os"
 	"regexp"
@@ -224,9 +225,29 @@ func matchesSearch(finding models.Finding, search string) bool {
 	return false
 }
 
+// businessCache holds the owners the customer set per account. Nil in tests, which then see tag owners only.
+var businessCache *business.Cache
+
+func SetBusinessCache(c *business.Cache) { businessCache = c }
+
+func ownerOf(f models.Finding) (owner, source string) {
+	if t := strings.TrimSpace(f.Team); t != "" {
+		return t, "tag"
+	}
+	if businessCache != nil {
+		if o := businessCache.Owner(f.AccountID); o != "" {
+			return o, "account"
+		}
+	}
+	return "", ""
+}
+
 func toFindingListItem(finding models.Finding) schema.FindingListItem {
 	pType := principalTypeForFinding(finding)
+	owner, ownerSource := ownerOf(finding)
 	return schema.FindingListItem{
+		Owner:                owner,
+		OwnerSource:          ownerSource,
 		ID:                   finding.ID,
 		Title:                finding.Title,
 		Severity:             strings.ToLower(string(finding.Severity)),
@@ -273,6 +294,17 @@ func toTrustDisplay(evidence map[string]any) *schema.TrustDisplay {
 		Reason:            strEvidence(evidence, "reason"),
 		AdminEvalState:    strEvidence(evidence, "admin_eval_state"),
 		ActivityStatus:    strEvidence(evidence, "activity_status"),
+		GuardStrength:     strEvidence(evidence, "guard_strength"),
+	}
+	if g, ok := evidence["guards"].([]any); ok {
+		for _, x := range g {
+			if str, ok := x.(string); ok {
+				td.Guards = append(td.Guards, str)
+			}
+		}
+	}
+	if v, ok := boolEvidence(evidence, "in_organization"); ok {
+		td.InOrganization = &v
 	}
 	if td.RoleARN != "" {
 		td.PrincipalID = blastradius.EncodePrincipalID(td.RoleARN, trustPrincipalType(td), "")

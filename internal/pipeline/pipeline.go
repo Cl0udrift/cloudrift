@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	awscfg "github.com/aws/aws-sdk-go-v2/config"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,7 +22,9 @@ import (
 	"github.com/Zero0x00/cloudrift/internal/collectors"
 	"github.com/Zero0x00/cloudrift/internal/config"
 	"github.com/Zero0x00/cloudrift/internal/models"
+	"github.com/Zero0x00/cloudrift/internal/pricing"
 	"github.com/Zero0x00/cloudrift/internal/scorers"
+	"github.com/Zero0x00/cloudrift/internal/trustapprovals"
 	"github.com/Zero0x00/cloudrift/internal/validators"
 )
 
@@ -65,6 +68,20 @@ type Options struct {
 // probing in production; deterministic fakes in tests). Mirrors the seam pattern used in
 // internal/scorers/cost.go.
 var validateAssetsFn = validators.ValidateAssets
+
+// newPriceSource reads list prices with the management credentials (or the default chain). When none can reach the
+// Price List API the unused resources are still listed, without a cost.
+var newPriceSource = func(ctx context.Context, cfg *config.Config, cacheDir string) pricing.Prices {
+	var opts []func(*awscfg.LoadOptions) error
+	if cfg != nil && cfg.AWS.ManagementProfile != "" {
+		opts = append(opts, awscfg.WithSharedConfigProfile(cfg.AWS.ManagementProfile))
+	}
+	awsCfg, err := awscfg.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return pricing.Unavailable{Reason: "no AWS credentials for the Price List API"}
+	}
+	return pricing.New(awsCfg, cacheDir)
+}
 
 func (o Options) runsModule(m models.Module) bool {
 	if len(o.Modules) == 0 {
@@ -162,28 +179,44 @@ func Run(ctx context.Context, cfg *config.Config, outputDir, toolVersion string,
 		findings = append(findings, scorers.ScoreUnheldTargets(ctx, res.Assets, res.Coverage.Complete(), validators.IsEC2Address)...)
 	}
 
+	// --- Unused resources that cost money, priced from the AWS list price. ---
+	if opts.runsModule(models.ModuleUnusedResource) {
+		progress("pricing", "finding unused resources and pricing them")
+		findings = append(findings, scorers.ScoreUnusedResources(ctx, res.Assets, pricing.NewLazy(func() pricing.Prices { return newPriceSource(ctx, cfg, outputDir) }))...)
+	}
+
 	// --- External-trust module: cross-account / federated IAM trust + resource-policy exposure. ---
 	if opts.runsModule(models.ModuleExternalAccess) {
 		progress("scoring", "evaluating IAM trust and resource-policy exposure")
 		activityIdx := collectors.IndexActivityByRoleARN(res.Activity)
-		findings = append(findings, scorers.ScoreTrust(res.Assets, res.Rels, activityIdx, cfg)...)
-		findings = append(findings, scorers.ScoreResourceExposure(res.Assets, res.Rels, cfg)...)
+		// Accounts approved from the dashboard count alongside the configured list, from this scan on.
+		trustCfg := *cfg
+		trustCfg.Trust.ApprovedExternalAccounts = append(append([]string(nil), cfg.Trust.ApprovedExternalAccounts...), trustapprovals.AccountIDs(outputDir)...)
+		findings = append(findings, scorers.ScoreTrust(res.Assets, res.Rels, activityIdx, &trustCfg)...)
+		findings = append(findings, scorers.ScoreResourceExposure(res.Assets, res.Rels, &trustCfg)...)
 		findings = append(findings, scorers.ScoreVPCEndpoints(res.Assets)...)
 		findings = append(findings, scorers.ScoreDeletedTrustPrincipals(res.Assets)...)
-		if cfg.Scan.IAMPolicyInventory {
-			progress("scoring", "recording broad IAM entitlement candidates")
-			entitlements := scorers.ScoreEntitlements(res.Assets, res.Rels)
-			ciem.AttachWorkloadsToEntitlements(entitlements, res.Assets, res.Rels)
-			findings = append(findings, entitlements...)
-			findings = append(findings, ciem.ScoreIdentityHygiene(res.Assets, res.Rels, time.Now().UTC())...)
-			if cfg.Scan.EscalationSearchSeconds > 0 {
-				progress("scoring", "searching for privilege-escalation paths")
-				esc, stats := ciem.ScoreEscalations(ctx, res.Assets, res.Rels, time.Duration(cfg.Scan.EscalationSearchSeconds)*time.Second, time.Now().UTC())
-				findings = append(findings, esc...)
-				res.Assets = append(res.Assets, escalationStatus(stats))
-			}
+		findings = append(findings, scorers.ScoreTrustPolicies(res.Assets)...)
+	}
+
+	// --- Identity and access: broad permissions, user credentials, administrators, escalation paths. ---
+	if opts.runsModule(models.ModuleIAMEntitlement) && cfg.Scan.IAMPolicyInventory {
+		progress("scoring", "recording broad IAM entitlement candidates")
+		entitlements := scorers.ScoreEntitlements(res.Assets, res.Rels)
+		ciem.AttachWorkloadsToEntitlements(entitlements, res.Assets, res.Rels)
+		findings = append(findings, entitlements...)
+		findings = append(findings, ciem.ScoreIdentityHygiene(res.Assets, res.Rels, time.Now().UTC())...)
+		if cfg.Scan.EscalationSearchSeconds > 0 {
+			progress("scoring", "searching for privilege-escalation paths")
+			esc, stats := ciem.ScoreEscalations(ctx, res.Assets, res.Rels, time.Duration(cfg.Scan.EscalationSearchSeconds)*time.Second, time.Now().UTC())
+			findings = append(findings, esc...)
+			res.Assets = append(res.Assets, escalationStatus(stats))
 		}
 	}
+
+	// --- Real billing, when "attach account spend" is on: what each account spends, and what unused resources cost. ---
+	findings = scorers.EnrichWasteActuals(ctx, findings, *cfg)
+	res.Assets = append(res.Assets, scorers.AccountSpendAssets(ctx, *cfg, res.Coverage.Scanned)...)
 
 	// --- Optional Cost Explorer enrichment (no-op unless cfg.Cost.UseCUR). ---
 	if enriched, cerr := scorers.EnrichCostFromCE(ctx, findings, *cfg); cerr == nil {

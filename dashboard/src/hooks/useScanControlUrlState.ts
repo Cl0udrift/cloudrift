@@ -1,29 +1,27 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
-const MODULE_OPTIONS = ["all", "orphaned_edge", "external_access"] as const;
+/** The areas a scan can be limited to. None chosen means all of them. */
+export const SCAN_AREAS = ["iam_entitlement", "external_access", "orphaned_edge", "unused_resource"] as const;
 const PROVIDER_OPTIONS = ["", "openai", "local"] as const;
 
 export type ScanControlUrlState = {
   profile: string;
-  moduleName: (typeof MODULE_OPTIONS)[number];
+  /** Empty means every area. */
+  modules: string[];
   provider: (typeof PROVIDER_OPTIONS)[number];
   noHTTP: boolean;
   neo4j: boolean;
 };
 
-function parseModule(raw: string | null): ScanControlUrlState["moduleName"] {
-  if (MODULE_OPTIONS.includes((raw ?? "") as ScanControlUrlState["moduleName"])) {
-    return (raw ?? "all") as ScanControlUrlState["moduleName"];
-  }
-  return "all";
+function parseModules(sp: URLSearchParams): string[] {
+  const raw = [sp.get("modules"), sp.get("module")].filter(Boolean).join(",");
+  const list = raw.split(",").map((x) => x.trim()).filter((x) => (SCAN_AREAS as readonly string[]).includes(x));
+  return Array.from(new Set(list)).length === SCAN_AREAS.length ? [] : Array.from(new Set(list));
 }
 
 function parseProvider(raw: string | null): ScanControlUrlState["provider"] {
-  if (PROVIDER_OPTIONS.includes((raw ?? "") as ScanControlUrlState["provider"])) {
-    return (raw ?? "") as ScanControlUrlState["provider"];
-  }
-  return "";
+  return PROVIDER_OPTIONS.includes((raw ?? "") as ScanControlUrlState["provider"]) ? ((raw ?? "") as ScanControlUrlState["provider"]) : "";
 }
 
 function parseBool(raw: string | null): boolean {
@@ -31,13 +29,7 @@ function parseBool(raw: string | null): boolean {
 }
 
 function parseState(sp: URLSearchParams): ScanControlUrlState {
-  return {
-    profile: sp.get("profile") ?? "",
-    moduleName: parseModule(sp.get("module")),
-    provider: parseProvider(sp.get("provider")),
-    noHTTP: parseBool(sp.get("no_http")),
-    neo4j: parseBool(sp.get("neo4j"))
-  };
+  return { profile: sp.get("profile") ?? "", modules: parseModules(sp), provider: parseProvider(sp.get("provider")), noHTTP: parseBool(sp.get("no_http")), neo4j: parseBool(sp.get("neo4j")) };
 }
 
 export function useScanControlUrlState() {
@@ -48,28 +40,13 @@ export function useScanControlUrlState() {
     (partial: Partial<ScanControlUrlState>) => {
       const next = { ...state, ...partial };
       const merged = new URLSearchParams(searchParams);
-      const managedKeys = ["profile", "module", "provider", "no_http", "neo4j"];
-      for (const key of managedKeys) {
-        merged.delete(key);
-      }
-      if (next.profile.trim()) {
-        merged.set("profile", next.profile.trim());
-      }
-      if (next.moduleName !== "all") {
-        merged.set("module", next.moduleName);
-      }
-      if (next.provider) {
-        merged.set("provider", next.provider);
-      }
-      if (next.noHTTP) {
-        merged.set("no_http", "1");
-      }
-      if (next.neo4j) {
-        merged.set("neo4j", "1");
-      }
-      if (merged.toString() !== searchParams.toString()) {
-        setSearchParams(merged, { replace: true });
-      }
+      for (const key of ["profile", "module", "modules", "provider", "no_http", "neo4j"]) merged.delete(key);
+      if (next.profile.trim()) merged.set("profile", next.profile.trim());
+      if (next.modules.length > 0) merged.set("modules", next.modules.join(","));
+      if (next.provider) merged.set("provider", next.provider);
+      if (next.noHTTP) merged.set("no_http", "1");
+      if (next.neo4j) merged.set("neo4j", "1");
+      if (merged.toString() !== searchParams.toString()) setSearchParams(merged, { replace: true });
     },
     [searchParams, setSearchParams, state]
   );

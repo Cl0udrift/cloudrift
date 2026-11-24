@@ -1,6 +1,6 @@
 import { BarChart } from "@tremor/react";
 import type { AccountBreakdownItem } from "../../api/types";
-import { formatUsd } from "../../lib/format";
+import { formatCount } from "../../lib/format";
 
 const DEFAULT_LIMIT = 6;
 
@@ -30,9 +30,6 @@ function normalizeOwnershipItems(items: AccountBreakdownItem[]): OwnershipRiskIt
 
 export function sortOwnershipRiskItems(items: OwnershipRiskItem[]): OwnershipRiskItem[] {
   return [...items].sort((a, b) => {
-    if (b.riskUsd !== a.riskUsd) {
-      return b.riskUsd - a.riskUsd;
-    }
     if (b.criticalCount !== a.criticalCount) {
       return b.criticalCount - a.criticalCount;
     }
@@ -50,19 +47,24 @@ export function sortOwnershipRiskItems(items: OwnershipRiskItem[]): OwnershipRis
 export function OwnershipRiskPanel({
   items,
   limit = DEFAULT_LIMIT,
-  onAccountClick
+  onAccountClick,
+  action
 }: {
   items: AccountBreakdownItem[];
   limit?: number;
   onAccountClick?: (accountId: string) => void;
+  /** A link or button shown at the right of the heading. */
+  action?: React.ReactNode;
 }) {
   const normalized = normalizeOwnershipItems(Array.isArray(items) ? items : []);
   const ranked = sortOwnershipRiskItems(normalized).slice(0, Math.max(1, Math.min(limit, 8)));
 
   return (
     <div className="hs-card p-5">
-      <h3 className="cr-section-title">Ownership risk</h3>
-      <p className="cr-helper mt-1">Top owning accounts by monthly risk, then critical and high findings.</p>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="cr-section-title">Critical and high findings by account</h3>
+        {action}
+      </div>
 
       {ranked.length === 0 ? (
         <p className="mt-4 text-sm text-slate-500">No risk detected across accounts</p>
@@ -70,21 +72,24 @@ export function OwnershipRiskPanel({
         <div
           className="cr-chart-focusable mt-4 rounded-md"
           tabIndex={0}
-          aria-label="Ownership risk chart ranked by account monthly risk"
+          aria-label="Critical and high findings per account"
         >
           <BarChart
             className="h-[300px]"
             data={ranked.map((item) => ({
               account: item.team ? `${item.team} - ${item.accountName}` : item.accountName,
               key: item.accountId,
-              risk: item.riskUsd
+              Critical: item.criticalCount,
+              High: item.highCount
             }))}
             index="account"
-            categories={["risk"]}
+            categories={["Critical", "High"]}
             layout="vertical"
-            colors={["emerald"]}
+            stack
+            colors={["rose", "amber"]}
             yAxisWidth={170}
-            valueFormatter={(value) => formatUsd(value)}
+            allowDecimals={false}
+            valueFormatter={(value) => formatCount(value)}
             onValueChange={(value) => {
               const key = ranked.find((item) => (item.team ? `${item.team} - ${item.accountName}` : item.accountName) === value?.account)?.accountId;
               if (key) {

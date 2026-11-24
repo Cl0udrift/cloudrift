@@ -78,3 +78,28 @@ func TestEdgeServicesCollectOwnedNamesAndAddresses(t *testing.T) {
 		t.Fatalf("each collector records success: %v", status)
 	}
 }
+
+type fakeVol struct{}
+
+func (fakeVol) DescribeVolumes(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	return &ec2.DescribeVolumesOutput{Volumes: []ec2types.Volume{
+		{VolumeId: awsv2.String("vol-1"), Size: awsv2.Int32(100), VolumeType: ec2types.VolumeTypeGp3, State: ec2types.VolumeStateAvailable, Encrypted: awsv2.Bool(false)},
+		{VolumeId: awsv2.String("vol-2"), Size: awsv2.Int32(8), VolumeType: ec2types.VolumeTypeGp2, State: ec2types.VolumeStateInUse, Encrypted: awsv2.Bool(true), Attachments: []ec2types.VolumeAttachment{{InstanceId: awsv2.String("i-1")}}},
+	}}, nil
+}
+
+func TestVolumesRecordSizeTypeStateAndAttachment(t *testing.T) {
+	assets, _ := collectEdgeServices(context.Background(), "1", "us-east-1", WorkloadClients{Volumes: fakeVol{}}, time.Now())
+	byName := map[string]map[string]any{}
+	for _, a := range assets {
+		if a.AssetType == "ebs_volume" {
+			byName[a.Name] = a.Properties
+		}
+	}
+	if byName["vol-1"]["state"] != "available" || byName["vol-1"]["size_gb"] != int64(100) || byName["vol-1"]["volume_type"] != "gp3" || byName["vol-1"]["encrypted"] != false {
+		t.Fatalf("vol-1: %v", byName["vol-1"])
+	}
+	if att := byName["vol-2"]["attached_to"].([]string); len(att) != 1 || att[0] != "i-1" {
+		t.Fatalf("vol-2 attachment: %v", byName["vol-2"])
+	}
+}

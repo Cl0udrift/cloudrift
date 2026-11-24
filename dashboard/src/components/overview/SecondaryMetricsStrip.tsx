@@ -51,13 +51,13 @@ export function SecondaryMetricsStrip({
   return (
     <div>
       <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-        Operational KPIs
+        Counts
       </h2>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MiniKpi label="High findings" value={formatCount(summary.high_count)} tone="orange" onClick={onOpenHigh} />
         <MiniKpi label="Medium findings" value={formatCount(summary.medium_count)} tone="amber" onClick={onOpenMedium} />
         <MiniKpi label="Total findings" value={formatCount(summary.finding_count)} tone="slate" onClick={onOpenAll} />
-        <MiniKpi label="Orphaned edge" value={formatCount(summary.orphaned_edge_count)} tone="cyan" onClick={onOpenOrphaned} />
+        <MiniKpi label="Takeover risk" value={formatCount(summary.orphaned_edge_count)} tone="cyan" onClick={onOpenOrphaned} />
       </div>
     </div>
   );

@@ -26,6 +26,10 @@ type AddressAPI interface {
 	DescribeNetworkInterfaces(context.Context, *ec2.DescribeNetworkInterfacesInput, ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error)
 }
 
+type VolumeAPI interface {
+	DescribeVolumes(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
+}
+
 type ACMAPI interface {
 	ListCertificates(context.Context, *acm.ListCertificatesInput, ...func(*acm.Options)) (*acm.ListCertificatesOutput, error)
 	DescribeCertificate(context.Context, *acm.DescribeCertificateInput, ...func(*acm.Options)) (*acm.DescribeCertificateOutput, error)
@@ -56,6 +60,7 @@ const (
 	CollectorACM             = "acm"
 	CollectorAPIGateway      = "apigateway"
 	CollectorCognito         = "cognito"
+	CollectorEBSVolumes      = "ebs_volumes"
 )
 
 func collectEdgeServices(ctx context.Context, accountID, region string, c WorkloadClients, at time.Time) ([]models.AssetNode, []models.Relationship) {
@@ -74,6 +79,9 @@ func collectEdgeServices(ctx context.Context, accountID, region string, c Worklo
 		run(CollectorPublicAddresses, func() ([]models.AssetNode, error) {
 			return collectPublicAddresses(ctx, accountID, region, c.Addresses, at)
 		})
+	}
+	if c.Volumes != nil {
+		run(CollectorEBSVolumes, func() ([]models.AssetNode, error) { return collectVolumes(ctx, accountID, region, c.Volumes, at) })
 	}
 	if c.ACM != nil {
 		run(CollectorACM, func() ([]models.AssetNode, error) { return collectCertificates(ctx, accountID, region, c.ACM, at) })
@@ -280,4 +288,43 @@ func nonEmpty(vals ...string) []string {
 		}
 	}
 	return out
+}
+
+// collectVolumes records every EBS volume with what prices it (size and type) and whether it is attached. A volume
+// in the "available" state is attached to nothing but still billed.
+func collectVolumes(ctx context.Context, accountID, region string, api VolumeAPI, at time.Time) ([]models.AssetNode, error) {
+	var nodes []models.AssetNode
+	var token *string
+	for {
+		out, err := api.DescribeVolumes(ctx, &ec2.DescribeVolumesInput{NextToken: token})
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range out.Volumes {
+			id := awsv2.ToString(v.VolumeId)
+			var attached []string
+			for _, a := range v.Attachments {
+				attached = append(attached, awsv2.ToString(a.InstanceId))
+			}
+			props := map[string]any{
+				"volume_id": id, "size_gb": int64(awsv2.ToInt32(v.Size)), "volume_type": string(v.VolumeType), "state": string(v.State),
+				"encrypted": awsv2.ToBool(v.Encrypted), "attached_to": attached, "collected_at": at.Format(time.RFC3339), "source_api": "ec2:DescribeVolumes",
+			}
+			if v.Iops != nil {
+				props["iops"] = int64(*v.Iops)
+			}
+			if v.CreateTime != nil {
+				props["create_time"] = v.CreateTime.UTC().Format(time.RFC3339)
+			}
+			if tags := ec2TagMap(v.Tags); len(tags) > 0 {
+				props["tags"] = tags
+			}
+			nodes = append(nodes, models.AssetNode{ARN: "arn:aws:ec2:" + region + ":" + accountID + ":volume/" + id, AssetType: models.AssetEBSVolume, Name: id, AccountID: accountID, Region: region, Properties: props})
+		}
+		if out.NextToken == nil || *out.NextToken == "" {
+			break
+		}
+		token = out.NextToken
+	}
+	return nodes, nil
 }

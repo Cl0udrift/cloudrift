@@ -192,10 +192,13 @@ func collectLoadBalancers(ctx context.Context, accountID, region string, api ELB
 		if t := tags[arn]; len(t) > 0 {
 			props["tags"] = t
 		}
-		targets, truncated := lbTargets(ctx, api, accountID, region, arn)
-		if truncated {
+		targets, summary := lbTargets(ctx, api, accountID, region, arn)
+		if summary.truncated {
 			props["targets_truncated"] = true
 		}
+		// Every registered target of any kind, so a load balancer with none can be called idle. Left unset when any
+		// call failed: not knowing is never idle.
+		props["target_groups"], props["registered_targets"], props["targets_complete"] = summary.groups, summary.registered, summary.complete
 		assets = append(assets, models.AssetNode{ARN: arn, AssetType: models.AssetLoadBalancer, Name: awsv2.ToString(lb.LoadBalancerName), AccountID: accountID, Region: region, Properties: props})
 		for _, id := range lb.SecurityGroups {
 			rels = append(rels, models.Relationship{SourceARN: arn, TargetARN: sgARN(region, accountID, id), RelType: models.RelUsesSecurityGroup})
@@ -207,25 +210,39 @@ func collectLoadBalancers(ctx context.Context, accountID, region string, api ELB
 	return assets, rels, nil
 }
 
-// lbTargets returns the instances registered behind a load balancer. Only instance targets are linked (an IP or
-// Lambda target is not an instance). A failure on one load balancer yields no targets for it, never a guess.
-func lbTargets(ctx context.Context, api ELBv2API, accountID, region, lbARN string) ([]string, bool) {
+type targetSummary struct {
+	groups     int
+	registered int
+	complete   bool
+	truncated  bool
+}
+
+// lbTargets returns the instances registered behind a load balancer, linked as relationships, and a count of every
+// registered target of any kind (instance, IP, Lambda). A failure yields no targets for that group and clears
+// complete, never a guess.
+func lbTargets(ctx context.Context, api ELBv2API, accountID, region, lbARN string) ([]string, targetSummary) {
 	groups, err := api.DescribeTargetGroups(ctx, &elbv2.DescribeTargetGroupsInput{LoadBalancerArn: awsv2.String(lbARN), PageSize: awsv2.Int32(maxTargetGroupsPerLB)})
 	if err != nil {
-		return nil, false
+		return nil, targetSummary{}
+	}
+	sum := targetSummary{groups: len(groups.TargetGroups), complete: true, truncated: groups.NextMarker != nil && *groups.NextMarker != ""}
+	if sum.truncated {
+		sum.complete = false
 	}
 	seen := map[string]bool{}
 	var out []string
 	for _, g := range groups.TargetGroups {
-		if g.TargetType != elbtypes.TargetTypeEnumInstance {
-			continue
-		}
 		health, err := api.DescribeTargetHealth(ctx, &elbv2.DescribeTargetHealthInput{TargetGroupArn: g.TargetGroupArn})
 		if err != nil {
+			sum.complete = false
 			continue
 		}
 		for _, d := range health.TargetHealthDescriptions {
 			if d.Target == nil {
+				continue
+			}
+			sum.registered++
+			if g.TargetType != elbtypes.TargetTypeEnumInstance {
 				continue
 			}
 			arn := "arn:aws:ec2:" + region + ":" + accountID + ":instance/" + awsv2.ToString(d.Target.Id)
@@ -236,7 +253,7 @@ func lbTargets(ctx context.Context, api ELBv2API, accountID, region, lbARN strin
 		}
 	}
 	sort.Strings(out)
-	return out, groups.NextMarker != nil && *groups.NextMarker != ""
+	return out, sum
 }
 
 func loadBalancerTags(ctx context.Context, api ELBv2API, lbs []elbtypes.LoadBalancer) map[string]map[string]string {

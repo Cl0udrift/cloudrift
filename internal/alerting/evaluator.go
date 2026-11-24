@@ -372,35 +372,9 @@ func (e *Evaluator) evalStaleExternalPrivileged(rule AlertRule, scanID string, f
 	return res, nil
 }
 
+// previousScanID is the newest earlier scan of the same accounts. A scan of another account is not a baseline.
 func (e *Evaluator) previousScanID(current string) string {
-	ids, err := scans.ListScanIDs(e.outputDir)
-	if err != nil || len(ids) == 0 {
-		return ""
-	}
-	type rec struct {
-		id string
-		ts string
-	}
-	recs := make([]rec, 0, len(ids))
-	for _, id := range ids {
-		meta, _, err := scans.LoadScanArtifacts(e.outputDir, id)
-		if err != nil {
-			continue
-		}
-		recs = append(recs, rec{id: id, ts: scans.SortTimestamp(meta).Format(timeLayout)})
-	}
-	sort.Slice(recs, func(i, j int) bool {
-		if recs[i].ts == recs[j].ts {
-			return recs[i].id < recs[j].id
-		}
-		return recs[i].ts > recs[j].ts
-	})
-	for i, r := range recs {
-		if r.id == current && i+1 < len(recs) {
-			return recs[i+1].id
-		}
-	}
-	return ""
+	return scans.PreviousScanID(e.outputDir, current)
 }
 
 const timeLayout = "2006-01-02T15:04:05.999999999Z07:00"
@@ -537,9 +511,7 @@ func topThemes(findings []models.Finding, limit int) []string {
 	return out
 }
 
-func diffIdentity(f models.Finding) string {
-	return strings.ToLower(strings.TrimSpace(f.Title)) + "|" + strings.ToLower(strings.TrimSpace(f.AffectedARN))
-}
+func diffIdentity(f models.Finding) string { return f.DiffKey() }
 
 func diffCounts(oldFindings, newFindings []models.Finding) (newCount int, resolvedCount int) {
 	oldIdx := map[string]struct{}{}

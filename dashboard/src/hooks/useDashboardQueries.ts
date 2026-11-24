@@ -211,6 +211,20 @@ export function useStartScanMutation() {
   });
 }
 
+export function usePreflightMutation() {
+  return useMutation({ mutationFn: (profile: string) => apiClient.preflight(profile) });
+}
+
+export function useCancelScanMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiClient.cancelScan(),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: queryKeys.scanRunStatus() });
+    }
+  });
+}
+
 export function useExportNeo4jMutation() {
   return useMutation({
     mutationFn: (scanId: string) => apiClient.exportScanToNeo4j(scanId)
@@ -239,7 +253,10 @@ export const SCAN_RISK_TREND_MAX_DIFFS = 4;
 export type ScanRiskTrendPoint = {
   label: string;
   newCount: number;
-  resolvedCount: number;
+  /** No longer reported while the resource is still there: the likely fixes. */
+  fixedCount: number;
+  /** Gone because the resource was deleted, or the account was not scanned. Not fixes. */
+  goneCount: number;
   net: number;
   isPending: boolean;
   isError: boolean;
@@ -262,7 +279,7 @@ export function useScanRiskTrendData(scansNewestFirst: ScanListItem[], enabled: 
       if (!newer?.scan_id || !older?.scan_id) {
         break;
       }
-      const label = newer.timestamp?.slice(0, 10) ?? newer.scan_id.slice(0, 8);
+      const label = newer.timestamp ? new Date(newer.timestamp).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : newer.scan_id.slice(0, 8);
       out.push({ oldId: older.scan_id, newId: newer.scan_id, label });
     }
     return out;
@@ -285,12 +302,15 @@ export function useScanRiskTrendData(scansNewestFirst: ScanListItem[], enabled: 
         const pending = Boolean(r?.isPending || r?.isLoading);
         const err = Boolean(r?.isError);
         const newCount = r?.data?.new_findings?.length ?? 0;
-        const resolvedCount = r?.data?.resolved_findings?.length ?? 0;
+        const resolved = r?.data?.resolved_findings ?? [];
+        const fixedCount = resolved.filter((f) => f.reason === "no_longer_reported").length;
+        const goneCount = resolved.length - fixedCount;
         return {
           label: p.label,
           newCount,
-          resolvedCount,
-          net: newCount - resolvedCount,
+          fixedCount,
+          goneCount,
+          net: newCount - fixedCount,
           isPending: pending,
           isError: err
         };

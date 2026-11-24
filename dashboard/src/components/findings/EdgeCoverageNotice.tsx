@@ -15,7 +15,7 @@ export function EdgeCoverageNotice({ scanId }: { scanId: string | null }) {
     <div role="status" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-100">
       <p className="font-semibold">{live.state === "no_data" ? "Nothing was checked for takeover" : "The DNS check is incomplete"}</p>
       <p>
-        {live.detail}.{" "}
+        {(live.detail ?? "").replace(/\.+$/, "")}.{" "}
         <Link className="underline" to="/coverage">
           See coverage
         </Link>

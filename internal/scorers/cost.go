@@ -29,7 +29,11 @@ var loadAWSCfgForCE = func(ctx context.Context, cfg config.Config) (awsv2.Config
 	if cfg.AWS.ManagementProfile != "" {
 		opts = append(opts, awscfg.WithSharedConfigProfile(cfg.AWS.ManagementProfile))
 	}
-	return awscfg.LoadDefaultConfig(ctx, opts...)
+	c, err := awscfg.LoadDefaultConfig(ctx, opts...)
+	// Cost Explorer is one global endpoint, served from us-east-1. A profile with no Region would otherwise fail with
+	// "Missing Region" and the whole cost feature would silently do nothing.
+	c.Region = "us-east-1"
+	return c, err
 }
 
 var ceNowUTC = func() time.Time {

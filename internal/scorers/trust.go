@@ -18,11 +18,13 @@ var externalAccountIDPattern = regexp.MustCompile(`^arn:aws:iam::([0-9]{12}):`)
 type trustCondition string
 
 const (
-	condGhostAdmin    trustCondition = "ghost_admin_access"
-	condUnknownVendor trustCondition = "unknown_vendor"
-	condStale         trustCondition = "stale_review_now"
-	condAging         trustCondition = "aging"
-	condActive        trustCondition = "active"
+	condGhostAdmin      trustCondition = "ghost_admin_access"
+	condUnknownVendor   trustCondition = "unknown_vendor"
+	condStale           trustCondition = "stale_review_now"
+	condAging           trustCondition = "aging"
+	condActive          trustCondition = "active"
+	condUnguarded       trustCondition = "no_guard"
+	condActivityUnknown trustCondition = "activity_unknown"
 )
 
 type adminEvalState string
@@ -51,6 +53,16 @@ func ScoreTrust(
 	for _, accountID := range cfg.Trust.ApprovedExternalAccounts {
 		if accountID = strings.TrimSpace(accountID); accountID != "" {
 			approved[accountID] = struct{}{}
+		}
+	}
+
+	// Accounts in your own AWS Organization are not outside vendors: they count as approved, and the finding
+	// says so. Only a known organization (the scan could list its members) gives a set.
+	internal := map[string]bool{}
+	for _, asset := range assets {
+		if asset.AssetType == models.AssetOrganizationAccount {
+			internal[asset.Name] = true
+			approved[asset.Name] = struct{}{}
 		}
 	}
 
@@ -92,10 +104,16 @@ func ScoreTrust(
 			adminState = adminTrue
 		}
 
+		// With no last-used data the role is not "unused": the scan could not tell. Rate it as unknown, then let the
+		// account and administrator rules raise it.
+		daysForRating := activity.DaysSinceUsed
+		if activityStatus == "missing_join" {
+			daysForRating = 0
+		}
 		severity, verdict, unknownVendor := classifyTrust(
 			isAdmin,
 			adminState,
-			activity.DaysSinceUsed,
+			daysForRating,
 			principalType,
 			externalAccountID,
 			approved,
@@ -103,7 +121,30 @@ func ScoreTrust(
 			cfg.Trust.GhostThresholdDays,
 		)
 
+		if activityStatus == "missing_join" && verdict == condActive {
+			severity, verdict = models.SeverityMedium, condActivityUnknown
+		}
+		doc, _ := role.Properties["trust_policy_document"].(string)
+		guard, guardNames := guardForPrincipal(parseTrustStatements(doc), principalValue, externalAccountID)
+		inOrg := principalType == "aws_account" && externalAccountID != "" && internal[externalAccountID] && externalAccountID != role.AccountID
+		if verdict != condGhostAdmin {
+			switch {
+			case inOrg && severityRank(severity) > severityRank(models.SeverityMedium):
+				severity = models.SeverityMedium
+			case unknownVendor && guard == guardStrong && severityRank(severity) > severityRank(models.SeverityMedium):
+				severity = models.SeverityMedium
+			case verdict == condStale && guard == guardStrong && severityRank(severity) > severityRank(models.SeverityMedium):
+				// Unused matters less when an external ID, organization or named principal limits who can call.
+				severity = models.SeverityMedium
+			case principalType == "aws_account" && !unknownVendor && !inOrg && guard == guardNone && severityRank(severity) < severityRank(models.SeverityMedium):
+				severity, verdict = models.SeverityMedium, condUnguarded
+			}
+		}
+
 		title := trustTitle(role.Name, verdict)
+		if inOrg {
+			title = strings.Replace(title, "an outside account", "another account in your organization", 1)
+		}
 		// Stable identity: module + role + external principal, NOT the (mutable) verdict, so a
 		// trust whose severity/verdict changes across scans keeps the same ID for diff "changed".
 		hash := sha256.Sum256([]byte(string(models.ModuleExternalAccess) + "|" + role.ARN + "|" + rel.TargetARN))
@@ -129,6 +170,9 @@ func ScoreTrust(
 				"admin_eval_state":    string(adminState),
 				"is_admin":            isAdmin,
 				"unknown_vendor":      unknownVendor,
+				"in_organization":     inOrg,
+				"guard_strength":      guard,
+				"guards":              guardNames,
 				"activity_source":     "iam:getrole:role_last_used",
 				"activity_status":     activityStatus,
 				// Normalize to map[string]any so in-memory consumers (e.g. scorers.PriorityScore)
@@ -292,6 +336,10 @@ func trustImpact(condition trustCondition) string {
 		return "Externally trusted admin role can enable direct privileged access."
 	case condUnknownVendor:
 		return "Role trusts an external account outside approved vendor list."
+	case condActivityUnknown:
+		return "IAM returned no last-used data for this role, so it is not known whether the outside account uses it."
+	case condUnguarded:
+		return "An outside account can assume this role with no external ID, organization or named-principal condition. Any identity in that account that has sts:AssumeRole can use it."
 	case condStale:
 		return "Unused externally trusted role increases latent access risk."
 	case condAging:
@@ -304,13 +352,17 @@ func trustImpact(condition trustCondition) string {
 func trustRecommendation(condition trustCondition, activityStatus string) string {
 	missingTelemetryNote := ""
 	if activityStatus == "missing_join" {
-		missingTelemetryNote = " Activity telemetry for this role was unavailable and the stale classification is conservative; verify IAM RoleLastUsed visibility."
+		missingTelemetryNote = " Activity telemetry for this role was unavailable, so how recently it was used did not count toward the rating; verify IAM RoleLastUsed visibility."
 	}
 	switch condition {
 	case condGhostAdmin:
 		return "Remove external trust or reduce role privileges immediately and require explicit vendor approval." + missingTelemetryNote
 	case condUnknownVendor:
 		return "Validate business owner and vendor contract; remove trust if not explicitly approved." + missingTelemetryNote
+	case condActivityUnknown:
+		return "Check the role's last-used date in IAM, then decide whether the trust is still needed." + missingTelemetryNote
+	case condUnguarded:
+		return "Add an sts:ExternalId condition (for a vendor) or an aws:PrincipalOrgID or aws:PrincipalArn condition (for your own accounts)." + missingTelemetryNote
 	case condStale:
 		if activityStatus == "missing_join" {
 			return "Investigate missing activity telemetry for this role, then disable or delete if still unverified." + missingTelemetryNote
@@ -329,9 +381,13 @@ func trustReason(condition trustCondition, activityStatus string) string {
 		return "is_admin=true with external trust"
 	case condUnknownVendor:
 		return "external account not found in approved list"
+	case condActivityUnknown:
+		return "no last-used data for the role"
+	case condUnguarded:
+		return "approved account, but no external ID, organization or named-principal condition"
 	case condStale:
 		if activityStatus == "missing_join" {
-			return "missing activity join; treated conservatively as stale"
+			return "missing activity join; use is unknown, not stale"
 		}
 		return "never used or days_since_used > ghost threshold"
 	case condAging:
@@ -348,6 +404,10 @@ func trustTitle(role string, verdict trustCondition) string {
 		return role + " gives an outside account administrator access it has not used recently"
 	case condUnknownVendor:
 		return role + " trusts an outside account that is not on the approved list"
+	case condActivityUnknown:
+		return role + " trusts an outside account and it is not known whether it is used"
+	case condUnguarded:
+		return role + " trusts an outside account with no external ID or other guard"
 	case condStale:
 		return role + " trusts an outside account and has not been used recently"
 	case condAging:

@@ -5,6 +5,7 @@ const emphasisBorder: Record<string, string> = {
   rose: "border-l-rose-500/80",
   violet: "border-l-violet-500/70",
   emerald: "border-l-emerald-500/70",
+  amber: "border-l-amber-500/80",
   neutral: "border-l-slate-300 dark:border-l-slate-600"
 };
 
@@ -72,14 +73,16 @@ function ExecCard({
     <button
       type="button"
       onClick={onClick}
-      className={`hs-kpi-card flex h-28 flex-col justify-between ${emphasisBorder[emphasis]}`}
+      className={`hs-kpi-card flex min-h-[6.5rem] flex-col justify-between ${value === "0" ? emphasisBorder.neutral : emphasisBorder[emphasis]}`}
     >
       <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-slate-900 dark:text-slate-100">{value}</p>
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="text-[11px] text-slate-500">{delta === undefined ? "—" : formatDelta(delta, deltaKind)}</span>
-        {sparkline ? <TinySparkline data={sparkline} /> : <div className="h-4 w-16" />}
-      </div>
+      <p className={`mt-2 text-3xl font-semibold tabular-nums tracking-tight ${value === "0" ? "text-slate-400 dark:text-slate-500" : "text-slate-900 dark:text-slate-100"}`}>{value}</p>
+      {delta !== undefined || sparkline ? (
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-slate-500">{delta === undefined ? "" : formatDelta(delta, deltaKind)}</span>
+          {sparkline ? <TinySparkline data={sparkline} /> : null}
+        </div>
+      ) : null}
     </button>
   );
 }
@@ -110,9 +113,9 @@ export function ExecutiveSummaryStrip({
   return (
     <div>
       <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-        Executive summary
+        Findings at a glance
       </h2>
-      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(15rem,1fr))]">
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
         <ExecCard
           label="Critical findings"
           value={formatCount(summary.critical_count)}
@@ -121,7 +124,7 @@ export function ExecutiveSummaryStrip({
           emphasis="rose"
           onClick={onOpenCritical}
         />
-        <ExecCard label="High findings" value={formatCount(summary.high_count)} delta={undefined} emphasis="neutral" onClick={onOpenHigh} />
+        <ExecCard label="High findings" value={formatCount(summary.high_count)} delta={undefined} emphasis="amber" onClick={onOpenHigh} />
         {/* Dollar cost exists only for orphaned-edge findings, and at list price it is usually $0. A $0.00 tile on a scan of
             identity findings reads as "no risk", so it is shown only when there is a figure. */}
         {summary.total_monthly_risk_cost_usd > 0 ? (
@@ -136,7 +139,7 @@ export function ExecutiveSummaryStrip({
           />
         ) : null}
         <ExecCard
-          label="External access"
+          label="Trust and exposure"
           value={formatCount(summary.external_access_count)}
           delta={undefined}
           emphasis="violet"

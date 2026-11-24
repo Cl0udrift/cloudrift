@@ -52,6 +52,7 @@ type scanControlCenter struct {
 	alertSvc   *alerting.Service
 
 	mu      sync.RWMutex
+	cancel  context.CancelFunc
 	current schema.ScanRunStatusResponse
 	history []schema.ScanRunHistoryItem
 }
@@ -131,6 +132,7 @@ func (s *scanControlCenter) RuntimeStatus() http.HandlerFunc {
 			RegionPlanNote:   note,
 			ScanMode:         scanMode,
 			ScanModePlanNote: scanModeNote,
+			Schedule:         s.scheduleInfo(cfg, time.Now()),
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
@@ -179,38 +181,26 @@ func (s *scanControlCenter) StartScan() http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid_provider", "provider must be openai|local when set", nil)
 			return
 		}
-		if req.Module == "" {
-			req.Module = "all"
-		}
-		if req.Module != "all" && req.Module != "orphaned_edge" && req.Module != "external_access" {
-			writeError(w, http.StatusBadRequest, "invalid_module", "module must be all|orphaned_edge|external_access", nil)
+		modules, err := normalizeModules(req.Modules, req.Module)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_module", err.Error(), nil)
 			return
 		}
+		req.Modules = modules
+		req.Module = "all"
+		if len(modules) > 0 {
+			req.Module = strings.Join(modules, ",")
+		}
 
-		s.mu.Lock()
-		if s.current.Status == "running" {
-			s.mu.Unlock()
+		runID, err := s.begin(req, cfg)
+		if errors.Is(err, errScanRunning) {
 			writeError(w, http.StatusConflict, "scan_running", "a scan is already running", nil)
 			return
 		}
-		runID := fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
-		now := time.Now().UTC()
-		s.current = schema.ScanRunStatusResponse{
-			RunID:         runID,
-			Status:        "running",
-			Stage:         "starting",
-			Message:       "validating profile and preparing scan",
-			Profile:       req.Profile,
-			Module:        req.Module,
-			NoHTTP:        req.NoHTTP,
-			Neo4j:         req.Neo4j,
-			Provider:      req.Provider,
-			StartedAt:     now,
-			LastUpdatedAt: now,
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "scan_start_error", err.Error(), nil)
+			return
 		}
-		s.mu.Unlock()
-
-		go s.runScanAsync(req, cfg, runID)
 
 		writeJSON(w, http.StatusAccepted, schema.ScanStartResponse{
 			RunID:   runID,
@@ -218,6 +208,36 @@ func (s *scanControlCenter) StartScan() http.HandlerFunc {
 			Message: "scan started",
 		})
 	}
+}
+
+var errScanRunning = errors.New("a scan is already running")
+
+// begin records a run and starts it in the background. The request is already validated. It is used by the
+// Start button and by the schedule, so both start a scan the same way.
+func (s *scanControlCenter) begin(req schema.ScanStartRequest, cfg *config.Config) (string, error) {
+	if len(req.Modules) > 0 && req.Module == "" {
+		req.Module = strings.Join(req.Modules, ",")
+	}
+	if req.Module == "" {
+		req.Module = "all"
+	}
+	s.mu.Lock()
+	if s.current.Status == "running" {
+		s.mu.Unlock()
+		return "", errScanRunning
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+	runID := fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
+	now := time.Now().UTC()
+	s.current = schema.ScanRunStatusResponse{
+		RunID: runID, Status: "running", Stage: "starting", Message: "validating profile and preparing scan",
+		Profile: req.Profile, Module: req.Module, NoHTTP: req.NoHTTP, Neo4j: req.Neo4j, Provider: req.Provider,
+		StartedAt: now, LastUpdatedAt: now,
+	}
+	s.mu.Unlock()
+	go s.runScanAsync(ctx, req, cfg, runID)
+	return runID, nil
 }
 
 func (s *scanControlCenter) CurrentRunStatus() http.HandlerFunc {
@@ -254,9 +274,9 @@ func (s *scanControlCenter) CurrentProgressEvent() schema.ScanProgressEvent {
 	}
 }
 
-func (s *scanControlCenter) runScanAsync(req schema.ScanStartRequest, cfg *config.Config, runID string) {
+func (s *scanControlCenter) runScanAsync(ctx context.Context, req schema.ScanStartRequest, cfg *config.Config, runID string) {
 	s.updateRun(runID, "running", "validating_profile", "validating AWS profile")
-	if resp, _ := validateCredentialSource(context.Background(), req.Profile); !resp.OK {
+	if resp, _ := validateCredentialSource(ctx, req.Profile); !resp.OK {
 		s.failRun(runID, fmt.Sprintf("profile validation failed: %s", resp.Message))
 		return
 	}
@@ -288,12 +308,25 @@ func (s *scanControlCenter) runScanAsync(req schema.ScanStartRequest, cfg *confi
 			s.updateRun(runID, "running", stage, message)
 		},
 	}
-	if req.Module != "" && req.Module != "all" {
-		scanOpts.Modules = []string{req.Module}
+	if len(req.Modules) > 0 {
+		scanOpts.Modules = req.Modules
 	}
-	scanID, err := pipeline.Run(context.Background(), cfg, s.outputDir, buildVersion, pipeline.NewAWSSource(), scanOpts)
+	scanID, err := pipeline.Run(ctx, cfg, s.outputDir, buildVersion, pipeline.NewAWSSource(), scanOpts)
 	if err != nil {
+		if ctx.Err() != nil {
+			s.cancelRun(runID)
+			return
+		}
 		s.failRun(runID, fmt.Sprintf("scan failed: %v", err))
+		return
+	}
+	if ctx.Err() != nil {
+		// Stopped during the run: the pipeline still wrote what it had. A half-read scan would read as a clean one, so
+		// it is removed.
+		if scans.IsSafeScanID(scanID) {
+			_ = os.RemoveAll(filepath.Join(s.outputDir, scanID))
+		}
+		s.cancelRun(runID)
 		return
 	}
 	s.updateRunWithScanID(runID, "running", "scan_complete", "scan artifacts created", scanID)
@@ -390,6 +423,24 @@ func (s *scanControlCenter) failRun(runID, message string) {
 		Neo4j:      s.current.Neo4j,
 		Message:    s.current.Message,
 	})
+}
+
+// cancelRun records a scan the user stopped. It is not a failure.
+func (s *scanControlCenter) cancelRun(runID string) {
+	slog.Info("scan run cancelled", "run_id", runID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.current.RunID != runID {
+		return
+	}
+	now := time.Now().UTC()
+	s.current.Status = "cancelled"
+	s.current.Stage = "cancelled"
+	s.current.Message = "scan stopped; nothing from it was saved"
+	s.current.FinishedAt = now
+	s.current.LastUpdatedAt = now
+	s.current.Log = append(s.current.Log, now.Format("15:04:05")+" CANCELLED")
+	s.appendHistoryLocked(schema.ScanRunHistoryItem{RunID: s.current.RunID, StartedAt: s.current.StartedAt, FinishedAt: s.current.FinishedAt, Status: s.current.Status, Profile: s.current.Profile, Module: s.current.Module, NoHTTP: s.current.NoHTTP, Neo4j: s.current.Neo4j, Message: s.current.Message})
 }
 
 func (s *scanControlCenter) finishRun(runID, scanID, message string) {
@@ -688,4 +739,43 @@ func exportScanToNeo4j(ctx context.Context, cfg *config.Config, scanPath string)
 		return false, nil
 	}
 	return true, nil
+}
+
+// scanModules are the areas a scan can be limited to.
+var scanModules = []string{"iam_entitlement", "external_access", "orphaned_edge", "unused_resource"}
+
+// normalizeModules checks the requested areas. An empty list, or "all", means everything and returns nil.
+func normalizeModules(modules []string, single string) ([]string, error) {
+	in := append([]string(nil), modules...)
+	if s := strings.TrimSpace(single); s != "" {
+		in = append(in, s)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range in {
+		for _, part := range strings.Split(m, ",") {
+			m = strings.ToLower(strings.TrimSpace(part))
+			if m == "" {
+				continue
+			}
+			if m == "all" {
+				return nil, nil
+			}
+			ok := false
+			for _, v := range scanModules {
+				ok = ok || v == m
+			}
+			if !ok {
+				return nil, fmt.Errorf("module %q is not one of: %s", m, strings.Join(scanModules, ", "))
+			}
+			if !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
+		}
+	}
+	if len(out) == len(scanModules) {
+		return nil, nil
+	}
+	return out, nil
 }

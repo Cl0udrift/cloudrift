@@ -15,6 +15,7 @@ import {
   IconScan,
   IconShield,
   IconBell,
+  IconCoins,
   IconZap,
   IconAlertTriangle,
   IconBriefcase,
@@ -38,6 +39,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     label: "Discover",
     items: [
       { to: "/inventory", label: "Inventory", preserveSearch: true, Icon: IconBoxes },
+      { to: "/cost", label: "Cost", preserveSearch: true, Icon: IconCoins },
       { to: "/identities", label: "Identities", preserveSearch: true, Icon: IconShield },
       { to: "/principals", label: "Users & Groups", preserveSearch: true, Icon: IconShield },
       { to: "/identity-center", label: "Identity Center", preserveSearch: true, Icon: IconShield },
@@ -60,6 +62,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/scan-control", label: "Scan Control", preserveSearch: false, Icon: IconScan },
       { to: "/alerting", label: "Alerting", preserveSearch: true, Icon: IconBell },
+      { to: "/business", label: "Business settings", preserveSearch: false, Icon: IconSettings },
       { to: "/query", label: "Query", preserveSearch: true, Icon: IconSliders },
       { to: "/coverage", label: "Coverage", preserveSearch: true, Icon: IconMap },
       { to: "/settings", label: "Settings", preserveSearch: false, Icon: IconSettings }

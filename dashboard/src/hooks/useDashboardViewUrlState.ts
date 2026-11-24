@@ -1,20 +1,19 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
-export type DashboardViewId = "executive" | "high-signal" | "operations";
+/** One view per audience: the CISO or CEO, the manager, the analyst. */
+export type DashboardViewId = "executive" | "manager" | "analyst";
 
-const VALID: ReadonlySet<string> = new Set(["executive", "high-signal", "operations"]);
+// Older links: high-signal was the manager's view, operations the analyst's. The short-lived leader/operator names too.
+const ALIASES: Record<string, DashboardViewId> = {
+  executive: "executive", manager: "manager", analyst: "analyst",
+  "high-signal": "manager", operations: "analyst", leader: "executive", operator: "analyst"
+};
 
 export function useDashboardViewUrlState() {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const view = useMemo((): DashboardViewId => {
-    const raw = searchParams.get("view");
-    if (raw && VALID.has(raw)) {
-      return raw as DashboardViewId;
-    }
-    return "executive";
-  }, [searchParams]);
+  const view = useMemo((): DashboardViewId => ALIASES[searchParams.get("view") ?? ""] ?? "executive", [searchParams]);
 
   const setView = useCallback(
     (next: DashboardViewId) => {

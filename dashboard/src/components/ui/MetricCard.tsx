@@ -7,11 +7,13 @@ interface MetricCardProps {
   context?: string;
   to?: string;
   actionLabel?: string;
+  /** Drop the card chrome so several can share one card. */
+  bare?: boolean;
 }
 
-export function MetricCard({ label, value, context, to, actionLabel }: MetricCardProps) {
+export function MetricCard({ label, value, context, to, actionLabel, bare }: MetricCardProps) {
   return (
-    <div className="hs-card flex flex-col gap-1 p-4">
+    <div className={`flex flex-col gap-1 p-4 ${bare ? "" : "hs-card"}`}>
       <p className="cr-kpi-label">{label}</p>
       <p className={value === null ? "text-sm font-medium text-slate-500 dark:text-slate-300" : "cr-kpi-value"}>
         {value === null ? "Not assessed" : value}

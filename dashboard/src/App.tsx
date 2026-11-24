@@ -16,6 +16,8 @@ import { CoveragePage } from "./pages/Coverage";
 import { ExternalEntitiesPage } from "./pages/ExternalEntities";
 import { TrustReportPage } from "./pages/TrustReport";
 import { AlertingPage } from "./pages/Alerting";
+import { BusinessSettingsPage } from "./pages/BusinessSettings";
+import { CostPage } from "./pages/Cost";
 import { QueryPage } from "./pages/Query";
 
 const BlastExplorerPage = lazy(async () => {
@@ -44,6 +46,8 @@ export default function App() {
         <Route path="/trust-report" element={<TrustReportPage />} />
         <Route path="/external-entities" element={<ExternalEntitiesPage />} />
         <Route path="/alerting" element={<AlertingPage />} />
+        <Route path="/cost" element={<CostPage />} />
+        <Route path="/business" element={<BusinessSettingsPage />} />
         <Route path="/query" element={<QueryPage />} />
         <Route
           path="/blast-explorer"
